@@ -1,0 +1,6 @@
+[submodule "sharedstatetable"]
+	path = sharedstatetable
+	url = https://git01.codeplex.com/sharedstatetable
+[submodule "rdmc"]
+	path = rdmc
+	url = https://git01.codeplex.com/rdmc
