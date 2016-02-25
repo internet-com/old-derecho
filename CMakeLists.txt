@@ -1,11 +1,9 @@
 cmake_minimum_required(VERSION 2.8)
 
-PROJECT(verbs-mcast CXX)
-SET(CMAKE_CXX_FLAGS "-std=c++1y -Wall -ggdb")
+project(derecho CXX)
+set(CMAKE_CXX_FLAGS "-std=c++14 -Wall -ggdb")
+add_subdirectory(rdmc)
+add_subdirectory(sst)
 
-ADD_EXECUTABLE(main rdmc/rdmc.cpp rdmc/util.cpp main.cpp sst/tcp.cpp sst/verbs.cpp rdmc/group_send.cpp rdmc/verbs_helper.cpp rdmc/connection.cpp)
-TARGET_LINK_LIBRARIES(main rdmacm ibverbs boost_system rt pthread)
-
-add_custom_target(format clang-format-3.5 -i *.cpp *.h)
- 
- 
+add_executable(derecho main.cpp)
+target_link_libraries(derecho rdmacm ibverbs boost_system rt pthread rdmc sst)
