@@ -62,8 +62,8 @@ int main () {
   const size_t buffer_size = num_out*msg_size;
   // buffer for the message - received here by the receivers and generated here by the sender
   unique_ptr<char[]> buffer(new char[buffer_size]);
-  shared_ptr<memory_region> mr = make_shared<memory_region>(buffer.get(), buffer_size);
-  
+  auto mr = make_shared<rdma::memory_region>(buffer.get(), buffer_size);
+
   // create the vector of members - node 0 is the sender
   vector<uint32_t> members(group_size);
   for(uint32_t i = 0; i < group_size; i++) {
