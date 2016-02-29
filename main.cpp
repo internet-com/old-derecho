@@ -29,17 +29,20 @@ using namespace std;
 using namespace sst;
 using sst::tcp::tcp_initialize;
 using sst::tcp::sync;
-using rdmc::node_rank;
-using rdmc::num_nodes;
-using rdmc::node_addresses;
+uint32_t node_rank;
+uint32_t num_nodes;
+vector<string> node_addresses;
 
 struct Row {
   volatile bool done [1000];
 };
 
 int main () {
-  // initialize RDMA resources, input number of nodes, node rank and ip addresses and create TCP connections
-  rdmc::initialize();
+	query_addresses(node_addresses, node_rank);
+	num_nodes = node_addresses.size();
+
+	// initialize RDMA resources, input number of nodes, node rank and ip addresses and create TCP connections
+  rdmc::initialize(node_addresses, node_rank);
 
   // initialize tcp connections
   tcp_initialize(num_nodes, node_rank, node_addresses);
@@ -97,14 +100,14 @@ int main () {
 		     [&](size_t length) -> rdmc::receive_destination {
 		       return {mr, (size_t)msg_size*((size_t)cur_msg%10)};
 		     },
-		     [&](uint16_t group_number, rdmc::completion_status, char *data,
-			 size_t size) {
+		     [&](char *data, size_t size) {
 		       cout << (void*) data << endl;
 		       (*sst)[node_rank].done[cur_msg] = true;
 		       sst->put();
 		       cur_msg++;
 		       cout << "Done" << endl;
-		     });
+		     },
+			 [](optional<uint32_t>){});
   send_groups.emplace(send_params, 0);
   
   auto f = [&] (SST_writes <Row> *sst) {
