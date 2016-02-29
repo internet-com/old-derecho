@@ -5,3 +5,7 @@ cmake_install.cmake
 CMakeFiles/*
 derecho
 scripts/
+/derecho_group.cpp~
+/derecho_group.h~
+/experiments/test_group_interface.cpp~
+/main
