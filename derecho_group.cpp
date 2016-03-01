@@ -1,7 +1,8 @@
 #include "derecho_group.h"
 
 namespace derecho {
-  derecho_group::derecho_group (vector <int> _members, size_t _block_size, int _num_out, int _msg_size, rdmc::completion_callback_t send_callback) {
+  derecho_group::derecho_group (vector <int> _members, size_t _block_size, int _num_out, int _msg_size, rdmc::completion_callback_t send_callback, rdmc::type _type = rdmc::BINOMIAL_SEND) {
+    // copy the parameters
     members = _members;
     num_members = members.size();
     // find the member_index
@@ -12,14 +13,13 @@ namespace derecho {
       }
     }
     block_size = _block_size;
-    num_out = _num_out;
-    msg_size = _msg_size;
-    buffer_size = num_out*msg_size;
-    msg_offset = 0;
+    buffer_size = _buffer_size;
+    type = _type;
+
+    // initialize start and end
+    start = end = 0;
     
-    rdmc::send_algorithm type = rdmc::BINOMIAL_SEND;
-      
-    // rotated list of members
+    // rotated list of members - used for creating n internal RDMC groups
     vector <int> rotated_members (num_members);
 
     // create num_members group one by one
