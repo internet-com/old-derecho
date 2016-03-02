@@ -22,7 +22,7 @@ namespace derecho {
     // rotated list of members - used for creating n internal RDMC groups
     vector <int> rotated_members (num_members);
 
-    // create num_members group one by one
+    // create num_members groups one at a time
     for (int i = 0; i < num_members; ++i) {
       /* members[i] is the sender for the i^th group
        * for now, we simply rotate the members vector to supply to create_group
