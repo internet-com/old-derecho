@@ -1,10 +1,17 @@
 #ifndef DERECHO_GROUP_H
 #define DERECHO_GROUP_H
 
+#include <functional>
+
 #include "rdmc/rdmc.h"
 
 namespace derecho {
+  typedef std::function<void (int, long long int, long long int, long long int)> send_recv_callback;
+  typedef std::function<void (int, long long int, long long int, long long int)> stability_callback;
+  
   // combines sst and rdmc to give an abstraction of a group where anyone can send
+  // template parameter is for the group size - used for the SST row-struct
+  template <int N>
   class derecho_group {
     // number of members
     int num_members;
@@ -22,6 +29,9 @@ namespace derecho {
     rdmc::send_algorithm type;
     // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
     vector <int> start, end;
+    // callbacks for message send/recv and stability
+    send_recv_callback k0_callback;
+    stability_callback k1_callback;
     // memory regions wrapping the buffers for RDMA ops
     vector <shared_ptr<memory_region> > mrs;
 
@@ -36,7 +46,7 @@ namespace derecho {
     long long int get_position (long long int size);
     // send the message in the last position returned by the last successful call to get_position
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
-    // note that this allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
+    // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
   };
 }
