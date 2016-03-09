@@ -10,8 +10,8 @@
 #include "sst/sst.h"
 
 namespace derecho {
-  typedef std::function<void (int, long long int, long long int, long long int)> send_recv_callback;
-  typedef std::function<void (int, long long int, long long int, long long int)> stability_callback;
+  typedef std::function<void (int, long long int, char*, long long int)> send_recv_callback;
+  typedef std::function<void (int, long long int, char*, long long int)> stability_callback;
   
   // combines sst and rdmc to give an abstraction of a group where anyone can send
   // template parameter is for the group size - used for the SST row-struct
@@ -42,7 +42,7 @@ namespace derecho {
     std::vector <std::shared_ptr<rdma::memory_region> > mrs;
     // queue for address and size of sent/received messages
     // pushed on successful send/receive by RDMC and popped before calling K0_callback by SST
-    std::vector <std::queue <pair <char*, size_t>>> send_recv_queue;
+    std::vector <std::queue <std::pair <char*, size_t>>> send_recv_queue;
     std::queue <std::pair <char*, size_t>> stability_queue;
     
     struct Row {
@@ -94,7 +94,7 @@ namespace derecho {
     send_recv_queue.resize(num_members);
     
     // rotated list of members - used for creating n internal RDMC groups
-    std::vector <int> rotated_members (num_members);
+    std::vector <uint32_t> rotated_members (num_members);
 
     // create num_members groups one at a time
     for (int i = 0; i < num_members; ++i) {
@@ -109,20 +109,22 @@ namespace derecho {
       std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(), buffer_size);
       mrs.push_back (mr);
       for (int j = 0; j < num_members; ++j) {
-	rotated_members[j] = members[(i+j)%num_members];
+	rotated_members[j] = (uint32_t) members[(i+j)%num_members];
       }
       // i is the group number
       // receive desination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
       rdmc::create_group(i, rotated_members, block_size, type,
-			 [&mr=mrs[i], i, &start=start[i], &buffer_size](size_t length) -> rdmc::receive_destination {
-			   return {mr, (buffer_size-start < length)? 0:start}
+			 [&mr=this->mrs[i], &start=this->start[i], &buffer_size=this->buffer_size](size_t length) -> rdmc::receive_destination {
+			   return {mr, (buffer_size-start < (long long int) length)? 0:(size_t)start};
 			 },
-			 [i, &index](char *data, size_t size){
-			   send_recv_queue[i].push (std::pair <char*, size_t> (data, size));
-			   index[i]++;
+			 [&index=this->index[i], &send_recv_queue=this->send_recv_queue[i]](char *data, size_t size){
+			   send_recv_queue.push (std::pair <char*, size_t> (data, size));
+			   index++;
 			 },
-			 [](optional<uint32_t>){});
+			 [](boost::optional<uint32_t>){});
     }
+
+    std::cout << "RDMC groups created" << std::endl;
 
     // create the SST writes table
     sst = new sst::SST_writes<Row> (members, node_rank);
@@ -135,13 +137,14 @@ namespace derecho {
     // register message send/recv predicates and stability predicates
     int local_index = -1;
     for (int i = 0; i < num_members; ++i) {
-      auto send_recv_pred = [&index=index[i], local_index] (sst::SST_writes <Row> *sst) mutable {
+      auto send_recv_pred = [&index=this->index[i], local_index] (sst::SST_writes <Row> *sst) mutable {
 	if (index > local_index) {
 	  local_index++;
 	  return true;
 	}
+	return false;
       };
-      auto send_recv_trig = [i, local_index, &k0_callback, &send_recv_queue=send_recv_queue[i], &member_index, &stability_queue] (sst::SST_writes <Row> *sst) mutable {
+      auto send_recv_trig = [i, local_index, &k0_callback=this->k0_callback, &send_recv_queue=this->send_recv_queue[i], &member_index=this->member_index, &stability_queue=this->stability_queue] (sst::SST_writes <Row> *sst) mutable {
 	local_index++;
 	auto p = send_recv_queue.front();
 	char *buf = p.first;
@@ -152,10 +155,10 @@ namespace derecho {
 	(*sst)[member_index].seq_num[i]++;
 	stability_queue.push (p);
       };
-      sst->predicates.insert (send_recv_pred, send_recv_trig, PredicateType::RECURRENT);
+      sst->predicates.insert (send_recv_pred, send_recv_trig, sst::PredicateType::RECURRENT);
     }
     int stable = -1;
-    auto stability_pred = [stable, &num_members, &member_index] (sst::SST_writes <Row> *sst) mutable {
+    auto stability_pred = [stable, &num_members=this->num_members, &member_index=this->member_index] (sst::SST_writes <Row> *sst) mutable {
       int min_msg = (*sst)[member_index].seq_num[member_index];
       // minimum of message number received
       for (int i = 0; i < num_members; ++i) {
@@ -169,21 +172,21 @@ namespace derecho {
       }
       return false;
     };
-    auto stability_trig = [&index=index[member_index], stable, &k1_callback, &buffer_size, member_index] (sst::SST_writes <Row> *sst) mutable {
+    auto stability_trig = [stable, &k1_callback=this->k1_callback, &buffer_size=this->buffer_size, member_index=this->member_index, &stability_queue=this->stability_queue, &end=this->end[member_index]] (sst::SST_writes <Row> *sst) mutable {
       auto p = stability_queue.front();
       char *buf = p.first;
       long long int msg_size = p.second;
       stability_queue.pop();
       k1_callback (member_index, stable, buf, msg_size);
       stable++;
-      if (buffer_size - end[member_index] <= msg_size) {
-	end[member_index] = msg_size;
+      if (buffer_size - end <= msg_size) {
+	end = msg_size;
       }
       else {
-	end[member_index] += msg_size;
+	end += msg_size;
       }
-    }
-    sst->predicates.insert (stability_pred, stability_trig, PredicateType::RECURRENT);
+    };
+    sst->predicates.insert (stability_pred, stability_trig, sst::PredicateType::RECURRENT);
   }
 
   template <int N>

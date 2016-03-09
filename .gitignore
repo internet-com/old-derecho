@@ -10,3 +10,8 @@ scripts/
 /experiments/test_group_interface.cpp~
 /main
 /derecho_group.h.ps
+/experiments/CMakeFiles/
+/experiments/script_copy.sh
+/experiments/test_group_interface
+/script_copy.sh
+/script_copy.sh~
