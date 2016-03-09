@@ -50,15 +50,17 @@ int main () {
 
   cout << "Derecho group created" << endl;
 
-  int msg_size = 5;
-  long long int pos = g.get_position (msg_size);
-  cout << "pos is " << pos << endl;
-  for (int i = 0; i < msg_size; ++i) {
-    g.buffers[node_rank][i] = 'a';
+  if (node_rank == 0) {
+    int msg_size = 50;
+    long long int pos = g.get_position (msg_size);
+    cout << "pos is " << pos << endl;
+    for (int i = 0; i < msg_size; ++i) {
+      g.buffers[node_rank][i] = 'a';
+    }
+    cout << "Calling send" << endl;
+    g.send(pos, msg_size);
+    cout << "send call finished" << endl;
   }
-  cout << "Calling send" << endl;
-  g.send(pos, msg_size);
-  cout << "send call finished" << endl;
   while (true) {
     
   }

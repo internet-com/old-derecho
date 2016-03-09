@@ -82,6 +82,9 @@ namespace derecho {
     buffer_size = _buffer_size;
     type = _type;
 
+    k0_callback = _k0_callback;
+    k1_callback = _k1_callback;
+
     // initialize start, end and indexes
     start.resize(num_members);
     end.resize(num_members);
@@ -150,6 +153,7 @@ namespace derecho {
 	char *buf = p.first;
 	long long int msg_size = p.second;
 	send_recv_queue.pop();
+	std::cout << "Calling k0_callback function" << std::endl;
 	k0_callback (i, local_index, buf, msg_size);
 	// update SST, so that the sender can see the receipt of the message
 	(*sst)[member_index].seq_num[i]++;
@@ -177,8 +181,9 @@ namespace derecho {
       char *buf = p.first;
       long long int msg_size = p.second;
       stability_queue.pop();
-      k1_callback (member_index, stable, buf, msg_size);
       stable++;
+      std::cout << "Calling k1_callback function" << std::endl;
+      k1_callback (member_index, stable, buf, msg_size);
       if (buffer_size - end <= msg_size) {
 	end = msg_size;
       }
