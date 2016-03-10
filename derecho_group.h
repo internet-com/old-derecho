@@ -9,6 +9,9 @@
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
 
+using std::cout;
+using std::endl;
+
 namespace derecho {
   typedef std::function<void (int, long long int, char*, long long int)> send_recv_callback;
   typedef std::function<void (int, long long int, char*, long long int)> stability_callback;
@@ -110,24 +113,31 @@ namespace derecho {
       buffers.push_back (std::move (buffer));
       // create a memory region encapsulating the buffer
       std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(), buffer_size);
+      cout << "Size of MR is " << mr->size << endl;
       mrs.push_back (mr);
+      cout << "Size of MR in the vector is " << mrs[i]->size << endl;
       for (int j = 0; j < num_members; ++j) {
 	rotated_members[j] = (uint32_t) members[(i+j)%num_members];
       }
       // i is the group number
       // receive desination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
       rdmc::create_group(i, rotated_members, block_size, type,
-			 [&mr=this->mrs[i], &start=this->start[i], &buffer_size=this->buffer_size](size_t length) -> rdmc::receive_destination {
-			   return {mr, (buffer_size-start < (long long int) length)? 0:(size_t)start};
+			 [i, &mrs=this->mrs, &start=this->start[i], &buffer_size=this->buffer_size](size_t length) -> rdmc::receive_destination {
+			   cout << "Size of MR is " << mrs[i]->size << endl;
+			   cout << "Length of incoming message is " << length << endl;
+			   size_t offset = (buffer_size-start < (long long int) length)? 0:(size_t)start;
+			   cout << "Offset is " << offset << endl;
+			   return {mrs[i], (buffer_size-start < (long long int) length)? 0:(size_t)start};
 			 },
 			 [&index=this->index[i], &send_recv_queue=this->send_recv_queue[i]](char *data, size_t size){
+			   cout << "In completion callback" << endl;
 			   send_recv_queue.push (std::pair <char*, size_t> (data, size));
 			   index++;
 			 },
 			 [](boost::optional<uint32_t>){});
     }
 
-    std::cout << "RDMC groups created" << std::endl;
+    cout << "RDMC groups created" << endl;
 
     // create the SST writes table
     sst = new sst::SST_writes<Row> (members, node_rank);
@@ -136,6 +146,7 @@ namespace derecho {
 	(*sst)[i].seq_num[j] = -1;
       }
     }
+    sst->put();
     sst->sync_with_members();
     // register message send/recv predicates and stability predicates
     int local_index = -1;
@@ -148,15 +159,17 @@ namespace derecho {
 	return false;
       };
       auto send_recv_trig = [i, local_index, &k0_callback=this->k0_callback, &send_recv_queue=this->send_recv_queue[i], &member_index=this->member_index, &stability_queue=this->stability_queue] (sst::SST_writes <Row> *sst) mutable {
+	cout << "in send recv trigger" << endl;
 	local_index++;
 	auto p = send_recv_queue.front();
 	char *buf = p.first;
 	long long int msg_size = p.second;
 	send_recv_queue.pop();
-	std::cout << "Calling k0_callback function" << std::endl;
+	cout << "Calling k0_callback function" << endl;
 	k0_callback (i, local_index, buf, msg_size);
 	// update SST, so that the sender can see the receipt of the message
 	(*sst)[member_index].seq_num[i]++;
+	sst->put(offsetof (Row, seq_num[0]) + i*sizeof (((Row*) 0)->seq_num[0]), sizeof (((Row*) 0)->seq_num[0]));
 	stability_queue.push (p);
       };
       sst->predicates.insert (send_recv_pred, send_recv_trig, sst::PredicateType::RECURRENT);
@@ -177,12 +190,13 @@ namespace derecho {
       return false;
     };
     auto stability_trig = [stable, &k1_callback=this->k1_callback, &buffer_size=this->buffer_size, member_index=this->member_index, &stability_queue=this->stability_queue, &end=this->end[member_index]] (sst::SST_writes <Row> *sst) mutable {
+      cout << "In stability trigger" << endl;
       auto p = stability_queue.front();
       char *buf = p.first;
       long long int msg_size = p.second;
       stability_queue.pop();
       stable++;
-      std::cout << "Calling k1_callback function" << std::endl;
+      cout << "Calling k1_callback function" << endl;
       k1_callback (member_index, stable, buf, msg_size);
       if (buffer_size - end <= msg_size) {
 	end = msg_size;
