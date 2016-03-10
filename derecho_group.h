@@ -213,6 +213,7 @@ namespace derecho {
     // if the size of the message is greater than the buffer size, then return a -1 without thinking
     if (msg_size > buffer_size) {
       cout << "Can't send messages of size larger than the size of the circular buffer" << endl;
+      return -1;
     }
     long long int my_start = start[member_index];
     long long int my_end = end[member_index];
