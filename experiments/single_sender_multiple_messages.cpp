@@ -78,7 +78,7 @@ int main () {
 	g.buffers[node_rank][i] = rand ()%26 + 'a';
       }
       cout << "Calling send" << endl;
-      g.send(pos, msg_size);
+      g.send();
       cout << "send call finished" << endl;
     }
   }

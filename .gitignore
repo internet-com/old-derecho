@@ -16,3 +16,7 @@ scripts/
 /script_copy.sh
 /script_copy.sh~
 /experiments/single_sender_multiple_messages.cpp~
+/experiments/make_at_fractus_nodes.sh
+/experiments/single_sender_multiple_messages
+/experiments/single_sender_one_message
+/make_at_fractus_nodes.sh
