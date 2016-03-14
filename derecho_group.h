@@ -217,6 +217,15 @@ namespace derecho {
     }
     long long int my_start = start[member_index];
     long long int my_end = end[member_index];
+    if (my_start == my_end) {
+      my_start = 0;
+      my_end = 0;
+      start[member_index] = 0;
+      end[member_index] = 0;
+    }
+    cout << "Start is: " << my_start << endl;
+    cout << "End is: " << my_end << endl;
+    cout << "Message size is: " << msg_size << endl;
     if (my_start < my_end) {
       if (my_end - my_start >= msg_size) {
 	start[member_index] += msg_size;
