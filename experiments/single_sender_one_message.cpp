@@ -65,7 +65,7 @@ int main () {
   cout << "Derecho group created" << endl;
 
   if (node_rank == 0) {
-    int msg_size = 50;
+    int msg_size = 10;
     long long int pos = g.get_position (msg_size);
     cout << "pos is " << pos << endl;
     for (int i = 0; i < msg_size; ++i) {

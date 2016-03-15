@@ -17,6 +17,7 @@ using std::pair;
 namespace derecho {
   enum MESSAGE_STATUS {
     BEING_GENERATED,
+    GENERATED,
     READY_TO_SEND,
     RDMC_RECEIVED,
     K0_PROCESSED
@@ -103,25 +104,6 @@ namespace derecho {
       start[i] = end[i] = 0;
     }
     
-    auto send_message_pred = [&msg_info=this->msg_info, index=(long long int) 0, member_index=this->member_index] (sst::SST_writes <Row> *sst) mutable {
-      if (msg_info.find (std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND)) != msg_info.end()) {
-	index++;
-	return true;
-      }
-      return false;
-    };
-    auto send_message_trig = [&msg_info=this->msg_info, index=(long long int) 0, member_index=this->member_index, &mrs=this->mrs] (sst::SST_writes <Row> *sst) mutable {
-      auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND)];
-      msg_info.erase (std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND));
-      char *buf = p.first;
-      long long int msg_size = p.second;
-      index++;
-      rdmc::send(member_index, mrs[member_index], buf-mrs[member_index]->buffer, msg_size);
-    };
-    sst->predicates.insert (send_message_pred, send_message_trig, sst::PredicateType::RECURRENT);
-    
-    initialize_send();
-    
     // rotated list of members - used for creating n internal RDMC groups
     vector <uint32_t> rotated_members (num_members);
 
@@ -145,16 +127,20 @@ namespace derecho {
       // i is the group number
       // receive desination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
       rdmc::create_group(i, rotated_members, block_size, type,
-			 [i, &mrs=this->mrs, &start=this->start[i], &buffer_size=this->buffer_size](size_t length) -> rdmc::receive_destination {
+			 [i, &start=this->start[i], &buffer_size=this->buffer_size, &mrs=this->mrs](size_t length) -> rdmc::receive_destination {
 			   cout << "Size of MR is " << mrs[i]->size << endl;
 			   cout << "Length of incoming message is " << length << endl;
 			   size_t offset = (buffer_size-start < (long long int) length)? 0:(size_t)start;
 			   cout << "Offset is " << offset << endl;
 			   return {mrs[i], (buffer_size-start < (long long int) length)? 0:(size_t)start};
 			 },
-			 [&msg_info=this->msg_info, index=(long long int) 0, i](char *data, size_t size) mutable {
+			 [&msg_info=this->msg_info, index=(long long int) 0, i, member_index=this->member_index](char *data, size_t size) mutable {
 			   cout << "In completion callback" << endl;
-			   msg_info[std::tuple<int, long long int, int> (i, index++, RDMC_RECEIVED)] = pair <char*, size_t> (data, size);
+			   msg_info[std::tuple<int, long long int, int> (i, index, RDMC_RECEIVED)] = pair <char*, size_t> (data, size);
+			   if (i == member_index) {
+			     msg_info[std::tuple<int, long long int, int> (i, index+1, READY_TO_SEND)] = pair <char*, size_t> (0, 0);
+			   }
+			   index++;
 			 },
 			 [](boost::optional<uint32_t>){});
     }
@@ -170,6 +156,32 @@ namespace derecho {
     }
     sst->put();
     sst->sync_with_members();
+
+    auto send_message_pred = [&msg_info=this->msg_info, index=(long long int) 0, member_index=this->member_index] (sst::SST_writes <Row> *sst) mutable {
+      if (msg_info.find (std::tuple<int, long long int, int> (member_index, index, GENERATED)) != msg_info.end() && msg_info.find (std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND)) != msg_info.end()) {
+	auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, GENERATED)];
+	cout << "P is: ";
+	cout << p.first << " " << p.second << endl << std::flush;
+	index++;
+	return true;
+      }
+      return false;
+    };
+    auto send_message_trig = [&msg_info=this->msg_info, index=(long long int) 0, member_index=this->member_index, &mrs=this->mrs] (sst::SST_writes <Row> *sst) mutable {
+      auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, GENERATED)];
+      msg_info.erase (std::tuple<int, long long int, int> (member_index, index, GENERATED));
+      msg_info.erase(std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND));
+      char *buf = p.first;
+      long long int msg_size = p.second;
+      index++;
+      cout << "Calling RDMC send: message size is " << msg_size << endl << std::flush;
+      rdmc::send(member_index, mrs[member_index], buf-mrs[member_index]->buffer, msg_size);
+    };
+    sst->predicates.insert (send_message_pred, send_message_trig, sst::PredicateType::RECURRENT);
+
+    initialize_position();
+    initialize_send();
+    
     // register message send/recv predicates and stability predicates
     for (int i = 0; i < num_members; ++i) {
       auto send_recv_pred = [&msg_info=this->msg_info, index=(long long int) 0, i] (sst::SST_writes <Row> *sst) mutable {
@@ -228,11 +240,13 @@ namespace derecho {
       index++;
     };
     sst->predicates.insert (stability_pred, stability_trig, sst::PredicateType::RECURRENT);
+
+    msg_info[std::tuple<int, long long int, int> (member_index, 0, READY_TO_SEND)] = pair <char*, long long int> (0,0);
   }
 
   template <int N>
   void derecho_group<N>::initialize_position () {
-    get_position = [this, index=0] (long long int msg_size) mutable {
+    get_position = [this, index=0] (long long int msg_size) mutable -> long long int {
       // if the size of the message is greater than the buffer size, then return a -1 without thinking
       if (msg_size > buffer_size) {
 	cout << "Can't send messages of size larger than the size of the circular buffer" << endl;
@@ -246,9 +260,6 @@ namespace derecho {
 	start[member_index] = 0;
 	end[member_index] = 0;
       }
-      cout << "Start is: " << my_start << endl;
-      cout << "End is: " << my_end << endl;
-      cout << "Message size is: " << msg_size << endl;
       if (my_start < my_end) {
 	if (my_end - my_start >= msg_size) {
 	  start[member_index] += msg_size;
@@ -282,7 +293,7 @@ namespace derecho {
     send = [&msg_info=this->msg_info, index=0, member_index=this->member_index] () mutable {
       auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, BEING_GENERATED)];
       msg_info.erase (std::tuple<int, long long int, int> (member_index, index, BEING_GENERATED));
-      msg_info[std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND)] = p;
+      msg_info[std::tuple<int, long long int, int> (member_index, index, GENERATED)] = p;
       ++index;
     };
   }

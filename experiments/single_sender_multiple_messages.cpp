@@ -68,7 +68,7 @@ int main () {
   if (node_rank == 0) {
     for (int i = 0; i < num_messages; ++i) {
       // random message size between 1 and 100
-      int msg_size = rand()%100+1;
+      int msg_size = (rand()%7 + 2) * 10;
       long long int pos = g.get_position (msg_size);
       while (pos < 0) {
 	pos = g.get_position (msg_size);
@@ -80,6 +80,11 @@ int main () {
       cout << "Calling send" << endl;
       g.send();
       cout << "send call finished" << endl;
+      cout << "Waiting for some time" << endl;
+      for (int w = 0; w < 1e9; ) {
+	++w;
+      }
+      cout << "Done waiting" << endl;
     }
   }
   while (true) {
