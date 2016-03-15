@@ -1,5 +1,5 @@
 /*
- * a single sender sends multiple random messages of random size to the group
+ * multiple senders send multiple random messages of random size to the group
  */
 
 #include <iostream>
@@ -22,6 +22,8 @@ using std::cin;
 using std::vector;
 
 int main () {
+  const int N = 2;
+  
   srand(time(NULL));
   
   uint32_t node_rank;
@@ -49,16 +51,25 @@ int main () {
   long long int buffer_size = 10000;
   long long int block_size = 10;
 
+  int num_messages = 100;
+  
   auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is received " << endl;
+    cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is received" << endl;
   };
-  auto k1_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
+  auto k1_callback = [&] (int sender_id, long long int index, char *buf, long long int msg_size) {
     cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is stable " << endl;
+    // if (index == num_messages) {
+    //   for (unsigned int i = 0; i < N; ++i) {
+    // 	if (i != node_rank) {
+    // 	  sst::tcp::sync (i);
+    // 	}
+    //   }
+    //   exit (0);
+    // }
   };
   
-  derecho::derecho_group<2> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group<N> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
 
-  int num_messages = 100;
   for (int i = 0; i < num_messages; ++i) {
     // random message size between 1 and 100
     int msg_size = (rand()%7 + 2) * 10;

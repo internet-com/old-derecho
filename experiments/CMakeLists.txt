@@ -14,3 +14,7 @@ target_link_libraries(single_sender_one_message rdmacm ibverbs boost_system rt p
 # single_sender_multiple_messages
 add_executable(single_sender_multiple_messages single_sender_multiple_messages.cpp)
 target_link_libraries(single_sender_multiple_messages rdmacm ibverbs boost_system rt pthread rdmc sst)
+
+# multiple_senders_multiple_messages
+add_executable(multiple_senders_multiple_messages multiple_senders_multiple_messages.cpp)
+target_link_libraries(multiple_senders_multiple_messages rdmacm ibverbs boost_system rt pthread rdmc sst)
