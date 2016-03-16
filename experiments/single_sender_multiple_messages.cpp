@@ -59,17 +59,19 @@ int main () {
   derecho::derecho_group<2> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
 
   int num_messages = 100;
-  for (int i = 0; i < num_messages; ++i) {
-    // random message size between 1 and 100
-    int msg_size = (rand()%7 + 2) * 10;
-    long long int pos = g.get_position (msg_size);
-    while (pos < 0) {
-      pos = g.get_position (msg_size);
+  if (node_rank == 0) {
+    for (int i = 0; i < num_messages; ++i) {
+      // random message size between 1 and 100
+      int msg_size = (rand()%7 + 2) * 10;
+      long long int pos = g.get_position (msg_size);
+      while (pos < 0) {
+	pos = g.get_position (msg_size);
+      }
+      for (int j = 0; j < msg_size; ++j) {
+	g.buffers[node_rank][pos+j] = rand ()%26 + 'a';
+      }
+      g.send();
     }
-    for (int i = 0; i < msg_size; ++i) {
-      g.buffers[node_rank][i] = rand ()%26 + 'a';
-    }
-    g.send();
   }
   while (true) {
     

@@ -51,21 +51,13 @@ int main () {
   long long int buffer_size = 10000;
   long long int block_size = 10;
 
-  int num_messages = 100;
+  int num_messages = 26;
   
   auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is received" << endl;
+    cout << "k0_callback -- Sender: " << sender_id << ", Message number: " << (int)buf[0]-(int)'a' << endl;
   };
   auto k1_callback = [&] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is stable " << endl;
-    // if (index == num_messages) {
-    //   for (unsigned int i = 0; i < N; ++i) {
-    // 	if (i != node_rank) {
-    // 	  sst::tcp::sync (i);
-    // 	}
-    //   }
-    //   exit (0);
-    // }
+    cout << "k1_callback -- Stable message number: " << (int) buf[0]-(int)'a' << endl;
   };
   
   derecho::derecho_group<N> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
@@ -77,13 +69,15 @@ int main () {
     while (pos < 0) {
       pos = g.get_position (msg_size);
     }
-    for (int i = 0; i < msg_size; ++i) {
-      g.buffers[node_rank][i] = rand ()%26 + 'a';
+    for (int j = 0; j < msg_size; ++j) {
+      g.buffers[node_rank][pos+j] = 'a'+i;
     }
     g.send();
   }
   while (true) {
-    
+    int n;
+    cin >> n;
+    g.sst_print ();
   }
   
   return 0;

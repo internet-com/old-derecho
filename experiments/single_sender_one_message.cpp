@@ -69,7 +69,7 @@ int main () {
     long long int pos = g.get_position (msg_size);
     cout << "pos is " << pos << endl;
     for (int i = 0; i < msg_size; ++i) {
-      g.buffers[node_rank][i] = rand ()%26 + 'a';
+      g.buffers[node_rank][pos+i] = rand ()%26 + 'a';
     }
     cout << "Calling send" << endl;
     g.send();
