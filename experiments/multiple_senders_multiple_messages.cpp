@@ -22,7 +22,7 @@ using std::cin;
 using std::vector;
 
 int main () {
-  const int N = 2;
+  const int N = 8;
   
   srand(time(NULL));
   
@@ -51,13 +51,12 @@ int main () {
   long long int buffer_size = 10000;
   long long int block_size = 10;
 
-  int num_messages = 26;
+  int num_messages = 1000;
   
   auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "k0_callback -- Sender: " << sender_id << ", Message number: " << (int)buf[0]-(int)'a' << endl;
   };
   auto k1_callback = [&] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "k1_callback -- Stable message number: " << (int) buf[0]-(int)'a' << endl;
+    cout << "k0_callback: " << index << endl;
   };
   
   derecho::derecho_group<N> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);

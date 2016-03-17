@@ -2,6 +2,7 @@
 #define DERECHO_GROUP_H
 
 #include <functional>
+#include <mutex>
 #include <tuple>
 #include <cassert>
 #include <memory>
@@ -53,6 +54,7 @@ namespace derecho {
     vector <std::shared_ptr<rdma::memory_region> > mrs;
     // map of <i,index,stage> |-> <buf,size>
     std::map <std::tuple<int, long long int, int>, pair <char*, long long int>> msg_info;
+    std::mutex map_mtx;
     
     struct Row {
       long long int seq_num[N];
@@ -60,8 +62,10 @@ namespace derecho {
     
     sst::SST_writes<Row> *sst;    
 
-    void initialize_position ();
-    void initialize_send ();
+    void insert_in_map (int sender_id, long long int index, int msg_status, char *buf, long long int size);
+    pair <char*, long long int> access_from_map (int sender_id, long long int index, int msg_status);
+    void erase_from_map (int sender_id, long long int index, int msg_status);
+    bool search_in_map (int sender_id, long long int index, int msg_status);
     
   public:
     // buffers to store incoming/outgoing messages
@@ -71,10 +75,10 @@ namespace derecho {
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
     derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, send_recv_callback _k0_callback, stability_callback _k1_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
     // get a position in the buffer before sending
-    std::function<long long int (long long int)> get_position;
+    long long int get_position (long long int);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
-    std::function<void ()> send;
+    void send ();
     void sst_print ();
   };
 
@@ -126,14 +130,14 @@ namespace derecho {
       // i is the group number
       // receive desination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
       rdmc::create_group(i, rotated_members, block_size, type,
-			 [i, &start=this->start[i], &buffer_size=this->buffer_size, &mrs=this->mrs](size_t length) -> rdmc::receive_destination {
-			   return {mrs[i], (buffer_size-start < (long long int) length)? 0:(size_t)start};
+			 [this, i](size_t length) -> rdmc::receive_destination {
+			   return {mrs[i], (buffer_size-start[i] < (long long int) length)? 0:(size_t)start[i]};
 			 },
-			 [&msg_info=this->msg_info, i, member_index=this->member_index](char *data, size_t size) mutable {
+			 [this, i](char *data, size_t size) {
 			   static long long int index[N];
-			   msg_info[std::tuple<int, long long int, int> (i, index[i], RDMC_RECEIVED)] = pair <char*, size_t> (data, size);
+			   insert_in_map(i, index[i], RDMC_RECEIVED, data, size);
 			   if (i == member_index) {
-			     msg_info[std::tuple<int, long long int, int> (i, index[i]+1, READY_TO_SEND)] = pair <char*, size_t> (0, 0);
+			     insert_in_map(i, index[i]+1, READY_TO_SEND, 0, 0);
 			   }
 			   index[i]++;
 			 },
@@ -150,19 +154,19 @@ namespace derecho {
     sst->put();
     sst->sync_with_members();
 
-    auto send_message_pred = [&msg_info=this->msg_info, member_index=this->member_index] (sst::SST_writes <Row> *sst) mutable {
+    auto send_message_pred = [this] (sst::SST_writes <Row> *sst) {
       static long long int index = 0;      
-      if (msg_info.find (std::tuple<int, long long int, int> (member_index, index, GENERATED)) != msg_info.end() && msg_info.find (std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND)) != msg_info.end()) {
+      if (search_in_map(member_index, index, GENERATED) && search_in_map(member_index, index, READY_TO_SEND)) {
 	index++;
 	return true;
       }
       return false;
     };
-    auto send_message_trig = [&msg_info=this->msg_info, member_index=this->member_index, &mrs=this->mrs] (sst::SST_writes <Row> *sst) mutable {
+    auto send_message_trig = [this] (sst::SST_writes <Row> *sst) {
       static long long int index = 0; 
-      auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, GENERATED)];
-      msg_info.erase (std::tuple<int, long long int, int> (member_index, index, GENERATED));
-      msg_info.erase (std::tuple<int, long long int, int> (member_index, index, READY_TO_SEND));
+      auto p = access_from_map(member_index, index, GENERATED);
+      erase_from_map (member_index, index, GENERATED);
+      erase_from_map (member_index, index, READY_TO_SEND);
       char *buf = p.first;
       long long int msg_size = p.second;
       index++;
@@ -170,23 +174,20 @@ namespace derecho {
     };
     sst->predicates.insert (send_message_pred, send_message_trig, sst::PredicateType::RECURRENT);
 
-    initialize_position();
-    initialize_send();
-    
     // register message send/recv predicates and stability predicates
     for (int i = 0; i < num_members; ++i) {
-      auto send_recv_pred = [&msg_info=this->msg_info, i] (sst::SST_writes <Row> *sst) mutable {
+      auto send_recv_pred = [this, i] (sst::SST_writes <Row> *sst) {
 	static long long int index[N];
-	if (msg_info.find (std::tuple<int, long long int, int> (i, index[i], RDMC_RECEIVED)) != msg_info.end()) {
+	if (search_in_map(i, index[i], RDMC_RECEIVED)) {
 	  index[i]++;
 	  return true;
 	}
 	return false;
       };
-      auto send_recv_trig = [&msg_info=this->msg_info, i, &member_index=this->member_index, &k0_callback=this->k0_callback] (sst::SST_writes <Row> *sst) mutable {
+      auto send_recv_trig = [this, i] (sst::SST_writes <Row> *sst) {
 	static long long int index[N];
-	auto p = msg_info[std::tuple<int, long long int, int> (i, index[i], RDMC_RECEIVED)];
-	msg_info.erase (std::tuple<int, long long int, int> (i, index[i], RDMC_RECEIVED));
+	auto p = access_from_map(i, index[i], RDMC_RECEIVED);
+	erase_from_map (i, index[i], RDMC_RECEIVED);
 	char *buf = p.first;
 	long long int msg_size = p.second;
 	k0_callback (i, index[i], buf, msg_size);
@@ -194,13 +195,13 @@ namespace derecho {
 	(*sst)[member_index].seq_num[i]++;
 	sst->put(offsetof (Row, seq_num[0]) + i*sizeof (((Row*) 0)->seq_num[0]), sizeof (((Row*) 0)->seq_num[0]));
 	if (i == member_index) {
-	  msg_info[std::tuple<int, long long int, int> (i, index[i], K0_PROCESSED)] = p;
+	  insert_in_map (i, index[i], K0_PROCESSED, buf, msg_size);
 	}
 	index[i]++;
       };
       sst->predicates.insert (send_recv_pred, send_recv_trig, sst::PredicateType::RECURRENT);
     }
-    auto stability_pred = [&msg_info=this->msg_info, &num_members=this->num_members, &member_index=this->member_index] (sst::SST_writes <Row> *sst) mutable {
+    auto stability_pred = [this] (sst::SST_writes <Row> *sst) {
       static long long int index = 0;      
       int min_msg = (*sst)[member_index].seq_num[member_index];
       // minimum of message number received
@@ -215,29 +216,29 @@ namespace derecho {
       }
       return false;
     };
-    auto stability_trig = [&msg_info=this->msg_info, &buffer_size=this->buffer_size, member_index=this->member_index, &end=this->end[member_index], &k1_callback=this->k1_callback] (sst::SST_writes <Row> *sst) mutable {
+    auto stability_trig = [this] (sst::SST_writes <Row> *sst) {
       static long long int index = 0;      
-      auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, K0_PROCESSED)];
+      auto p = access_from_map(member_index, index, K0_PROCESSED);
       char *buf = p.first;
       long long int msg_size = p.second;
-      msg_info.erase(std::tuple<int, long long int, int> (member_index, index, K0_PROCESSED));
+      erase_from_map (member_index, index, K0_PROCESSED);
       k1_callback (member_index, index, buf, msg_size);
-      if (buffer_size - end <= msg_size) {
-	end = msg_size;
+      if (buffer_size - end[member_index] <= msg_size) {
+	end[member_index] = msg_size;
       }
       else {
-	end += msg_size;
+	end[member_index] += msg_size;
       }
       index++;
     };
     sst->predicates.insert (stability_pred, stability_trig, sst::PredicateType::RECURRENT);
 
-    msg_info[std::tuple<int, long long int, int> (member_index, 0, READY_TO_SEND)] = pair <char*, long long int> (0,0);
+    insert_in_map (member_index, 0, READY_TO_SEND, 0, 0);
   }
 
   template <int N>
-  void derecho_group<N>::initialize_position () {
-    get_position = [this, index=0] (long long int msg_size) mutable -> long long int {
+  long long int derecho_group<N>::get_position (long long int msg_size) {
+      static long long int index = 0;
       // if the size of the message is greater than the buffer size, then return a -1 without thinking
       if (msg_size > buffer_size) {
 	cout << "Can't send messages of size larger than the size of the circular buffer" << endl;
@@ -254,7 +255,7 @@ namespace derecho {
 	  if (start[member_index] == buffer_size) {
 	    start[member_index] = 0;
 	  }
-	  msg_info[std::tuple<int, long long int, int> (member_index, index++, BEING_GENERATED)] = pair <char*, int> (mrs[member_index]->buffer+my_start, msg_size);
+	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer+my_start, msg_size);
 	  return my_start;
 	}
 	else {
@@ -267,7 +268,7 @@ namespace derecho {
 	  if (start[member_index] == buffer_size) {
 	    start[member_index] = 0;
 	  }
-	  msg_info[std::tuple<int, long long int, int> (member_index, index++, BEING_GENERATED)] = pair <char*, int> (mrs[member_index]->buffer+my_start, msg_size);
+	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer+my_start, msg_size);
 	  return my_start;
 	}
 	else if (my_end >= msg_size) {
@@ -275,24 +276,22 @@ namespace derecho {
 	  if (start[member_index] == buffer_size) {
 	    start[member_index] = 0;
 	  }
-	  msg_info[std::tuple<int, long long int, int> (member_index, index++, BEING_GENERATED)] = pair <char*, int> (mrs[member_index]->buffer, msg_size);
+	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer, msg_size);
 	  return 0;
 	}
 	else {
 	  return -1;
 	}
       }
-    };
-  }
+    }
 
   template <int N>
-  void derecho_group<N>::initialize_send () {
-    send = [this, &msg_info=this->msg_info, index=0, member_index=this->member_index] () mutable {
-      auto p = msg_info[std::tuple<int, long long int, int> (member_index, index, BEING_GENERATED)];
-      msg_info.erase (std::tuple<int, long long int, int> (member_index, index, BEING_GENERATED));
-      msg_info[std::tuple<int, long long int, int> (member_index, index, GENERATED)] = p;
-      ++index;
-    };
+  void derecho_group<N>::send () {
+    static long long int index = 0;
+    auto p = access_from_map(member_index, index, BEING_GENERATED);
+    erase_from_map (member_index, index, BEING_GENERATED);
+    insert_in_map (member_index, index, GENERATED, p.first, p.second);
+    ++index;
   }
 
   template <int N>
@@ -304,6 +303,37 @@ namespace derecho {
       }
       cout << endl;
     }
+  }
+
+  template <int N>
+  void derecho_group<N>::insert_in_map (int sender_id, long long int index, int msg_status, char *buf, long long int size) {
+    map_mtx.lock();
+    msg_info [std::tuple<int, long long int, int> (sender_id, index, msg_status)] = std::pair <char*, long long int> (buf, size);
+    map_mtx.unlock();
+  }
+
+  
+  template <int N>
+  pair <char*, long long int> derecho_group<N>::access_from_map (int sender_id, long long int index, int msg_status) {
+    map_mtx.lock();
+    auto p = msg_info[std::tuple<int, long long int, int> (sender_id, index, msg_status)];
+    map_mtx.unlock();
+    return p;
+  }
+  
+  template <int N>
+  void derecho_group<N>::erase_from_map (int sender_id, long long int index, int msg_status) {
+    map_mtx.lock();
+    msg_info.erase (std::tuple<int, long long int, int> (sender_id, index, msg_status));
+    map_mtx.unlock();
+  }
+
+  template <int N>
+  bool derecho_group<N>::search_in_map (int sender_id, long long int index, int msg_status) {
+    map_mtx.lock();
+    bool found = (msg_info.find (std::tuple<int, long long int, int> (sender_id, index, msg_status)) != msg_info.end());
+    map_mtx.unlock();
+    return found;
   }
 }
 #endif /* DERECHO_GROUP_H */
