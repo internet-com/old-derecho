@@ -28,7 +28,7 @@ int main () {
   
   uint32_t node_rank;
   uint32_t num_nodes;
-  vector<std::string> node_addresses;
+  map<uint32_t, std::string> node_addresses;
 
   query_addresses(node_addresses, node_rank);
   num_nodes = node_addresses.size();
@@ -37,7 +37,7 @@ int main () {
   rdmc::initialize(node_addresses, node_rank);
 
   // initialize tcp connections
-  sst::tcp::tcp_initialize(num_nodes, node_rank, node_addresses);
+  sst::tcp::tcp_initialize(node_rank, node_addresses);
   
   // initialize the rdma resources
   sst::verbs_initialize();

@@ -31,7 +31,7 @@ using sst::tcp::tcp_initialize;
 using sst::tcp::sync;
 uint32_t node_rank;
 uint32_t num_nodes;
-vector<string> node_addresses;
+map <uint32_t, string> node_addresses;
 
 struct Row {
   volatile bool done [1000];
@@ -45,7 +45,7 @@ int main () {
   rdmc::initialize(node_addresses, node_rank);
 
   // initialize tcp connections
-  tcp_initialize(num_nodes, node_rank, node_addresses);
+  tcp_initialize(node_rank, node_addresses);
     
   // initialize the rdma resources
   sst::verbs_initialize();
