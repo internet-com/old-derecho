@@ -22,7 +22,7 @@ using std::cin;
 using std::vector;
 
 int main () {
-  const int N = 8;
+  const int N = 2;
   
   srand(time(NULL));
   
