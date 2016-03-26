@@ -193,7 +193,8 @@ namespace derecho {
 	k0_callback (i, index[i], buf, msg_size);
 	// update SST, so that the sender can see the receipt of the message
 	(*sst)[member_index].seq_num[i]++;
-	sst->put(offsetof (Row, seq_num[0]) + i*sizeof (((Row*) 0)->seq_num[0]), sizeof (((Row*) 0)->seq_num[0]));
+	// sst->put(offsetof (Row, seq_num[0]) + i*sizeof (((Row*) 0)->seq_num[0]), sizeof (((Row*) 0)->seq_num[0]));
+	sst->put();
 	if (i == member_index) {
 	  insert_in_map (i, index[i], K0_PROCESSED, buf, msg_size);
 	}
