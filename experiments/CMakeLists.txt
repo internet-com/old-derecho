@@ -18,3 +18,7 @@ target_link_libraries(single_sender_multiple_messages rdmacm ibverbs boost_syste
 # multiple_senders_multiple_messages
 add_executable(multiple_senders_multiple_messages multiple_senders_multiple_messages.cpp)
 target_link_libraries(multiple_senders_multiple_messages rdmacm ibverbs boost_system rt pthread rdmc sst)
+
+# bandwidth_test
+add_executable(bandwidth_test bandwidth_test.cpp)
+target_link_libraries(bandwidth_test rdmacm ibverbs boost_system rt pthread rdmc sst)
