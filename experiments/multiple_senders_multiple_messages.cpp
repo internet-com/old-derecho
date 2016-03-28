@@ -74,9 +74,6 @@ int main () {
     g.send();
   }
   while (true) {
-    int n;
-    cin >> n;
-    g.sst_print ();
   }
   
   return 0;

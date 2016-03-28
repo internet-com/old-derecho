@@ -79,7 +79,6 @@ namespace derecho {
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
-    void sst_print ();
   };
 
   template <int N>
@@ -293,17 +292,6 @@ namespace derecho {
     erase_from_map (member_index, index, BEING_GENERATED);
     insert_in_map (member_index, index, GENERATED, p.first, p.second);
     ++index;
-  }
-
-  template <int N>
-  void derecho_group<N>::sst_print () {
-    cout << "Printing SST" << endl;
-    for (int i = 0; i < num_members; ++i) {
-      for (int j = 0; j < num_members; ++j) {
-	cout << (*sst)[i].seq_num[j] << " ";
-      }
-      cout << endl;
-    }
   }
 
   template <int N>
