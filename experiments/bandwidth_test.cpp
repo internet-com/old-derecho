@@ -17,7 +17,7 @@ using std::endl;
 using std::cin;
 using std::vector;
 
-int main () {
+int main (int argc, char *argv[]) {
   const int N = 4;
   
   srand(time(NULL));
@@ -43,11 +43,11 @@ int main () {
     members[i] = i;
   }
 
-  long long int unit = 1000;
-  long long int buffer_size = 10*unit*unit*unit;
-  long long int block_size = unit;
+  long long int buffer_size = atoll(argv[1]);
+  long long int block_size = atoll(argv[2]);
 
-  long long int msg_size = 100*unit*unit;
+  long long int msg_size = atoll(argv[3]);
+  cout << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
   int num_messages = 1000;
   
   bool done = false;
@@ -77,8 +77,8 @@ int main () {
   }
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
-  long long int nanoseconds_elapsed = (end_time.tv_sec*1e9 + end_time.tv_nsec)- (start_time.tv_sec*1e9 + start_time.tv_nsec);
-  cout << (msg_size * num_messages * 8 + 0.0)/nanoseconds_elapsed << endl;
+  long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
+  cout << (msg_size * (long long int) num_messages * (long long int) 8 + 0.0)/nanoseconds_elapsed << endl;
   for (unsigned int i = 0; i < num_nodes; ++i) {
     if (i != node_rank) {
       sst::tcp::sync (members[i]);
