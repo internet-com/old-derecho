@@ -85,5 +85,5 @@ int main (int argc, char *argv[]) {
     }
   }
   cout << "Exiting" << endl;
-  return 0;
+  exit(0);
 }
