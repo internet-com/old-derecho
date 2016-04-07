@@ -2,8 +2,12 @@
 #define DERECHO_GROUP_H
 
 #include <functional>
+#include <boost/optional.hpp>
 #include <mutex>
 #include <tuple>
+#include <map>
+#include <set>
+#include <queue>
 #include <cassert>
 #include <memory>
 
@@ -16,6 +20,8 @@ using std::vector;
 using std::pair;
 
 namespace derecho {
+  typedef std::function<void (int, long long int, char*, long long int)> message_callback;
+  
   enum MESSAGE_STATUS {
     BEING_GENERATED,
     GENERATED,
@@ -24,12 +30,20 @@ namespace derecho {
     K0_PROCESSED
   };
 
-  typedef std::function<void (int, long long int, char*, long long int)> send_recv_callback;
-  typedef std::function<void (int, long long int, char*, long long int)> stability_callback;
+  struct Row {
+    long long int seq_num;
+    long long int stable_num;
+  };
+
+  struct msg_info {
+    int sender_id;
+    long long int index;
+    long long int offset;
+    long long int size;
+  };
   
   // combines sst and rdmc to give an abstraction of a group where anyone can send
   // template parameter is for the group size - used for the SST row-struct
-  template <int N>
   class derecho_group {
     // number of members
     int num_members;
@@ -45,284 +59,39 @@ namespace derecho {
     // send algorithm for constructing a multicast from point-to-point unicast
     // binomial pipeline by default
     rdmc::send_algorithm type;
+    int window_size;
+    // callbacks for message send/recv and stability
+    message_callback local_stability_callback;
+    message_callback global_stability_callback;
+
     // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
     vector <long long int> start, end;
-    // callbacks for message send/recv and stability
-    send_recv_callback k0_callback;
-    stability_callback k1_callback;
+    
+    // buffers to store incoming/outgoing messages
+    vector <std::unique_ptr<char[]> > buffers;
     // memory regions wrapping the buffers for RDMA ops
     vector <std::shared_ptr<rdma::memory_region> > mrs;
-    // map of <i,index,stage> |-> <buf,size>
-    std::map <std::tuple<int, long long int, int>, pair <char*, long long int>> msg_info;
-    std::mutex map_mtx;
-    
-    struct Row {
-      long long int seq_num[N];
-    };
-    
+
+    // index to be used the next time get_position is called
+    // when next_message is not none, then next_message.index = future_message_index-1
+    long long int future_message_index = 0;
+    // next_message is the message that will be sent when send is called the next time
+    // it is boost::none when there is no message to send
+    boost::optional <msg_info> next_message;
+    std::queue <msg_info> pending_sends;
+    std::map <long long int, msg_info> locally_stable_messages;
+    std::mutex msg_state_mtx;
+
     sst::SST_writes<Row> *sst;    
 
-    void insert_in_map (int sender_id, long long int index, int msg_status, char *buf, long long int size);
-    pair <char*, long long int> access_from_map (int sender_id, long long int index, int msg_status);
-    void erase_from_map (int sender_id, long long int index, int msg_status);
-    bool search_in_map (int sender_id, long long int index, int msg_status);
-    
   public:
-    // buffers to store incoming/outgoing messages
-    // it is public so that data can be generated from outside directly into the send buffer
-    // eliminating the need for memory copy
-    vector <std::unique_ptr<char[]> > buffers;
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, send_recv_callback _k0_callback, stability_callback _k1_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback local_stability_callback, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, _window_size = 3);
     // get a position in the buffer before sending
-    long long int get_position (long long int);
+    char* get_position (long long int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
   };
-
-  template <int N>
-  derecho_group<N>::derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, send_recv_callback _k0_callback, stability_callback _k1_callback, rdmc::send_algorithm _type) {
-    // copy the parameters
-    members = _members;
-    num_members = members.size();
-    assert (num_members == N);
-    // find the member_index
-    for (int i = 0; i < num_members; ++i) {
-      if (members[i] == node_rank) {
-	member_index = i;
-	break;
-      }
-    }
-    block_size = _block_size;
-    buffer_size = _buffer_size;
-    type = _type;
-
-    k0_callback = _k0_callback;
-    k1_callback = _k1_callback;
-
-    // initialize start, end and indexes
-    start.resize(num_members);
-    end.resize(num_members);
-    for (int i = 0; i < num_members; ++i) {
-      start[i] = end[i] = 0;
-    }
-    
-    // rotated list of members - used for creating n internal RDMC groups
-    vector <uint32_t> rotated_members (num_members);
-
-    // create num_members groups one at a time
-    for (int i = 0; i < num_members; ++i) {
-      /* members[i] is the sender for the i^th group
-       * for now, we simply rotate the members vector to supply to create_group
-       * even though any arrangement of receivers in the members vector is possible
-       */
-      // allocate buffer for the group
-      std::unique_ptr<char[]> buffer(new char[buffer_size]);
-      buffers.push_back (std::move (buffer));
-      // create a memory region encapsulating the buffer
-      std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(), buffer_size);
-      mrs.push_back (mr);
-      for (int j = 0; j < num_members; ++j) {
-	rotated_members[j] = (uint32_t) members[(i+j)%num_members];
-      }
-      // i is the group number
-      // receive desination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
-      rdmc::create_group(i, rotated_members, block_size, type,
-			 [this, i](size_t length) -> rdmc::receive_destination {
-			   return {mrs[i], (buffer_size-start[i] < (long long int) length)? 0:(size_t)start[i]};
-			 },
-			 [this, i](char *data, size_t size) {
-			   static long long int index[N];
-			   insert_in_map(i, index[i], RDMC_RECEIVED, data, size);
-			   if (i == member_index) {
-			     insert_in_map(i, index[i]+1, READY_TO_SEND, 0, 0);
-			   }
-			   index[i]++;
-			 },
-			 [](boost::optional<uint32_t>){});
-    }
-    
-    // create the SST writes table
-    sst = new sst::SST_writes<Row> (members, node_rank);
-    for (int i = 0; i < num_members; ++i) {
-      for (int j = 0; j < num_members; ++j) {
-	(*sst)[i].seq_num[j] = -1;
-      }
-    }
-    sst->put();
-    sst->sync_with_members();
-
-    auto send_message_pred = [this] (sst::SST_writes <Row> *sst) {
-      static long long int index = 0;      
-      if (search_in_map(member_index, index, GENERATED) && search_in_map(member_index, index, READY_TO_SEND)) {
-	index++;
-	return true;
-      }
-      return false;
-    };
-    auto send_message_trig = [this] (sst::SST_writes <Row> *sst) {
-      static long long int index = 0; 
-      auto p = access_from_map(member_index, index, GENERATED);
-      erase_from_map (member_index, index, GENERATED);
-      erase_from_map (member_index, index, READY_TO_SEND);
-      char *buf = p.first;
-      long long int msg_size = p.second;
-      index++;
-      rdmc::send(member_index, mrs[member_index], buf-mrs[member_index]->buffer, msg_size);
-    };
-    sst->predicates.insert (send_message_pred, send_message_trig, sst::PredicateType::RECURRENT);
-
-    // register message send/recv predicates and stability predicates
-    for (int i = 0; i < num_members; ++i) {
-      auto send_recv_pred = [this, i] (sst::SST_writes <Row> *sst) {
-	static long long int index[N];
-	if (search_in_map(i, index[i], RDMC_RECEIVED)) {
-	  index[i]++;
-	  return true;
-	}
-	return false;
-      };
-      auto send_recv_trig = [this, i] (sst::SST_writes <Row> *sst) {
-	static long long int index[N];
-	auto p = access_from_map(i, index[i], RDMC_RECEIVED);
-	erase_from_map (i, index[i], RDMC_RECEIVED);
-	char *buf = p.first;
-	long long int msg_size = p.second;
-	k0_callback (i, index[i], buf, msg_size);
-	// update SST, so that the sender can see the receipt of the message
-	(*sst)[member_index].seq_num[i]++;
-	// sst->put(offsetof (Row, seq_num[0]) + i*sizeof (((Row*) 0)->seq_num[0]), sizeof (((Row*) 0)->seq_num[0]));
-	sst->put();
-	if (i == member_index) {
-	  insert_in_map (i, index[i], K0_PROCESSED, buf, msg_size);
-	}
-	index[i]++;
-      };
-      sst->predicates.insert (send_recv_pred, send_recv_trig, sst::PredicateType::RECURRENT);
-    }
-    auto stability_pred = [this] (sst::SST_writes <Row> *sst) {
-      static long long int index = 0;      
-      int min_msg = (*sst)[member_index].seq_num[member_index];
-      // minimum of message number received
-      for (int i = 0; i < num_members; ++i) {
-	if ((*sst)[i].seq_num[member_index] < min_msg) {
-	  min_msg = (*sst)[i].seq_num[member_index];
-	}
-      }
-      if (min_msg >= index) {
-	index++;
-	return true;
-      }
-      return false;
-    };
-    auto stability_trig = [this] (sst::SST_writes <Row> *sst) {
-      static long long int index = 0;      
-      auto p = access_from_map(member_index, index, K0_PROCESSED);
-      char *buf = p.first;
-      long long int msg_size = p.second;
-      erase_from_map (member_index, index, K0_PROCESSED);
-      k1_callback (member_index, index, buf, msg_size);
-      if (buffer_size - end[member_index] <= msg_size) {
-	end[member_index] = msg_size;
-      }
-      else {
-	end[member_index] += msg_size;
-      }
-      index++;
-    };
-    sst->predicates.insert (stability_pred, stability_trig, sst::PredicateType::RECURRENT);
-
-    insert_in_map (member_index, 0, READY_TO_SEND, 0, 0);
-  }
-
-  template <int N>
-  long long int derecho_group<N>::get_position (long long int msg_size) {
-      static long long int index = 0;
-      // if the size of the message is greater than the buffer size, then return a -1 without thinking
-      if (msg_size > buffer_size) {
-	cout << "Can't send messages of size larger than the size of the circular buffer" << endl;
-	return -1;
-      }
-      if (start[member_index] == end[member_index]) {
-	start[member_index] = end[member_index] = 0;
-      }
-      long long int my_start = start[member_index];
-      long long int my_end = end[member_index];
-      if (my_start < my_end) {
-	if (my_end - my_start >= msg_size) {
-	  start[member_index] += msg_size;
-	  if (start[member_index] == buffer_size) {
-	    start[member_index] = 0;
-	  }
-	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer+my_start, msg_size);
-	  return my_start;
-	}
-	else {
-	  return -1;
-	}
-      }
-      else {
-	if (buffer_size - my_start >= msg_size) {
-	  start[member_index] += msg_size;
-	  if (start[member_index] == buffer_size) {
-	    start[member_index] = 0;
-	  }
-	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer+my_start, msg_size);
-	  return my_start;
-	}
-	else if (my_end >= msg_size) {
-	  start[member_index] = msg_size;
-	  if (start[member_index] == buffer_size) {
-	    start[member_index] = 0;
-	  }
-	  insert_in_map (member_index, index++, BEING_GENERATED, mrs[member_index]->buffer, msg_size);
-	  return 0;
-	}
-	else {
-	  return -1;
-	}
-      }
-    }
-
-  template <int N>
-  void derecho_group<N>::send () {
-    static long long int index = 0;
-    auto p = access_from_map(member_index, index, BEING_GENERATED);
-    erase_from_map (member_index, index, BEING_GENERATED);
-    insert_in_map (member_index, index, GENERATED, p.first, p.second);
-    ++index;
-  }
-
-  template <int N>
-  void derecho_group<N>::insert_in_map (int sender_id, long long int index, int msg_status, char *buf, long long int size) {
-    map_mtx.lock();
-    msg_info [std::tuple<int, long long int, int> (sender_id, index, msg_status)] = std::pair <char*, long long int> (buf, size);
-    map_mtx.unlock();
-  }
-
-  
-  template <int N>
-  pair <char*, long long int> derecho_group<N>::access_from_map (int sender_id, long long int index, int msg_status) {
-    map_mtx.lock();
-    auto p = msg_info[std::tuple<int, long long int, int> (sender_id, index, msg_status)];
-    map_mtx.unlock();
-    return p;
-  }
-  
-  template <int N>
-  void derecho_group<N>::erase_from_map (int sender_id, long long int index, int msg_status) {
-    map_mtx.lock();
-    msg_info.erase (std::tuple<int, long long int, int> (sender_id, index, msg_status));
-    map_mtx.unlock();
-  }
-
-  template <int N>
-  bool derecho_group<N>::search_in_map (int sender_id, long long int index, int msg_status) {
-    map_mtx.lock();
-    bool found = (msg_info.find (std::tuple<int, long long int, int> (sender_id, index, msg_status)) != msg_info.end());
-    map_mtx.unlock();
-    return found;
-  }
 }
 #endif /* DERECHO_GROUP_H */
