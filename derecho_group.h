@@ -60,8 +60,7 @@ namespace derecho {
     // binomial pipeline by default
     rdmc::send_algorithm type;
     int window_size;
-    // callbacks for message send/recv and stability
-    message_callback local_stability_callback;
+    // callback for when a message is globally stable
     message_callback global_stability_callback;
 
     // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
@@ -71,13 +70,14 @@ namespace derecho {
     vector <std::unique_ptr<char[]> > buffers;
     // memory regions wrapping the buffers for RDMA ops
     vector <std::shared_ptr<rdma::memory_region> > mrs;
-
+    
     // index to be used the next time get_position is called
     // when next_message is not none, then next_message.index = future_message_index-1
     long long int future_message_index = 0;
     // next_message is the message that will be sent when send is called the next time
     // it is boost::none when there is no message to send
     boost::optional <msg_info> next_message;
+    std::vector <long long int> msg_nums;
     std::queue <msg_info> pending_sends;
     std::map <long long int, msg_info> locally_stable_messages;
     std::mutex msg_state_mtx;
@@ -86,7 +86,7 @@ namespace derecho {
 
   public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback local_stability_callback, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, _window_size = 3);
     // get a position in the buffer before sending
     char* get_position (long long int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
