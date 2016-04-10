@@ -46,7 +46,7 @@ int main () {
   auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Received a message" << endl;};
   auto k1_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
-  derecho::derecho_group<2> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
 
   cout << "Derecho group created" << endl;
 

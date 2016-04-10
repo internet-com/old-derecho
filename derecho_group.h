@@ -4,6 +4,7 @@
 #include <functional>
 #include <boost/optional.hpp>
 #include <mutex>
+#include <condition_variable>
 #include <tuple>
 #include <map>
 #include <set>
@@ -81,12 +82,14 @@ namespace derecho {
     std::queue <msg_info> pending_sends;
     std::map <long long int, msg_info> locally_stable_messages;
     std::mutex msg_state_mtx;
+    std::condition_variable derecho_cv;
 
-    sst::SST_writes<Row> *sst;    
+    sst::SST<Row, Mode::Writes> *sst;    
 
+    void send_loop ();
   public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, int _window_size = 3);
     // get a position in the buffer before sending
     char* get_position (long long int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
