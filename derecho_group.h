@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <queue>
+#include <vector>
 #include <cassert>
 #include <memory>
 
@@ -84,7 +85,7 @@ namespace derecho {
     std::mutex msg_state_mtx;
     std::condition_variable derecho_cv;
 
-    sst::SST<Row, Mode::Writes> *sst;    
+    sst::SST<Row, sst::Mode::Writes> *sst;    
 
     void send_loop ();
   public:

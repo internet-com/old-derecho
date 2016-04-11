@@ -1,5 +1,7 @@
 #include "derecho_group.h"
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 using std::vector;
 using std::map;
@@ -33,7 +35,7 @@ namespace derecho {
       start[i] = end[i] = 0;
     }
 
-    index.resize(num_members, -1);
+    msg_nums.resize(num_members, -1);
     // rotated list of members - used for creating n internal RDMC groups
     vector <uint32_t> rotated_members (num_members);
 
@@ -62,14 +64,14 @@ namespace derecho {
 			   [this, i](char *data, size_t size) {
 			     {
 			       lock_guard <mutex> lock (msg_state_mtx);
-			       msg_num[i]++;
-			       locally_stable_messages[msg_num[i]*num_members + i] = {i, msg_num[i], data-buffers[i].get(), size};
-			       vector<long long int>::iterator min_it = std::min_element(std::begin(msg_num), std::end(msg_num));
-			       int index = std::distance(std::begin(msg_num), min_it);
+			       msg_nums[i]++;
+			       locally_stable_messages[msg_nums[i]*num_members + i] = {i, msg_nums[i], data-buffers[i].get(), size};
+			       vector<long long int>::iterator min_it = std::min_element(std::begin(msg_nums), std::end(msg_nums));
+			       int index = std::distance(std::begin(msg_nums), min_it);
 			       long long int new_seq_num = *min_it * num_members + index;
 			       if (new_seq_num > (*sst)[member_index].seq_num) {
 				 (*sst)[member_index].seq_num = new_seq_num;
-				 sst->put (0, sizeof (new_seq_num));
+				 sst->put (offsetof (Row, seq_num), sizeof (new_seq_num));
 				 // sst->put ();
 			       }
 			     }
@@ -85,14 +87,14 @@ namespace derecho {
 			   },
 			   [this, i](char *data, size_t size) {
 			     unique_lock <mutex> lock (msg_state_mtx);
-			     msg_num[i]++;
-			     locally_stable_messages[msg_num[i]*num_members + i] = {i, msg_num[i], data-buffers[i].get(), size};
-			     vector<long long int>::iterator min_it = std::min_element(std::begin(msg_num), std::end(msg_num));
-			     int index = std::distance(std::begin(msg_num), min_it);
+			     msg_nums[i]++;
+			     locally_stable_messages[msg_nums[i]*num_members + i] = {i, msg_nums[i], data-buffers[i].get(), size};
+			     vector<long long int>::iterator min_it = std::min_element(std::begin(msg_nums), std::end(msg_nums));
+			     int index = std::distance(std::begin(msg_nums), min_it);
 			     long long int new_seq_num = (*min_it + 1) * num_members + index;
 			     if (new_seq_num > (*sst)[member_index].seq_num) {
 			       (*sst)[member_index].seq_num = new_seq_num;
-			       sst->put (offset (Row, seq_num), sizeof (new_seq_num));
+			       sst->put (offsetof (Row, seq_num), sizeof (new_seq_num));
 			       // sst->put ();
 			     }
 			   },
@@ -101,7 +103,7 @@ namespace derecho {
     }
     
     // create the SST writes table
-    sst = new sst::SST<Row, Mode::Writes> (members, node_rank);
+    sst = new sst::SST<Row, sst::Mode::Writes> (members, node_rank);
     for (int i = 0; i < num_members; ++i) {
       (*sst)[i].seq_num = -1;
       (*sst)[i].stable_num = -1;
@@ -109,35 +111,35 @@ namespace derecho {
     sst->put();
     sst->sync_with_members();
 
-    auto stability_pred = [this, i] (sst::SST_writes <Row> *sst) {
+    auto stability_pred = [this] (const sst::SST <Row, sst::Mode::Writes> & sst) {
       return true;
     };
-    auto stability_trig = [this, i] (sst::SST_writes <Row> *sst) {
+    auto stability_trig = [this] (sst::SST <Row, sst::Mode::Writes> & sst) {
       // compute the min of the seq_num
-      long long int min_seq_num = (*sst)[0].seq_num;
+      long long int min_seq_num = sst[0].seq_num;
       for (int i = 0; i < num_members; ++i) {
-	if ((*sst)[i].seq_num < min_seq_num) {
-	  min_seq_num = (*sst)[i].seq_num;
+	if (sst[i].seq_num < min_seq_num) {
+	  min_seq_num = sst[i].seq_num;
 	}
       }
-      if ((*sst)[member_index].stable_num > min_seq_num) {
-	(*sst)[member_index].stable_num = min_seq_num;
-	sst->put (offsetof (Row, stable_num), sizeof (min_seq_num));
+      if (sst[member_index].stable_num > min_seq_num) {
+	sst[member_index].stable_num = min_seq_num;
+	sst.put (offsetof (Row, stable_num), sizeof (min_seq_num));
 	// sst->put ();
       }
     };
     sst->predicates.insert (stability_pred, stability_trig, sst::PredicateType::RECURRENT);
 
-    auto delivery_pred = [this] (sst::SST_writes <Row> *sst) {
+    auto delivery_pred = [this] (const sst::SST <Row, sst::Mode::Writes> & sst) {
       return true;
     };
-    auto delivery_trig = [this] (sst::SST_writes <Row> *sst) {
+    auto delivery_trig = [this] (sst::SST <Row, sst::Mode::Writes> & sst) {
       unique_lock <mutex> lock (msg_state_mtx);
       // compute the min of the stable_num
-      long long int min_stable_num = (*sst)[0].stable_num;
+      long long int min_stable_num = sst[0].stable_num;
       for (int i = 0; i < num_members; ++i) {
-	if ((*sst)[i].stable_num < min_stable_num) {
-	  min_stable_num = (*sst)[i].stable_num;
+	if (sst[i].stable_num < min_stable_num) {
+	  min_stable_num = sst[i].stable_num;
 	}
       }
 
@@ -146,19 +148,20 @@ namespace derecho {
 	if (least_undelivered_seq_num <= min_stable_num) {
 	  msg_info msg = locally_stable_messages.begin()->second;
 	  global_stability_callback (msg.sender_id, msg.index, buffers[msg.sender_id].get() + msg.offset, msg.size);
+	  locally_stable_messages.erase (locally_stable_messages.begin());
 	}
       }
     };
     sst->predicates.insert (delivery_pred, delivery_trig, sst::PredicateType::RECURRENT);
 
     // start derecho thread
-    thread derecho(&derecho_group::send_loop, this);
+    std::thread derecho(&derecho_group::send_loop, this);
   }
 
   void derecho_group::send_loop () {
     while (true) {
       unique_lock <mutex> lock (msg_state_mtx);
-      derecho_cv.wait (lock, [] {return true;});
+      derecho_cv.wait_for (lock, std::chrono::milliseconds(10), [] {return true;});
       if (!pending_sends.empty()) {
 	msg_info msg = pending_sends.front ();
 	if (locally_stable_messages.find ((msg.index-1)*num_members + member_index) != locally_stable_messages.end()) {

@@ -43,19 +43,18 @@ int main () {
   long long int buffer_size = 100;
   long long int block_size = 10;
 
-  auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Received a message" << endl;};
-  auto k1_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
+  auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 
   if (node_rank == 0) {
     int msg_size = 50;
-    long long int pos = g.get_position (msg_size);
-    cout << "pos is " << pos << endl;
+    char* buf = g.get_position (msg_size);
+    cout << "buf is " << buf << endl;
     for (int i = 0; i < msg_size; ++i) {
-      g.buffers[node_rank][i] = 'a';
+      buf[i] = 'a';
     }
     cout << "Calling send" << endl;
     g.send();
