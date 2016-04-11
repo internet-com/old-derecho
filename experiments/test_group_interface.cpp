@@ -40,8 +40,8 @@ int main () {
     members[i] = i;
   }
 
-  long long int buffer_size = 100;
-  long long int block_size = 10;
+  long long unsigned int buffer_size = 100;
+  long long unsigned int block_size = 10;
 
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
@@ -52,7 +52,6 @@ int main () {
   if (node_rank == 0) {
     int msg_size = 50;
     char* buf = g.get_position (msg_size);
-    cout << "buf is " << buf << endl;
     for (int i = 0; i < msg_size; ++i) {
       buf[i] = 'a';
     }
@@ -61,7 +60,9 @@ int main () {
     cout << "send call finished" << endl;
   }
   while (true) {
-    
+    int n;
+    cin >> n;
+    g.sst_print();
   }
   
   return 0;

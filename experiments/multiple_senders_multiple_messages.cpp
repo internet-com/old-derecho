@@ -22,8 +22,6 @@ using std::cin;
 using std::vector;
 
 int main () {
-  const int N = 4;
-  
   srand(time(NULL));
   
   uint32_t node_rank;
@@ -48,28 +46,24 @@ int main () {
   }
 
   
-  long long int buffer_size = 10000;
-  long long int block_size = 10;
+  long long unsigned int buffer_size = 10000;
+  long long unsigned int block_size = 10;
 
   int num_messages = 1000;
   
-  auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-  };
-  auto k1_callback = [&] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "k0_callback: " << index << endl;
-  };
+  auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Sender: " << sender_id << ", index: " << index << endl;};
   
-  derecho::derecho_group<N> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
 
   for (int i = 0; i < num_messages; ++i) {
     // random message size between 1 and 100
-    int msg_size = (rand()%7 + 2) * 10;
-    long long int pos = g.get_position (msg_size);
-    while (pos < 0) {
-      pos = g.get_position (msg_size);
+    unsigned int msg_size = (rand()%7 + 2) * 10;
+    char *buf = g.get_position (msg_size);
+    while (!buf) {
+      buf= g.get_position (msg_size);
     }
-    for (int j = 0; j < msg_size; ++j) {
-      g.buffers[node_rank][pos+j] = 'a'+i;
+    for (unsigned int j = 0; j < msg_size; ++j) {
+      buf[j] = 'a'+i;
     }
     g.send();
   }

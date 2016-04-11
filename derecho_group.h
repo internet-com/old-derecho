@@ -35,13 +35,14 @@ namespace derecho {
   struct Row {
     long long int seq_num;
     long long int stable_num;
+    long long int delivered_num;
   };
 
   struct msg_info {
     int sender_id;
     long long int index;
-    long long int offset;
-    long long int size;
+    long long unsigned int offset;
+    long long unsigned int size;
   };
   
   // combines sst and rdmc to give an abstraction of a group where anyone can send
@@ -55,18 +56,18 @@ namespace derecho {
     int member_index;
     // block size used for message transfer
     // we keep it simple; one block size for messages from all senders
-    long long int block_size;
+    long long unsigned int block_size;
     // size of the circular buffer
-    long long int buffer_size;
+    long long unsigned int buffer_size;
     // send algorithm for constructing a multicast from point-to-point unicast
     // binomial pipeline by default
     rdmc::send_algorithm type;
-    int window_size;
+    unsigned int window_size;
     // callback for when a message is globally stable
     message_callback global_stability_callback;
 
     // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
-    vector <long long int> start, end;
+    vector <long long unsigned int> start, end;
     
     // buffers to store incoming/outgoing messages
     vector <std::unique_ptr<char[]> > buffers;
@@ -81,6 +82,7 @@ namespace derecho {
     boost::optional <msg_info> next_message;
     std::vector <long long int> msg_nums;
     std::queue <msg_info> pending_sends;
+    std::queue <msg_info> sends_in_pipeline;
     std::map <long long int, msg_info> locally_stable_messages;
     std::mutex msg_state_mtx;
     std::condition_variable derecho_cv;
@@ -90,12 +92,14 @@ namespace derecho {
     void send_loop ();
   public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long int _buffer_size, long long int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, int _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
     // get a position in the buffer before sending
-    char* get_position (long long int msg_size);
+    char* get_position (long long unsigned int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
+
+    void sst_print ();
   };
 }
 #endif /* DERECHO_GROUP_H */
