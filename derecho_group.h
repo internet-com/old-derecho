@@ -80,10 +80,11 @@ namespace derecho {
     // next_message is the message that will be sent when send is called the next time
     // it is boost::none when there is no message to send
     boost::optional <msg_info> next_message;
-    std::vector <long long int> msg_nums;
+    // last_received_messages[i] is the largest index of the message received from sender i
+    std::vector <long long int> last_received_messages;
     std::queue <msg_info> pending_sends;
-    std::queue <msg_info> sends_in_pipeline;
     std::map <long long int, msg_info> locally_stable_messages;
+    long long int next_message_to_deliver = 0;
     std::mutex msg_state_mtx;
     std::condition_variable derecho_cv;
 
