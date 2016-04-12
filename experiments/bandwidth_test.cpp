@@ -18,8 +18,6 @@ using std::cin;
 using std::vector;
 
 int main (int argc, char *argv[]) {
-  const int N = 4;
-  
   srand(time(NULL));
   
   uint32_t node_rank;
@@ -43,32 +41,30 @@ int main (int argc, char *argv[]) {
     members[i] = i;
   }
 
-  long long int buffer_size = atoll(argv[1]);
-  long long int block_size = atoll(argv[2]);
+  long long unsigned int buffer_size = atoll(argv[1]);
+  long long unsigned int block_size = atoll(argv[2]);
 
-  long long int msg_size = atoll(argv[3]);
+  long long unsigned int msg_size = atoll(argv[3]);
   cout << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
   int num_messages = 1000;
   
   bool done = false;
-  auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-  };
-  auto k1_callback = [&num_messages, &done] (int sender_id, long long int index, char *buf, long long int msg_size) {
+  auto stability_callback = [&num_messages, &done] (int sender_id, long long int index, char *buf, long long int msg_size) {
     if (index == num_messages-1) {
       cout << "Done" << endl;
       done = true;
     }
   };
   
-  derecho::derecho_group<N> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
 
   struct timespec start_time;
   // start timer
   clock_gettime(CLOCK_REALTIME, &start_time);
   for (int i = 0; i < num_messages; ++i) {
-    long long int pos = g.get_position (msg_size);
-    while (pos < 0) {
-      pos = g.get_position (msg_size);
+    char* buf = g.get_position (msg_size);
+    while (!buf) {
+      buf = g.get_position (msg_size);
     }
     g.send();
   }
