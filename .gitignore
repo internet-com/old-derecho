@@ -32,3 +32,5 @@ scripts/
 /experiments/rdmc_test
 /experiments/data_bw_tests.html
 /experiments/data_bw_tests.org
+/experiments/derecho_bw_test
+/experiments/rdmc_bw_test

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <time.h>
 
@@ -16,6 +17,26 @@ using std::cout;
 using std::endl;
 using std::cin;
 using std::vector;
+
+size_t get_block_size (long long int msg_size) {
+  switch (msg_size) {
+  case 100:
+  case 1000:
+    return msg_size;
+  case 10000:
+    return 5000;
+  case 100000:
+  case 1000000:
+    return 100000;
+  case 10000000:
+  case 100000000:
+  case 1000000000:
+    return 1000000;
+  default:
+    cout << "Not handled" << endl;
+    exit (0);
+  }
+}
 
 int main (int argc, char *argv[]) {
   srand(time(NULL));
@@ -40,11 +61,16 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
+  
+  // -_- -_- -_- -_- -_-
+  vector<int> sst_members (num_nodes);
+  for (int i = 0; i < (int)num_nodes; ++i) {
+    sst_members[i] = i;
+  }
 
-  long long unsigned int buffer_size = atoll(argv[1]);
-  long long unsigned int block_size = atoll(argv[2]);
-
-  long long unsigned int msg_size = atoll(argv[3]);
+  long long unsigned int msg_size = atoll(argv[1]);
+  long long unsigned int block_size = get_block_size (msg_size);
+  long long unsigned int buffer_size = msg_size * 10;
   cout << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
   int num_messages = 1000;
   
@@ -74,12 +100,21 @@ int main (int argc, char *argv[]) {
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
-  cout << (msg_size * (long long int) num_messages * (long long int) 8 + 0.0)/nanoseconds_elapsed << endl;
+  double bw = (msg_size * (long long int) num_messages * (long long int) 8 + 0.0)/nanoseconds_elapsed;
+  struct Result {
+    double bw;
+  };
+  sst::SST<Result, sst::Mode::Writes> *sst = new sst::SST<Result, sst::Mode::Writes> (sst_members, node_rank);
+  (*sst)[node_rank].bw = bw;
+  sst->put();
+  sst->sync_with_members();
+  double total_bw = 0.0;
   for (unsigned int i = 0; i < num_nodes; ++i) {
-    if (i != node_rank) {
-      sst::tcp::sync (members[i]);
-    }
+    total_bw += (*sst)[i].bw;
   }
-  cout << "Exiting" << endl;
-  return 0;
+  std::ofstream fout;
+  std::string filename = "data_derecho_bw";
+  fout.open(filename, std::ofstream::app);
+  fout << msg_size << " " << total_bw << endl;
+  fout.close();  
 }

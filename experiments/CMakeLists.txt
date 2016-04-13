@@ -19,10 +19,10 @@ target_link_libraries(single_sender_multiple_messages rdmacm ibverbs boost_syste
 add_executable(multiple_senders_multiple_messages multiple_senders_multiple_messages.cpp ../derecho_group.cpp)
 target_link_libraries(multiple_senders_multiple_messages rdmacm ibverbs boost_system rt pthread rdmc sst)
 
-# bandwidth_test
-add_executable(bandwidth_test bandwidth_test.cpp ../derecho_group.cpp)
-target_link_libraries(bandwidth_test rdmacm ibverbs boost_system rt pthread rdmc sst)
+# derecho_bw_test
+add_executable(derecho_bw_test derecho_bw_test.cpp ../derecho_group.cpp)
+target_link_libraries(derecho_bw_test rdmacm ibverbs boost_system rt pthread rdmc sst)
 
-# rdmc_test
-add_executable(rdmc_test rdmc_test.cpp ../derecho_group.cpp)
-target_link_libraries(rdmc_test rdmacm ibverbs boost_system rt pthread rdmc sst)
+# rdmc_bw_test
+add_executable(rdmc_bw_test rdmc_bw_test.cpp ../derecho_group.cpp)
+target_link_libraries(rdmc_bw_test rdmacm ibverbs boost_system rt pthread rdmc sst)
