@@ -34,3 +34,8 @@ scripts/
 /experiments/data_bw_tests.org
 /experiments/derecho_bw_test
 /experiments/rdmc_bw_test
+/experiments/bw_script.sh
+/experiments/bw_tests.gpt
+/experiments/bw_tests.png
+/experiments/data_derecho_bw
+/experiments/data_rdmc_bw

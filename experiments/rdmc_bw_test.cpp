@@ -24,6 +24,7 @@ std::map <uint32_t, std::string> node_addresses;
 
 size_t get_block_size (long long int msg_size) {
   switch (msg_size) {
+  case 10:
   case 100:
   case 1000:
     return msg_size;
@@ -128,7 +129,7 @@ int main (int argc, char *argv[]) {
     total_bw += (*sst)[i].bw;
   }
   std::ofstream fout;
-  std::string filename = "data_derecho_bw";
+  std::string filename = "data_rdmc_bw";
   fout.open(filename, std::ofstream::app);
   fout << msg_size << " " << total_bw << endl;
   fout.close();  

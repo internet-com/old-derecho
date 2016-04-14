@@ -20,6 +20,7 @@ using std::vector;
 
 size_t get_block_size (long long int msg_size) {
   switch (msg_size) {
+  case 10:
   case 100:
   case 1000:
     return msg_size;
