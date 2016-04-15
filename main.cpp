@@ -6,6 +6,7 @@
 #include "rdmc/microbenchmarks.h"
 #include "rdmc/group_send.h"
 #include "sst/sst.h"
+#include "sst/predicates.h"
 #include "sst/tcp.h"
 
 #include <atomic>
@@ -31,7 +32,7 @@ using sst::tcp::tcp_initialize;
 using sst::tcp::sync;
 uint32_t node_rank;
 uint32_t num_nodes;
-vector<string> node_addresses;
+map <uint32_t, string> node_addresses;
 
 struct Row {
   volatile bool done [1000];
@@ -45,7 +46,7 @@ int main () {
   rdmc::initialize(node_addresses, node_rank);
 
   // initialize tcp connections
-  tcp_initialize(num_nodes, node_rank, node_addresses);
+  tcp_initialize(node_rank, node_addresses);
     
   // initialize the rdma resources
   sst::verbs_initialize();
@@ -76,7 +77,7 @@ int main () {
     sst_members[i] = i;
   }
   // create a new shared state table with all the members
-  SST_writes<Row> *sst = new SST_writes<Row> (sst_members, node_rank);
+  SST<Row, Mode::Writes> *sst = new SST<Row, Mode::Writes> (sst_members, node_rank);
 
   for (int i = 0; i < 1000; ++i) {
     (*sst)[node_rank].done[i] = false;
@@ -110,7 +111,7 @@ int main () {
 			 [](optional<uint32_t>){});
   send_groups.emplace(send_params, 0);
   
-  auto f = [&] (SST_writes <Row> *sst) {
+  auto f = [&] (const SST<Row, Mode::Writes> &sst) {
     cout << "In predicate : " << endl;
     cout << "cur_msg is : " << cur_msg << endl;
     cout << endl;
@@ -118,14 +119,14 @@ int main () {
       return true;
     }
     for (uint16_t i = 0; i < num_nodes; ++i) {
-      if ((*sst)[i].done[cur_msg-num_out] != true) {
+      if (sst[i].done[cur_msg-num_out] != true) {
 	return false;
       }
     }
     return true;
   };
 
-  auto g = [&] (SST_writes <Row> *sst) {
+  auto g = [&] (SST<Row, Mode::Writes> &sst) {
     cout << "In trigger : " << endl;
     cout << "cur_msg is : " << cur_msg << endl;
     cout << endl;
@@ -134,19 +135,19 @@ int main () {
     // send the message
     rdmc::send(group_number, mr, msg_size*(cur_msg%10), msg_size);
     // done is set to true upon completion
-    while (!(*sst)[node_rank].done[cur_msg]) {
+    while (!sst[node_rank].done[cur_msg]) {
     }
     if (cur_msg == 1000) {
       while (true) {
 	bool complete = true;
 	for (uint16_t i = 0; i < num_nodes; ++i) {
-	  complete = complete & (*sst)[i].done[cur_msg-1];
+	  complete = complete & sst[i].done[cur_msg-1];
 	}
 	if (complete) {
 	  break;
 	}
       }
-      sst->sync_with_members();
+      sst.sync_with_members();
       rdmc::shutdown();
     }
   };

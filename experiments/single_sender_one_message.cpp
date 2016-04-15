@@ -27,7 +27,7 @@ int main () {
   
   uint32_t node_rank;
   uint32_t num_nodes;
-  vector<std::string> node_addresses;
+  map<uint32_t, std::string> node_addresses;
 
   query_addresses(node_addresses, node_rank);
   num_nodes = node_addresses.size();
@@ -36,7 +36,7 @@ int main () {
   rdmc::initialize(node_addresses, node_rank);
 
   // initialize tcp connections
-  sst::tcp::tcp_initialize(num_nodes, node_rank, node_addresses);
+  sst::tcp::tcp_initialize(node_rank, node_addresses);
   
   // initialize the rdma resources
   sst::verbs_initialize();
@@ -47,29 +47,27 @@ int main () {
   }
 
   
-  long long int buffer_size = 100;
-  long long int block_size = 10;
+  long long unsigned int buffer_size = 100;
+  long long unsigned int block_size = 10;
 
-  auto k0_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "Received a message" << endl;
+  auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
+    cout << "Delivered a message" << endl;
     cout << "The message is:" << endl;
     for (int i = 0; i < msg_size; ++i) {
       cout << buf[i];
     }
     cout << endl;
   };
-  auto k1_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
-  derecho::derecho_group<2> g (members, node_rank, buffer_size, block_size, k0_callback, k1_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 
   if (node_rank == 0) {
-    int msg_size = 10;
-    long long int pos = g.get_position (msg_size);
-    cout << "pos is " << pos << endl;
-    for (int i = 0; i < msg_size; ++i) {
-      g.buffers[node_rank][pos+i] = rand ()%26 + 'a';
+    unsigned int msg_size = 10;
+    char* buf = g.get_position (msg_size);
+    for (unsigned int i = 0; i < msg_size; ++i) {
+      buf[i] = rand ()%26 + 'a';
     }
     cout << "Calling send" << endl;
     g.send();
