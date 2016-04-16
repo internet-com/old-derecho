@@ -39,3 +39,8 @@ scripts/
 /experiments/bw_tests.png
 /experiments/data_derecho_bw
 /experiments/data_rdmc_bw
+/experiments/block_size.cpp~
+/experiments/block_size.h~
+/experiments/data_derecho_bw~
+/experiments/window_size_test.cpp~
+/experiments/window_size_test

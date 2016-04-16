@@ -20,9 +20,13 @@ add_executable(multiple_senders_multiple_messages multiple_senders_multiple_mess
 target_link_libraries(multiple_senders_multiple_messages rdmacm ibverbs boost_system rt pthread rdmc sst)
 
 # derecho_bw_test
-add_executable(derecho_bw_test derecho_bw_test.cpp ../derecho_group.cpp)
+add_executable(derecho_bw_test derecho_bw_test.cpp block_size.cpp ../derecho_group.cpp)
 target_link_libraries(derecho_bw_test rdmacm ibverbs boost_system rt pthread rdmc sst)
 
 # rdmc_bw_test
-add_executable(rdmc_bw_test rdmc_bw_test.cpp ../derecho_group.cpp)
+add_executable(rdmc_bw_test rdmc_bw_test.cpp block_size.cpp ../derecho_group.cpp)
 target_link_libraries(rdmc_bw_test rdmacm ibverbs boost_system rt pthread rdmc sst)
+
+# window_size_test
+add_executable(window_size_test window_size_test.cpp block_size.cpp ../derecho_group.cpp)
+target_link_libraries(window_size_test rdmacm ibverbs boost_system rt pthread rdmc sst)

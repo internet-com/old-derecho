@@ -12,6 +12,7 @@
 #include "../rdmc/group_send.h"
 #include "../sst/sst.h"
 #include "../sst/verbs.h"
+#include "block_size.h"
 
 using std::cout;
 using std::endl;
@@ -21,27 +22,6 @@ using std::vector;
 uint32_t node_rank;
 uint32_t num_nodes;
 std::map <uint32_t, std::string> node_addresses;
-
-size_t get_block_size (long long int msg_size) {
-  switch (msg_size) {
-  case 10:
-  case 100:
-  case 1000:
-    return msg_size;
-  case 10000:
-    return 5000;
-  case 100000:
-  case 1000000:
-    return 100000;
-  case 10000000:
-  case 100000000:
-  case 1000000000:
-    return 1000000;
-  default:
-    cout << "Not handled" << endl;
-    exit (0);
-  }
-}
 
 int main (int argc, char *argv[]) {
   query_addresses(node_addresses, node_rank);

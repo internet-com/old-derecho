@@ -50,8 +50,9 @@ int main (int argc, char *argv[]) {
   }
 
   long long unsigned int msg_size = atoll(argv[1]);
+  unsigned int window_size = atoll(argv[2]);
   long long unsigned int block_size = get_block_size (msg_size);
-  long long unsigned int buffer_size = msg_size * 10;
+  long long unsigned int buffer_size = msg_size * window_size;
   cout << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
   int num_messages = 1000;
   
@@ -63,7 +64,7 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback, rdmc::BINOMIAL_SEND, window_size);
 
   struct timespec start_time;
   // start timer
@@ -94,8 +95,8 @@ int main (int argc, char *argv[]) {
     total_bw += (*sst)[i].bw;
   }
   std::ofstream fout;
-  std::string filename = "data_derecho_bw";
+  std::string filename = "data_window_size";
   fout.open(filename, std::ofstream::app);
-  fout << msg_size << " " << total_bw << endl;
+  fout << msg_size << " " << window_size << " " << total_bw << endl;
   fout.close();  
 }
