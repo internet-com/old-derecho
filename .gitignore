@@ -35,4 +35,11 @@ scripts/
 /experiments/window_size_test
 /experiments/simple_ssd_write
 /experiments/write_to_ssd
-/experiments/simple_ssd_write_fcntl
+/experiments/data_batching_10
+/experiments/data_batching_100
+/experiments/data_batching_1000
+/experiments/data_batching_10000
+/experiments/data_batching_100000
+/experiments/data_batching_1000000
+/experiments/data_batching_10000000
+/experiments/data_batching_100000000
