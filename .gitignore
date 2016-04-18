@@ -46,3 +46,5 @@ scripts/
 /experiments/data_rdmc_bw_100
 /experiments/data_rdmc_bw~
 /experiments/window_size_test
+/experiments/simple_ssd_write
+/experiments/write_to_ssd
