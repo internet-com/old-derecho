@@ -26,8 +26,6 @@ target_link_libraries(derecho_bw_test rdmacm ibverbs boost_system rt pthread rdm
 # rdmc_bw_test
 add_executable(rdmc_bw_test rdmc_bw_test.cpp ../derecho_group.cpp)
 target_link_libraries(rdmc_bw_test rdmacm ibverbs boost_system rt pthread rdmc sst)
-<<<<<<< Updated upstream
-=======
 
 # window_size_test
 add_executable(window_size_test window_size_test.cpp block_size.cpp ../derecho_group.cpp)
@@ -36,4 +34,3 @@ target_link_libraries(window_size_test rdmacm ibverbs boost_system rt pthread rd
 # write_to_ssd
 add_executable(write_to_ssd write_to_ssd.cpp block_size.cpp ../derecho_group.cpp)
 target_link_libraries(write_to_ssd rdmacm ibverbs boost_system rt pthread rdmc sst)
->>>>>>> Stashed changes
