@@ -43,3 +43,4 @@ scripts/
 /experiments/data_batching_1000000
 /experiments/data_batching_10000000
 /experiments/data_batching_100000000
+/experiments/simple_ssd_write_fcntl

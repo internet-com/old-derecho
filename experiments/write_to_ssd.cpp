@@ -4,15 +4,10 @@
 #include <time.h>
 
 #include "../derecho_group.h"
-#include "../rdmc/util.h"
-#include "../rdmc/message.h"
-#include "../rdmc/verbs_helper.h"
-#include "../rdmc/rdmc.h"
-#include "../rdmc/microbenchmarks.h"
-#include "../rdmc/group_send.h"
-#include "../sst/sst.h"
-#include "../sst/tcp.h"
 #include "block_size.h"
+#include "aggregate_bandwidth.h"
+#include "log_results.h"
+#include "initialize.h"
 
 using std::cout;
 using std::endl;
@@ -24,31 +19,14 @@ int main (int argc, char *argv[]) {
   
   uint32_t node_rank;
   uint32_t num_nodes;
-  map<uint32_t, std::string> node_addresses;
-
-  query_addresses(node_addresses, node_rank);
-  num_nodes = node_addresses.size();
-
-  // initialize RDMA resources, input number of nodes, node rank and ip addresses and create TCP connections
-  rdmc::initialize(node_addresses, node_rank);
-
-  // initialize tcp connections
-  sst::tcp::tcp_initialize(node_rank, node_addresses);
   
-  // initialize the rdma resources
-  sst::verbs_initialize();
+  initialize(node_rank, num_nodes);
   
   vector <int> members(num_nodes);
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
   
-  // -_- -_- -_- -_- -_-
-  vector<int> sst_members (num_nodes);
-  for (int i = 0; i < (int)num_nodes; ++i) {
-    sst_members[i] = i;
-  }
-
   long long unsigned int msg_size = atoll(argv[1]);
   long long unsigned int block_size = get_block_size (msg_size);
   long long unsigned int buffer_size = msg_size * 10;
@@ -86,21 +64,7 @@ int main (int argc, char *argv[]) {
   clock_gettime(CLOCK_REALTIME, &end_time);
   fssd.close();
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
-  double bw = (msg_size * (long long int) num_messages * (long long int) 8 + 0.0)/nanoseconds_elapsed;
-  struct Result {
-    double bw;
-  };
-  sst::SST<Result, sst::Mode::Writes> *sst = new sst::SST<Result, sst::Mode::Writes> (sst_members, node_rank);
-  (*sst)[node_rank].bw = bw;
-  sst->put();
-  sst->sync_with_members();
-  double total_bw = 0.0;
-  for (unsigned int i = 0; i < num_nodes; ++i) {
-    total_bw += (*sst)[i].bw;
-  }
-  std::ofstream fout;
-  std::string filename = "data_derecho_bw";
-  fout.open(filename, std::ofstream::app);
-  fout << msg_size << " " << total_bw << endl;
-  fout.close();  
+  double bw = (msg_size * num_messages * num_nodes * 8 + 0.0)/nanoseconds_elapsed;
+  double avg_bw = aggregate_bandwidth(members, node_rank, bw);  
+  log_results(msg_size, avg_bw, "data_ssd_bw");
 }

@@ -4,11 +4,15 @@
 #include <time.h>
 
 #include "../derecho_group.h"
+#include "../rdmc/rdmc.h"
 #include "block_size.h"
 #include "aggregate_bandwidth.h"
 #include "log_results.h"
 #include "initialize.h"
 
+using std::cout;
+using std::endl;
+using std::cin;
 using std::vector;
 
 int main (int argc, char *argv[]) {
@@ -16,7 +20,7 @@ int main (int argc, char *argv[]) {
   
   uint32_t node_rank;
   uint32_t num_nodes;
-  
+
   initialize(node_rank, num_nodes);
   
   vector <int> members(num_nodes);
@@ -25,18 +29,21 @@ int main (int argc, char *argv[]) {
   }
   
   long long unsigned int msg_size = atoll(argv[1]);
+  unsigned int window_size = atoll(argv[2]);
   long long unsigned int block_size = get_block_size (msg_size);
-  long long unsigned int buffer_size = msg_size * 10;
+  long long unsigned int buffer_size = msg_size * window_size;
+  cout << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
   int num_messages = 1000;
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
     if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+      cout << "Done" << endl;
       done = true;
     }
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback, rdmc::BINOMIAL_SEND, window_size);
 
   struct timespec start_time;
   // start timer
@@ -56,5 +63,15 @@ int main (int argc, char *argv[]) {
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
   double bw = (msg_size * num_messages * num_nodes * 8 + 0.0)/nanoseconds_elapsed;
   double avg_bw = aggregate_bandwidth(members, node_rank, bw);
-  log_results(msg_size, avg_bw, "data_derecho_bw");
+  struct params {
+    long long unsigned int msg_size;
+    unsigned int window_size;
+    double avg_bw;
+
+    void print(std::ofstream &fout) {
+      fout << msg_size << " " << window_size << " " << avg_bw << endl;
+    }
+  } t{msg_size, window_size, avg_bw};
+  log_results(t, "data_window_size");
+  return 0;
 }
