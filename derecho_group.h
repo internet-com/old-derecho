@@ -87,11 +87,17 @@ namespace derecho {
     long long int next_message_to_deliver = 0;
     std::mutex msg_state_mtx;
     std::condition_variable derecho_cv;
-
+    
+    vector <int> count;
+    int c = 0;
+    
     sst::SST<Row, sst::Mode::Writes> *sst;    
 
     void send_loop ();
   public:
+    vector <int> get_counter () {
+      return count;
+    }
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
     derecho_group (vector <int> _members, int node_rank, long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
     // get a position in the buffer before sending

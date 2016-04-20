@@ -51,6 +51,11 @@ int main (int argc, char *argv[]) {
   while (!done) {
     
   }
+  vector <int> count = g.get_counter();
+  for (unsigned int i = 0; i < count.size() && count[i] != 0; ++i) {
+    cout << count[i] << endl;
+  }
+  
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);

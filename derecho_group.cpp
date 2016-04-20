@@ -36,6 +36,8 @@ namespace derecho {
       start[i] = end[i] = 0;
     }
 
+    count.resize (num_members*1000, 0);
+    
     last_received_messages.resize(num_members, -1);
     // rotated list of members - used for creating n internal RDMC groups
     vector <uint32_t> rotated_members (num_members);
@@ -147,7 +149,8 @@ namespace derecho {
 
       if (!locally_stable_messages.empty()) {
 	long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
-	if (least_undelivered_seq_num <= min_stable_num) {
+        int local_count = 0;
+	while (least_undelivered_seq_num <= min_stable_num) {
 	  msg_info msg = locally_stable_messages.begin()->second;
 	  global_stability_callback (msg.sender_id, msg.index, buffers[msg.sender_id].get() + msg.offset, msg.size);
 	  if (msg.sender_id == member_index) {
@@ -156,10 +159,19 @@ namespace derecho {
 	      end[member_index] = 0;
 	    }
 	  }
-	  sst[member_index].delivered_num = least_undelivered_seq_num;
-	  sst.put (offsetof (Row, delivered_num), sizeof (least_undelivered_seq_num));
-	  // sst.put ();
 	  locally_stable_messages.erase (locally_stable_messages.begin());
+	  if (locally_stable_messages.empty()) {
+	    break;
+	  }
+	  least_undelivered_seq_num = locally_stable_messages.begin()->first;
+	  local_count++;
+	}
+	sst[member_index].delivered_num = min_stable_num;
+	sst.put (offsetof (Row, delivered_num), sizeof (least_undelivered_seq_num));
+	// sst.put ();
+	if (local_count > 0) {
+	  // cout << "Delivered " << count << " messages" << endl;
+	  count[c++] = local_count;
 	}
       }
     };
