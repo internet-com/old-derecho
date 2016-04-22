@@ -23,14 +23,16 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
-  
+
+  int window_size = 3;
   long long unsigned int msg_size = atoll(argv[1]);
   long long unsigned int block_size = get_block_size (msg_size);
-  long long unsigned int buffer_size = msg_size * 10;
+  long long unsigned int buffer_size = msg_size * window_size;
   int num_messages = 1000;
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
+    cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
     if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
       done = true;
     }
@@ -44,12 +46,15 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < num_messages; ++i) {
     char* buf = g.get_position (msg_size);
     while (!buf) {
+      cout << "in here" << endl;
       buf = g.get_position (msg_size);
     }
     g.send();
   }
   while (!done) {
-    
+    int n;
+    std::cin >> n;
+    g.print();
   }
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);

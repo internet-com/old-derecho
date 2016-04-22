@@ -271,11 +271,18 @@ namespace derecho {
     derecho_cv.notify_one();
   }
 
-  void derecho_group::sst_print () {
+  void derecho_group::print () {
     cout << "Printing SST" << endl;
     for (int i = 0; i < num_members; ++i) {
-      cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << endl;
+      cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << " " << (*sst)[i].delivered_num << endl;
     }
+    cout << endl;
+
+    cout << "Printing last_received_messages" << endl;
+    for (int i = 0; i < num_members; ++i) {
+      cout << last_received_messages[i] << " " << endl;
+    }
+    cout << endl;
   }
 }
 

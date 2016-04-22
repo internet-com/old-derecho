@@ -100,7 +100,7 @@ namespace derecho {
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
 
-    void sst_print ();
+    void print ();
   };
 }
 #endif /* DERECHO_GROUP_H */

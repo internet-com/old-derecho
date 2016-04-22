@@ -42,7 +42,7 @@ int main () {
   while (true) {
     int n;
     cin >> n;
-    g.sst_print();
+    g.print();
   }
   
   return 0;
