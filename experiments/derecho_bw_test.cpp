@@ -46,15 +46,11 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < num_messages; ++i) {
     char* buf = g.get_position (msg_size);
     while (!buf) {
-      cout << "in here" << endl;
       buf = g.get_position (msg_size);
     }
     g.send();
   }
   while (!done) {
-    int n;
-    std::cin >> n;
-    g.print();
   }
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
