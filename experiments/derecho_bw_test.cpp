@@ -23,10 +23,9 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
-  
+
   long long unsigned int msg_size = atoll(argv[1]);
   long long unsigned int block_size = get_block_size (msg_size);
-  long long unsigned int buffer_size = msg_size * 10;
   int num_messages = 1000;
   
   bool done = false;
@@ -36,7 +35,7 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, msg_size, block_size, stability_callback);
 
   struct timespec start_time;
   // start timer
@@ -51,15 +50,15 @@ int main (int argc, char *argv[]) {
   while (!done) {
     
   }
-  vector <int> count = g.get_counter();
-  for (unsigned int i = 0; i < count.size() && count[i] != 0; ++i) {
-    cout << count[i] << endl;
-  }
-  
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
   double bw = (msg_size * num_messages * num_nodes * 8 + 0.0)/nanoseconds_elapsed;
   double avg_bw = aggregate_bandwidth(members, node_rank, bw);
   log_results(msg_size, avg_bw, "data_derecho_bw");
+  
+  vector <int> count = g.get_counter();
+  for (unsigned int i = 0; i < count.size() && count[i] != 0; ++i) {
+    cout << count[i] << endl;
+  }
 }
