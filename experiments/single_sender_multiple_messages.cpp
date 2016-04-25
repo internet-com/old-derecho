@@ -35,7 +35,7 @@ int main () {
     cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is stable " << endl;
   };
   
-  derecho::derecho_group g (members, node_rank, max_msg_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, max_msg_size, stability_callback, block_size);
 
   int num_messages = 100;
   if (node_rank == 0) {

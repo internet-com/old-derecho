@@ -41,7 +41,7 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::derecho_group g (members, node_rank, msg_size, block_size, stability_callback, rdmc::BINOMIAL_SEND, window_size);
+  derecho::derecho_group g (members, node_rank, msg_size, stability_callback, block_size, window_size);
 
   struct timespec start_time;
   // start timer

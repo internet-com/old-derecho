@@ -30,13 +30,13 @@ int main (int argc, char *argv[]) {
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    // cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+    cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
     if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
       done = true;
     }
   };
   
-  derecho::derecho_group g (members, node_rank, msg_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, msg_size, stability_callback, block_size);
   
   struct timespec start_time;
   // start timer
