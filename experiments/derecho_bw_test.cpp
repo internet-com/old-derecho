@@ -24,10 +24,8 @@ int main (int argc, char *argv[]) {
     members[i] = i;
   }
 
-  int window_size = 3;
   long long unsigned int msg_size = atoll(argv[1]);
   long long unsigned int block_size = get_block_size (msg_size);
-  long long unsigned int buffer_size = msg_size * window_size;
   int num_messages = 1000;
   
   bool done = false;
@@ -38,8 +36,8 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
-
+  derecho::derecho_group g (members, node_rank, msg_size, block_size, stability_callback);
+  
   struct timespec start_time;
   // start timer
   clock_gettime(CLOCK_REALTIME, &start_time);

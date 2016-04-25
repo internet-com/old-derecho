@@ -29,7 +29,7 @@ int main () {
   }
 
   
-  long long unsigned int buffer_size = 100;
+  long long unsigned int max_msg_size = 100;
   long long unsigned int block_size = 10;
 
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
@@ -41,7 +41,7 @@ int main () {
     cout << endl;
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::derecho_group g (members, node_rank, max_msg_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 
