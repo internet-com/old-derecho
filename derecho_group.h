@@ -57,8 +57,8 @@ namespace derecho {
     // block size used for message transfer
     // we keep it simple; one block size for messages from all senders
     long long unsigned int block_size;
-    // size of the circular buffer
-    long long unsigned int buffer_size;
+    // maximum size of any message that can be sent
+    long long unsigned int max_msg_size;
     // send algorithm for constructing a multicast from point-to-point unicast
     // binomial pipeline by default
     rdmc::send_algorithm type;
@@ -66,11 +66,9 @@ namespace derecho {
     // callback for when a message is globally stable
     message_callback global_stability_callback;
 
-    // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
-    vector <long long unsigned int> start, end;
-    
+    vector<int> send_slots,recv_slots;
     // buffers to store incoming/outgoing messages
-    vector <std::unique_ptr<char[]> > buffers;
+    vector<std::unique_ptr<char[]>> buffers;
     // memory regions wrapping the buffers for RDMA ops
     vector <std::shared_ptr<rdma::memory_region> > mrs;
     
@@ -99,14 +97,14 @@ namespace derecho {
       return count;
     }
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
     // get a position in the buffer before sending
     char* get_position (long long unsigned int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
 
-    void sst_print ();
+    void print ();
   };
 }
 #endif /* DERECHO_GROUP_H */

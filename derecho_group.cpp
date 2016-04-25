@@ -10,7 +10,7 @@ using std::unique_lock;
 using std::lock_guard;
 
 namespace derecho {
-  derecho_group::derecho_group (vector <int> _members, int node_rank, long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback _global_stability_callback, rdmc::send_algorithm _type, unsigned int _window_size) {
+  derecho_group::derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback _global_stability_callback, rdmc::send_algorithm _type, unsigned int _window_size) {
     // copy the parameters
     members = _members;
     num_members = members.size();
@@ -22,19 +22,15 @@ namespace derecho {
       }
     }
     block_size = _block_size;
-    buffer_size = _buffer_size;
+    max_msg_size = _max_msg_size;
     type = _type;
     window_size = _window_size;
     assert (window_size >= 1);
 
     global_stability_callback = _global_stability_callback;
 
-    // initialize start, end and indexes
-    start.resize(num_members);
-    end.resize(num_members);
-    for (int i = 0; i < num_members; ++i) {
-      start[i] = end[i] = 0;
-    }
+    send_slots.resize(num_members,0);
+    recv_slots.resize(num_members,0);
 
     count.resize (num_members*1000, 0);
     
@@ -49,10 +45,10 @@ namespace derecho {
        * even though any arrangement of receivers in the members vector is possible
        */
       // allocate buffer for the group
-      std::unique_ptr<char[]> buffer(new char[buffer_size]);
+      std::unique_ptr<char[]> buffer(new char[max_msg_size*window_size]);
       buffers.push_back (std::move (buffer));
       // create a memory region encapsulating the buffer
-      std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(), buffer_size);
+      std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(),max_msg_size*window_size);
       mrs.push_back (mr);
       for (int j = 0; j < num_members; ++j) {
 	rotated_members[j] = (uint32_t) members[(i+j)%num_members];
@@ -62,7 +58,9 @@ namespace derecho {
       if (i == member_index) {
 	rdmc::create_group(i, rotated_members, block_size, type,
 			   [this, i](size_t length) -> rdmc::receive_destination {
-			     return {mrs[i], (buffer_size-start[i] < length)? 0:(size_t)start[i]};
+			     auto offset = max_msg_size * recv_slots[i];
+			     recv_slots[i] = (recv_slots[i]+1)%window_size;
+			     return {mrs[i],offset};
 			   },
 			   [this, i](char *data, size_t size) {
 			     {
@@ -86,7 +84,9 @@ namespace derecho {
       else {
 	rdmc::create_group(i, rotated_members, block_size, type,
 			   [this, i](size_t length) -> rdmc::receive_destination {
-			     return {mrs[i], (buffer_size-start[i] < length)? 0:(size_t)start[i]};
+			     auto offset = max_msg_size * recv_slots[i];
+			     recv_slots[i] = (recv_slots[i]+1)%window_size;
+			     return {mrs[i],offset};
 			   },
 			   [this, i](char *data, size_t size) {
 			     unique_lock <mutex> lock (msg_state_mtx);
@@ -153,12 +153,6 @@ namespace derecho {
 	while (least_undelivered_seq_num <= min_stable_num) {
 	  msg_info msg = locally_stable_messages.begin()->second;
 	  global_stability_callback (msg.sender_id, msg.index, buffers[msg.sender_id].get() + msg.offset, msg.size);
-	  if (msg.sender_id == member_index) {
-	    end[member_index] = msg.offset + msg.size;
-	    if (end[member_index] == buffer_size) {
-	      end[member_index] = 0;
-	    }
-	  }
 	  locally_stable_messages.erase (locally_stable_messages.begin());
 	  if (locally_stable_messages.empty()) {
 	    break;
@@ -166,10 +160,10 @@ namespace derecho {
 	  least_undelivered_seq_num = locally_stable_messages.begin()->first;
 	  local_count++;
 	}
-	sst[member_index].delivered_num = min_stable_num;
-	sst.put (offsetof (Row, delivered_num), sizeof (least_undelivered_seq_num));
-	// sst.put ();
 	if (local_count > 0) {
+	  sst[member_index].delivered_num = min_stable_num;
+	  sst.put (offsetof (Row, delivered_num), sizeof (least_undelivered_seq_num));
+	  // sst.put ();
 	  // cout << "Delivered " << count << " messages" << endl;
 	  count[c++] = local_count;
 	}
@@ -224,53 +218,19 @@ namespace derecho {
   }
 
   char* derecho_group::get_position (long long unsigned int msg_size) {
-    // if the size of the message is greater than the (buffer size)/window_size, then return null
-    if (msg_size > buffer_size/window_size) {
-      cout << "Can't send messages of size larger than the size of the circular buffer divided by the window size" << endl;
+    if (msg_size > max_msg_size) {
+      cout << "Can't send messages of size larger than the maximum message size which is equal to " << max_msg_size << endl;
       return NULL;
     }
-    if (start[member_index] == end[member_index]) {
-      start[member_index] = end[member_index] = 0;
-    }
-    long long unsigned int my_start = start[member_index];
-    long long unsigned int my_end = end[member_index];
-    if (my_start < my_end) {
-      if (my_end - my_start >= msg_size) {
-	start[member_index] += msg_size;
-	if (start[member_index] == buffer_size) {
-	  start[member_index] = 0;
-	}
-	msg_info msg = {member_index, future_message_index++, my_start, msg_size};
-	next_message = msg;
-	return buffers[member_index].get() + my_start;
-      }
-      else {
+    for (int i = 0; i < num_members; ++i) {
+      if ((*sst)[i].delivered_num < (future_message_index-window_size)*num_members + member_index) {
 	return NULL;
       }
     }
-    else {
-      if (buffer_size - my_start >= msg_size) {
-	start[member_index] += msg_size;
-	if (start[member_index] == buffer_size) {
-	  start[member_index] = 0;
-	}
-	msg_info msg = {member_index, future_message_index++, my_start, msg_size};
-	next_message = msg;
-	return buffers[member_index].get() + my_start;
-      }
-      else if (my_end >= msg_size) {
-	start[member_index] = msg_size;
-	if (start[member_index] == buffer_size) {
-	  start[member_index] = 0;
-	}
-	msg_info msg = {member_index, future_message_index++, 0, msg_size};
-	next_message = msg;
-	return buffers[member_index].get();
-      }
-      else {
-	return NULL;
-      }
-    }
+    auto pos = max_msg_size*send_slots[member_index];
+    send_slots[member_index] = (send_slots[member_index]+1)%window_size;
+    next_message = {member_index, future_message_index++, pos, msg_size};
+    return buffers[member_index].get()+pos;
   }
 
   void derecho_group::send () {
@@ -283,11 +243,18 @@ namespace derecho {
     derecho_cv.notify_one();
   }
 
-  void derecho_group::sst_print () {
+  void derecho_group::print () {
     cout << "Printing SST" << endl;
     for (int i = 0; i < num_members; ++i) {
-      cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << endl;
+      cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << " " << (*sst)[i].delivered_num << endl;
     }
+    cout << endl;
+
+    cout << "Printing last_received_messages" << endl;
+    for (int i = 0; i < num_members; ++i) {
+      cout << last_received_messages[i] << " " << endl;
+    }
+    cout << endl;
   }
 }
 
