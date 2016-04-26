@@ -1,6 +1,10 @@
-﻿#include "stdafx.h"
-#include "Derecho.h"
+﻿#include "Derecho.h"
 
+#include <algorithm>
+#include <exception>
+#include <thread>
+#include <chrono>
+#include <future>
 
 namespace Derecho
 {
@@ -15,18 +19,15 @@ namespace Derecho
           return theAddr;
       }
 
-      bool ipAddr::Equals(const std::shared_ptr<ipAddr>& someone)
+      bool ipAddr::Equals(const ipAddr& someone) const
       {
-          if (someone == nullptr)
-          {
-              return false;
-          }
-          return someone->theAddr == theAddr;
+
+          return someone.theAddr == theAddr;
       }
 
-      std::string ipAddr::ToString()
+      std::string ipAddr::ToString() const
       {
-          return std::string(_T("<")) + theAddr + std::string(_T(">"));
+          return std::string("<") + std::to_string(theAddr) + std::string(">");
       }
 
 int View::vcntr = 0;
@@ -38,10 +39,10 @@ int View::vcntr = 0;
       void View::newView(const std::shared_ptr<View>& Vc)
       {
 //C# TO C++ CONVERTER TODO TASK: There is no native C++ equivalent to 'ToString':
-          std::cout << std::string(_T("Process ")) << Vc->members[Vc->myRank] << std::string(_T("New view: ")) << Vc->ToString() << std::endl;
+          std::cout << std::string("Process ") << Vc->members[Vc->myRank].ToString() << std::string("New view: ") << Vc->ToString() << std::endl;
       }
 
-      std::shared_ptr<ipAddr> View::Joined()
+      std::shared_ptr<ipAddr> View::Joined() const
       {
           if (who == nullptr)
           {
@@ -49,7 +50,7 @@ int View::vcntr = 0;
           }
           for (int r = 0; r < n; r++)
           {
-              if (members[r]->Equals(who))
+              if (members[r].Equals(*who))
               {
                   return who;
               }
@@ -57,7 +58,7 @@ int View::vcntr = 0;
           return nullptr;
       }
 
-      std::shared_ptr<ipAddr> View::Departed()
+      std::shared_ptr<ipAddr> View::Departed() const
       {
           if (who == nullptr)
           {
@@ -65,7 +66,7 @@ int View::vcntr = 0;
           }
           for (int r = 0; r < n; r++)
           {
-              if (members[r]->Equals(who))
+              if (members[r].Equals(*who))
               {
                   return nullptr;
               }
@@ -73,11 +74,11 @@ int View::vcntr = 0;
           return who;
       }
 
-      int View::RankOfLeader()
+      int View::RankOfLeader() const
       {
-          for (int r = 0; r < Failed.size(); r++)
+          for (int r = 0; r < failed.size(); r++)
           {
-              if (!Failed[r])
+              if (!failed[r])
               {
                   return r;
               }
@@ -85,11 +86,11 @@ int View::vcntr = 0;
           return -1;
       }
 
-      int View::RankOf(const std::shared_ptr<ipAddr>& who)
+      int View::RankOf(const ipAddr& who) const
       {
-          for (int r = 0; r < n && members[r] != nullptr; r++)
+          for (int r = 0; r < n; r++)
           {
-              if (members[r]->Equals(who))
+              if (members[r].Equals(who))
               {
                   return r;
               }
@@ -97,7 +98,7 @@ int View::vcntr = 0;
           return -1;
       }
 
-      bool View::IAmLeader()
+      bool View::IAmLeader() const
       {
           return (RankOfLeader() == myRank); // True if I know myself to be the leader
       }
@@ -106,45 +107,41 @@ int View::vcntr = 0;
       {
           for (int n = 0; n < N; n++)
           {
-              if (rdmc[n] != nullptr)
-              {
-                  rdmc[n]->Destroy();
-              }
+              rdmc[n].Destroy();
           }
       }
 
-      std::string View::ToString()
+      std::string View::ToString() const
       {
-          std::string s = std::string(_T("View ")) + vid + std::string(_T(": MyRank=")) + myRank + std::string(_T("... "));
-          std::string ms = _T(" ");
+          std::string s = std::string("View ") + std::to_string(vid) + std::string(": MyRank=") + std::to_string(myRank) + std::string("... ");
+          std::string ms = " ";
           for (int m = 0; m < n; m++)
           {
-//C# TO C++ CONVERTER TODO TASK: There is no native C++ equivalent to 'ToString':
-              ms += members[m]->ToString() + std::string(_T("  "));
+              ms += members[m].ToString() + std::string("  ");
           }
 
-          s += std::string(_T("Members={")) + ms + std::string(_T("}, "));
-          std::string fs = _T(" ");
+          s += std::string("Members={") + ms + std::string("}, ");
+          std::string fs = " ";
           for (int m = 0; m < n; m++)
           {
-              fs += Failed[m] ? _T(" T ") : _T(" F ");
+              fs += failed[m] ? " T " : " F ";
           }
 
-          s += std::string(_T("Failed={")) + fs + std::string(_T(" }, nFailed=")) + nFailed;
+          s += std::string("Failed={") + fs + std::string(" }, nFailed=") + std::to_string(nFailed);
           std::shared_ptr<ipAddr> dep = Departed();
           if (dep != nullptr)
           {
-              s += std::string(_T(", Departed: ")) + dep;
+              s += std::string(", Departed: ") + dep->ToString();
           }
 
           std::shared_ptr<ipAddr> join = Joined();
           if (join != nullptr)
           {
-              s += std::string(_T(", Joined: ")) + join;
+              s += std::string(", Joined: ") + join->ToString();
           }
 
 //C# TO C++ CONVERTER TODO TASK: There is no native C++ equivalent to 'ToString':
-          s += std::string(_T("\n")) + gmsSST->ToString();
+          s += std::string("\n") + gmsSST->ToString();
           return s;
       }
 
@@ -155,18 +152,18 @@ int SST::scntr = 0;
           myPid = pid;
           for (int n = 0; n < nRows; n++)
           {
-              row[n] = std::make_shared<GMSSST>(vid, pids[n]);
+              row[n] = GMSSST(vid, pids[n]);
           }
       }
 
       void SST::InitializeFromOldSST(const std::shared_ptr<View>& Vnext, const std::shared_ptr<SST>& old, int whichFailed)
       {
           int m = 0;
-          for (int n = 0; n < Vnext->n && old->row[n] != nullptr; n++)
+          for (int n = 0; n < Vnext->n; n++)
           {
               if (n != whichFailed)
               {
-                  old->row[n]->UseToInitialize(Vnext->gmsSST->row[m++]);
+                  old->row[n].UseToInitialize(Vnext->gmsSST->row[m++]);
               }
           }
       }
@@ -202,14 +199,10 @@ int SST::scntr = 0;
 
       std::string SST::ToString()
       {
-          std::string s = _T("SST:\n");
+          std::string s = "SST:\n";
           for (int r = 0; r < row.size(); r++)
           {
-              if (row[r] != nullptr)
-              {
-//C# TO C++ CONVERTER TODO TASK: There is no native C++ equivalent to 'ToString':
-                  s += row[r]->ToString();
-              }
+              s += row[r].ToString();
           }
           return s;
       }
@@ -249,13 +242,8 @@ int SST::scntr = 0;
 int GMSSST::rcntr = 0;
 int GMSSST::maxChanges = 0;
 
-      GMSSST::GMSSST(int v, const std::shared_ptr<ipAddr>& ipa)
+      GMSSST::GMSSST(int v, const ipAddr& ipa) : vid(v), theIPA(ipa)
       {
-          vid = v;
-          if ((theIPA = ipa) == nullptr)
-          {
-              throw std::exception(_T("GMSST constructor"));
-          }
       }
 
       int GMSSST::ModIndexer(int n)
@@ -263,74 +251,74 @@ int GMSSST::maxChanges = 0;
           return n % View::N;
       }
 
-      void GMSSST::UseToInitialize(const std::shared_ptr<GMSSST>& newSST)
+      void GMSSST::UseToInitialize(GMSSST& newSST)
       {
-          Array::Copy(Changes, newSST->Changes, Changes.size());
-          newSST->nChanges = nChanges;
-          newSST->nCommitted = nCommitted;
-          newSST->nAcked = nAcked;
-          newSST->gmsSSTRowTime = gmsSSTRowTime;
+          std::copy_n(changes.begin(), View::N, newSST.changes.begin());
+          newSST.nChanges = nChanges;
+          newSST.nCommitted = nCommitted;
+          newSST.nAcked = nAcked;
+          newSST.gmsSSTRowTime = gmsSSTRowTime;
       }
 
-      void GMSSST::CopyTo(const std::shared_ptr<GMSSST>& destSST)
+      void GMSSST::CopyTo(GMSSST& destSST) const
       {
-          if (vid > 0 && destSST->vid > 0 && destSST->vid != vid)
+          if (vid > 0 && destSST.vid > 0 && destSST.vid != vid)
           {
-                throw ArgumentOutOfRangeException(std::string(_T("V.")) + destSST->vid + std::string(_T(" attempting to overwrite SST for V.")) + vid);
+                throw std::exception(std::string("V.") + std::to_string(destSST.vid) + std::string(" attempting to overwrite SST for V.") + std::to_string(vid));
           }
-          if (!destSST->theIPA->Equals(theIPA))
+          if (!destSST.theIPA.Equals(theIPA))
           {
-                throw ArgumentOutOfRangeException(std::string(_T("Setting GMSSST row for ")) + destSST->theIPA + std::string(_T(" from the SST row for ")) + theIPA);
+                throw std::exception(std::string("Setting GMSSST row for ") + destSST.theIPA.ToString() + std::string(" from the SST row for ") + theIPA.ToString());
           }
-          if (destSST->gmsSSTRowTime > gmsSSTRowTime)
+          if (destSST.gmsSSTRowTime > gmsSSTRowTime)
           {
-                throw ArgumentOutOfRangeException(std::string(_T("Setting GMSSST row for ")) + destSST->theIPA + std::string(_T(" from an OLDER SST row for ")) + theIPA);
+                throw std::exception(std::string("Setting GMSSST row for ") + destSST.theIPA.ToString() + std::string(" from an OLDER SST row for ") + theIPA.ToString());
           }
-          Array::Copy(Suspected, destSST->Suspected, Suspected.size());
-          Array::Copy(Changes, destSST->Changes, Changes.size());
-          destSST->nChanges = nChanges;
-          destSST->nCommitted = nCommitted;
-          destSST->nAcked = nAcked;
-          Array::Copy(nReceived, destSST->nReceived, nReceived.size());
-          if (destSST->Wedged && !Wedged)
+          std::copy(suspected.begin(), suspected.end(), destSST.suspected.begin());
+          std::copy(changes.begin(), changes.end(), destSST.changes.begin());
+          destSST.nChanges = nChanges;
+          destSST.nCommitted = nCommitted;
+          destSST.nAcked = nAcked;
+          std::copy(nReceived.begin(), nReceived.end(), destSST.nReceived.begin());
+          if (destSST.wedged && !wedged)
           {
-                throw ArgumentOutOfRangeException(std::string(_T("Setting instance ")) + destSST->gmsSSTRowInstance + std::string(_T(" Wedged = ")) + Wedged + std::string(_T(" from ")) + gmsSSTRowInstance);
+                throw std::exception(std::string("Setting instance ") + destSST.gmsSSTRowInstance + std::string(" Wedged = ") + std::to_string(wedged) + std::string(" from ") + gmsSSTRowInstance);
           }
-          destSST->Wedged = Wedged;
-          Array::Copy(GlobalMin, destSST->GlobalMin, GlobalMin.size());
-          destSST->GlobalMinReady = GlobalMinReady;
-          destSST->gmsSSTRowTime = gmsSSTRowTime;
+          destSST.wedged = wedged;
+          std::copy(globalMin.begin(), globalMin.end(), destSST.globalMin.begin());
+          destSST.globalMinReady = globalMinReady;
+          destSST.gmsSSTRowTime = gmsSSTRowTime;
       }
 
-      std::string GMSSST::ToString()
+      std::string GMSSST::ToString() const
       {
-          std::string s = theIPA + std::string(_T("@ vid=")) + vid + std::string(_T("[row-time=")) + gmsSSTRowTime + std::string(_T("]: "));
-          std::string tf = _T(" ");
+          std::string s = theIPA + std::string("@ vid=") + vid + std::string("[row-time=") + gmsSSTRowTime + std::string("]: ");
+          std::string tf = " ";
           for (int n = 0; n < View::N; n++)
           {
-              tf += (Suspected[n]? _T("T"): _T("F")) + std::string(_T(" "));
+              tf += (suspected[n]? "T": "F") + std::string(" ");
           }
 
-          s += std::string(_T("Suspected={")) + tf + std::string(_T("}, nChanges=")) + nChanges + std::string(_T(", nCommitted=")) + nCommitted;
-          std::string ch = _T(" ");
+          s += std::string("Suspected={") + tf + std::string("}, nChanges=") + nChanges + std::string(", nCommitted=") + nCommitted;
+          std::string ch = " ";
           for (int n = nCommitted; n < nChanges; n++)
           {
-              ch += Changes[GMSSST::ModIndexer(n)];
+              ch += changes[GMSSST::ModIndexer(n)];
           }
-          std::string rs = _T(" ");
-          for (int n = 0; n < nReceived.size(); n++)
+          std::string rs = " ";
+          for (int n = 0; n < View::N; n++)
           {
-              rs += nReceived[n] + std::string(_T(" "));
+              rs += nReceived[n] + std::string(" ");
           }
 
-          s += std::string(_T(", Changes={")) + ch + std::string(_T(" }, nAcked=")) + nAcked + std::string(_T(", nReceived={")) + rs + std::string(_T("}"));
-          std::string gs = _T(" ");
-          for (int n = 0; n < GlobalMin.size(); n++)
+          s += std::string(", Changes={") + ch + std::string(" }, nAcked=") + nAcked + std::string(", nReceived={") + rs + std::string("}");
+          std::string gs = " ";
+          for (int n = 0; n < View::N; n++)
           {
-              gs += GlobalMin[n] + std::string(_T(" "));
+              gs += globalMin[n] + std::string(" ");
           }
 
-          s += std::string(_T(", Wedged = ")) + (Wedged? _T("T"): _T("F")) + std::string(_T(", GlobalMin = {")) + gs + std::string(_T("}, GlobalMinReady=")) + GlobalMinReady + std::string(_T("\n"));
+          s += std::string(", Wedged = ") + (wedged? "T": "F") + std::string(", GlobalMin = {") + gs + std::string("}, GlobalMinReady=") + globalMinReady + std::string("\n");
           return s;
       }
 
@@ -346,7 +334,7 @@ int GMSSST::maxChanges = 0;
 
       void Group::Restart(int pid)
       {
-          std::cout << std::string(_T("Process <")) << pid << std::string(_T(">: RESTART Derecho")) << std::endl;
+          std::cout << std::string("Process <") << pid << std::string(">: RESTART Derecho") << std::endl;
           std::shared_ptr<ipAddr> p = std::make_shared<ipAddr>(pid);
           std::shared_ptr<View> Vc = theView;
           Vc->IKnowIAmLeader = true;
@@ -358,8 +346,8 @@ int GMSSST::maxChanges = 0;
 
       void Group::Leave(const std::shared_ptr<View>& Vc)
       {
-          std::cout << std::string(_T("Process ")) << Vc->members[Vc->myRank]->getPid() << std::string(_T(": Leave Derecho")) << std::endl;
-          (std::static_pointer_cast<SST>(Vc->gmsSST))->row[Vc->myRank]->Suspected[Vc->myRank] = true;
+          std::cout << std::string("Process ") << Vc->members[Vc->myRank].getPid() << std::string(": Leave Derecho") << std::endl;
+          (std::static_pointer_cast<SST>(Vc->gmsSST))->row[Vc->myRank].suspected[Vc->myRank] = true;
           Vc->gmsSST->Push(Vc->myRank, Vc->vid);
       }
 
@@ -370,19 +358,19 @@ volatile int Group::JoinsProcessed = 0;
       void Group::Join(int pid)
       {
           int cnt = 0;
-          std::cout << std::string(_T("Process <")) << pid << std::string(_T(">: JOIN Derecho")) << std::endl;
+          std::cout << std::string("Process <") << pid << std::string(">: JOIN Derecho") << std::endl;
           Joiners[nJoiners] = std::make_shared<ipAddr>(pid);
           nJoiners++;
           while (theView == nullptr)
           {
-              delay(2500);
+              std::this_thread::sleep_for(std::chrono::milliseconds(2500));
               if (cnt++ == 30)
               {
-                  throw std::exception(_T("Join failed"));
+                  throw std::exception("Join failed");
               }
           }
           std::shared_ptr<View> Vc = theView;
-          std::cout << std::string(_T("Process <")) << pid << std::string(_T(">: JOIN Derecho successful, I was added in view ")) << Vc->vid << std::endl;
+          std::cout << std::string("Process <") << pid << std::string(">: JOIN Derecho successful, I was added in view ") << Vc->vid << std::endl;
           SetupSSTandRDMC(pid, Vc, Vc->members);
           Vc->gmsSST->Pull(Vc);
           Vc->newView(Vc);
@@ -392,7 +380,7 @@ volatile int Group::JoinsProcessed = 0;
       {
           if (Vc->gmsSST != nullptr)
           {
-              throw std::exception(_T("Overwritting the SST"));
+              throw std::exception("Overwritting the SST");
           }
 
           Vc->gmsSST = std::make_shared<SST>(Vc->vid, pid, Vc->n, pids);
@@ -414,57 +402,57 @@ volatile int Group::JoinsProcessed = 0;
           std::shared_ptr<ipAddr> q = Joiners[JoinsProcessed++];
           if (q == nullptr)
           {
-                throw std::exception(_T("q null in ReceiveJoin"));
+                throw std::exception("q null in ReceiveJoin");
           }
           std::shared_ptr<SST> gmsSST = Vc->gmsSST;
-          if ((gmsSST->row[Vc->myRank]->nChanges - gmsSST->row[Vc->myRank]->nCommitted) == gmsSST->row[Vc->myRank]->Changes.size())
+          if ((gmsSST->row[Vc->myRank].nChanges - gmsSST->row[Vc->myRank].nCommitted) == gmsSST->row[Vc->myRank].changes.size())
           {
-              throw std::exception(_T("Too many changes to allow a Join right now"));
+              throw std::exception("Too many changes to allow a Join right now");
           }
 
-          gmsSST->row[Vc->myRank]->Changes[GMSSST::ModIndexer(gmsSST->row[Vc->myRank]->nChanges)] = q;
-          gmsSST->row[Vc->myRank]->nChanges++;
-          if (Vc->gmsSST->row[Vc->myRank]->nChanges > GMSSST::maxChanges)
+          gmsSST->row[Vc->myRank].changes[GMSSST::ModIndexer(gmsSST->row[Vc->myRank].nChanges)] = q;
+          gmsSST->row[Vc->myRank].nChanges++;
+          if (Vc->gmsSST->row[Vc->myRank].nChanges > GMSSST::maxChanges)
           {
-              GMSSST::maxChanges = Vc->gmsSST->row[Vc->myRank]->nChanges;
+              GMSSST::maxChanges = Vc->gmsSST->row[Vc->myRank].nChanges;
           }
           for (int n = 0; n < Vc->n; n++)
           {
-              Vc->rdmc[n]->Wedge(); // RDMC finishes sending, then stops sending or receiving in Vc
+              Vc->rdmc[n].Wedge(); // RDMC finishes sending, then stops sending or receiving in Vc
           }
-          gmsSST->row[Vc->myRank]->Wedged = true; // True if RDMC has halted new sends and receives in Vc
+          gmsSST->row[Vc->myRank].wedged = true; // True if RDMC has halted new sends and receives in Vc
           gmsSST->Push(Vc->myRank, Vc->vid);
       }
 
-      void Group::CommitJoin(const std::shared_ptr<View>& Vc, const std::shared_ptr<ipAddr>& q)
+      void Group::CommitJoin(const View& Vc, ipAddr& q)
       {
-          std::cout << std::string(_T("CommitJoin: Vid=")) << Vc->vid << std::string(_T("... joiner is ")) << q << std::endl;
-          std::make_shared<Thread>([&] ()
+          std::cout << std::string("CommitJoin: Vid=") << Vc.vid << std::string("... joiner is ") << q << std::endl;
+          std::async([&] ()
               // Runs in a separate thread in case state transfer is (in the future) at all slow
               // EDWARD TO DO //
           {
                 std::shared_ptr<View> Vcp = std::make_shared<View>();
-                Vcp->vid = Vc->vid;
-                Array::Copy(Vc->members, Vcp->members, Vc->n);
-                Vcp->n = Vc->n;
-                Vcp->myRank = Vc->RankOf(q);
+                Vcp->vid = Vc.vid;
+                std::copy(Vc.members.begin(), Vc.members.end(), Vcp->members.begin());
+                Vcp->n = Vc.n;
+                Vcp->myRank = Vc.RankOf(q);
                 Vcp->who = Vcp->members[Vcp->myRank];
-                Array::Copy(Vc->Failed, Vcp->Failed, Vc->Failed.size());
-                Vcp->nFailed = Vc->nFailed;
-                std::cout << std::string(_T("Sending View ")) << Vcp->vid << std::string(_T(" to ")) << q << std::endl;
-          }).Start();
+                std::copy(Vc.failed.begin(), Vc.failed.end(), Vcp->failed.begin());
+                Vcp->nFailed = Vc.nFailed;
+                std::cout << std::string("Sending View ") << Vcp->vid << std::string(" to ") << q << std::endl;
+          });
       }
 
-      void Group::ReportFailure(const std::shared_ptr<View>& Vc, const std::shared_ptr<ipAddr>& who)
+      void Group::ReportFailure(const View& Vc, const ipAddr& who)
       {
-          int r = Vc->RankOf(who);
-          (std::static_pointer_cast<SST>(Vc->gmsSST))->row[Vc->myRank]->Suspected[Vc->myRank] = true;
-          Vc->gmsSST->Push(Vc->myRank, Vc->vid);
+          int r = Vc.RankOf(who);
+          Vc.gmsSST->row[Vc.myRank].suspected[r] = true;
+          Vc.gmsSST->Push(Vc.myRank, Vc.vid);
       }
 
       void Program::Main(std::vector<std::string>& args)
       {
-          std::shared_ptr<Group> g = std::make_shared<Group>(_T("Derecho-Test"));
+          std::shared_ptr<Group> g = std::make_shared<Group>("Derecho-Test");
           for (int pid = 0; pid < 10; pid++)
           {
               Launch(g, pid);
@@ -473,7 +461,7 @@ volatile int Group::JoinsProcessed = 0;
 
       void Program::Launch(const std::shared_ptr<Group>& g, int pid)
       {
-          std::shared_ptr<Thread> tempVar = std::make_shared<Thread>([&] ()
+          std::thread t([&] ()
                       /* Restart the system */
           {
                 if (pid == 0)
@@ -484,15 +472,13 @@ volatile int Group::JoinsProcessed = 0;
                 }
                 else
                 {
-                      delay(pid * 5000);
-                      g->Join(pid);
-                      beNode(g, pid);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(pid * 5000));
+                    g->Join(pid);
+                    beNode(g, pid);
                 }
-                std::cout << std::string(_T("TERMINATION: Pid<")) << pid << std::string(_T(">")) << std::endl;
+                std::cout << std::string("TERMINATION: Pid<") << pid << std::string(">") << std::endl;
           });
-          tempVar->Name = std::string(_T("Process ")) + pid;
-          std::shared_ptr<Thread> t = tempVar;
-          t->Start();
+          t.detach();
       }
 
       bool Program::NotEqual(const std::shared_ptr<View>& Vc, std::vector<bool>& old)
@@ -501,7 +487,7 @@ volatile int Group::JoinsProcessed = 0;
           {
               for (int who = 0; who < View::N; who++)
               {
-                  if (Vc->gmsSST->row[r]->Suspected[who] && !old[who])
+                  if (Vc->gmsSST->row[r].suspected[who] && !old[who])
                   {
                       return true;
                   }
@@ -515,16 +501,16 @@ volatile int Group::JoinsProcessed = 0;
           int myRank = Vc->myRank;
           for (int who = 0; who < Vc->n; who++)
           {
-              old[who] = Vc->gmsSST->row[myRank]->Suspected[who];
+              old[who] = Vc->gmsSST->row[myRank].suspected[who];
           }
       }
 
-      bool Program::ChangesContains(const std::shared_ptr<View>& Vc, const std::shared_ptr<ipAddr>& q)
+      bool Program::ChangesContains(const View& Vc, const ipAddr& q)
       {
-          std::shared_ptr<GMSSST> myRow = Vc->gmsSST->row[Vc->myRank];
+          std::shared_ptr<GMSSST> myRow = Vc.gmsSST->row[Vc.myRank];
           for (int n = myRow->nCommitted; n < myRow->nChanges; n++)
           {
-              std::shared_ptr<ipAddr> p = myRow->Changes[GMSSST::ModIndexer(n)];
+              std::shared_ptr<ipAddr> p = myRow->changes[GMSSST::ModIndexer(n)];
               if (p != nullptr && p->Equals(q))
               {
                   return true;
@@ -536,12 +522,12 @@ volatile int Group::JoinsProcessed = 0;
       int Program::MinAcked(const std::shared_ptr<View>& Vc, std::vector<bool>& Failed)
       {
           int myRank = Vc->myRank;
-          int min = Vc->gmsSST->row[myRank]->nAcked;
+          int min = Vc->gmsSST->row[myRank].nAcked;
           for (int n = 0; n < Vc->n; n++)
           {
-              if (!Failed[n] && Vc->gmsSST->row[n]->nAcked < min)
+              if (!Failed[n] && Vc->gmsSST->row[n].nAcked < min)
               {
-                  min = Vc->gmsSST->row[n]->nAcked;
+                  min = Vc->gmsSST->row[n].nAcked;
               }
           }
 
@@ -559,7 +545,7 @@ volatile int Group::JoinsProcessed = 0;
           {
               for (int row = 0; row < Vc->myRank; row++)
               {
-                  if (!Vc->Failed[n] && !Vc->gmsSST->row[row]->Suspected[n])
+                  if (!Vc->failed[n] && !Vc->gmsSST->row[row].suspected[n])
                   {
                       return false; // I'm not the new leader, or some failure suspicion hasn't fully propagated
                   }
@@ -574,30 +560,30 @@ volatile int Group::JoinsProcessed = 0;
           // Merge the change lists
           for (int n = 0; n < Vc->n; n++)
           {
-              if (Vc->gmsSST->row[myRank]->nChanges < Vc->gmsSST->row[n]->nChanges)
+              if (Vc->gmsSST->row[myRank].nChanges < Vc->gmsSST->row[n].nChanges)
               {
-                  Array::Copy(Vc->gmsSST->row[n]->Changes, Vc->gmsSST->row[myRank]->Changes, Vc->gmsSST->row[myRank]->Changes.size());
-                  Vc->gmsSST->row[myRank]->nChanges = Vc->gmsSST->row[n]->nChanges;
-                  if (Vc->gmsSST->row[myRank]->nChanges > GMSSST::maxChanges)
+                  std::copy(Vc->gmsSST->row[n].changes.begin(), Vc->gmsSST->row[n].changes.end(), Vc->gmsSST->row[myRank].changes.begin());
+                  Vc->gmsSST->row[myRank].nChanges = Vc->gmsSST->row[n].nChanges;
+                  if (Vc->gmsSST->row[myRank].nChanges > GMSSST::maxChanges)
                   {
-                      GMSSST::maxChanges = Vc->gmsSST->row[myRank]->nChanges;
+                      GMSSST::maxChanges = Vc->gmsSST->row[myRank].nChanges;
                   }
               }
 
-              if (Vc->gmsSST->row[myRank]->nCommitted < Vc->gmsSST->row[n]->nCommitted) // How many I know to have been committed
+              if (Vc->gmsSST->row[myRank].nCommitted < Vc->gmsSST->row[n].nCommitted) // How many I know to have been committed
               {
-                  Vc->gmsSST->row[myRank]->nCommitted = Vc->gmsSST->row[n]->nCommitted;
+                  Vc->gmsSST->row[myRank].nCommitted = Vc->gmsSST->row[n].nCommitted;
               }
           }
           bool found = false;
           for (int n = 0; n < Vc->n; n++)
           {
-              if (Vc->Failed[n])
+              if (Vc->failed[n])
               {
                   // Make sure that the failed process is listed in the Changes vector as a proposed change
-                  for (int c = Vc->gmsSST->row[myRank]->nCommitted; c < Vc->gmsSST->row[myRank]->nChanges && !found; c++)
+                  for (int c = Vc->gmsSST->row[myRank].nCommitted; c < Vc->gmsSST->row[myRank].nChanges && !found; c++)
                   {
-                      if (Vc->gmsSST->row[myRank]->Changes[GMSSST::ModIndexer(c)]->Equals(Vc->members[n]))
+                      if (Vc->gmsSST->row[myRank].changes[GMSSST::ModIndexer(c)].Equals(Vc->members[n]))
                       {
                           // Already listed
                           found = true;
@@ -612,11 +598,11 @@ volatile int Group::JoinsProcessed = 0;
 
               if (!found)
               {
-                  Vc->gmsSST->row[myRank]->Changes[GMSSST::ModIndexer(Vc->gmsSST->row[myRank]->nChanges)] = Vc->members[n];
-                  Vc->gmsSST->row[myRank]->nChanges++;
-                  if (Vc->gmsSST->row[myRank]->nChanges > GMSSST::maxChanges)
+                  Vc->gmsSST->row[myRank].changes[GMSSST::ModIndexer(Vc->gmsSST->row[myRank].nChanges)] = Vc->members[n];
+                  Vc->gmsSST->row[myRank].nChanges++;
+                  if (Vc->gmsSST->row[myRank].nChanges > GMSSST::maxChanges)
                   {
-                      GMSSST::maxChanges = Vc->gmsSST->row[myRank]->nChanges;
+                      GMSSST::maxChanges = Vc->gmsSST->row[myRank].nChanges;
                   }
               }
           }
@@ -634,55 +620,56 @@ volatile int Group::JoinsProcessed = 0;
               std::shared_ptr<SST> gmsSST = Vc->gmsSST;
               int Leader = Vc->RankOfLeader(), myRank = Vc->myRank;
 
-              if (NotEqual(Vc, oldSuspected))
+              //This part should be a predicate that GMS registers with its SST
+              if (NotEqual(Vc, oldSuspected)) //This means there's a change in theView.suspected
               {
                   // Aggregate suspicions into gmsSST[myRank].Suspected;
                   for (int r = 0; r < Vc->n; r++)
                   {
                       for (int who = 0; who < Vc->n; who++)
                       {
-                          gmsSST->row[myRank]->Suspected[who] |= gmsSST->row[r]->Suspected[who];
+                          gmsSST->row[myRank].suspected[who] |= gmsSST->row[r].suspected[who];
                       }
                   }
 
                   for (int q = 0; q < Vc->n; q++)
                   {
-                      if (gmsSST->row[myRank]->Suspected[q] && !Vc->Failed[q])
+                      if (gmsSST->row[myRank].suspected[q] && !Vc->failed[q])
                       {
                           if (Vc->nFailed + 1 >= View::N / 2)
                           {
-                              throw std::exception(_T("Majority of a Derecho group simultaneously failed … shutting down"));
+                              throw std::exception("Majority of a Derecho group simultaneously failed … shutting down");
                           }
 
                           gmsSST->Freeze(q); // Cease to accept new updates from q
                           for (int n = 0; n < Vc->n; n++)
                           {
-                              Vc->rdmc[n]->Wedge(); // RDMC finishes sending, then stops sending or receiving in Vc
+                              Vc->rdmc[n].Wedge(); // RDMC finishes sending, then stops sending or receiving in Vc
                           }
 
-                          gmsSST->row[myRank]->Wedged = true; // RDMC has halted new sends and receives in Vc
-                          Vc->Failed[q] = true;
+                          gmsSST->row[myRank].wedged = true; // RDMC has halted new sends and receives in Vc
+                          Vc->failed[q] = true;
                           Vc->nFailed++;
 
                           if (Vc->nFailed > Vc->n / 2 || (Vc->nFailed == Vc->n / 2 && Vc->n % 2 == 0))
                           {
-                              throw std::exception(_T("Potential partitioning event: this node is no longer in the majority and must shut down!"));
+                              throw std::exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
                           }
 
                           gmsSST->Push(Vc->myRank, Vc->vid);
-                          if (Vc->IAmLeader() && !ChangesContains(Vc, Vc->members[q])) // Leader initiated
+                          if (Vc->IAmLeader() && !ChangesContains(*Vc, Vc->members[q])) // Leader initiated
                           {
-                              if ((gmsSST->row[myRank]->nChanges - gmsSST->row[myRank]->nCommitted) == gmsSST->row[myRank]->Changes.size())
+                              if ((gmsSST->row[myRank].nChanges - gmsSST->row[myRank].nCommitted) == gmsSST->row[myRank].changes.size())
                               {
-                                  throw std::exception(_T("Ran out of room in the pending changes list"));
+                                  throw std::exception("Ran out of room in the pending changes list");
                               }
 
-                              gmsSST->row[myRank]->Changes[GMSSST::ModIndexer(gmsSST->row[myRank]->nChanges)] = Vc->members[q]; // Reports the failure (note that q NotIn members)
-                              gmsSST->row[myRank]->nChanges++;
-                              std::cout << std::string(_T("NEW SUSPICION: adding ")) << Vc->members[q] << std::string(_T(" to the CHANGES/FAILED list")) << std::endl;
-                              if (gmsSST->row[myRank]->nChanges > GMSSST::maxChanges)
+                              gmsSST->row[myRank].changes[GMSSST::ModIndexer(gmsSST->row[myRank].nChanges)] = Vc->members[q]; // Reports the failure (note that q NotIn members)
+                              gmsSST->row[myRank].nChanges++;
+                              std::cout << std::string("NEW SUSPICION: adding ") << Vc->members[q] << std::string(" to the CHANGES/FAILED list") << std::endl;
+                              if (gmsSST->row[myRank].nChanges > GMSSST::maxChanges)
                               {
-                                  GMSSST::maxChanges = gmsSST->row[myRank]->nChanges;
+                                  GMSSST::maxChanges = gmsSST->row[myRank].nChanges;
                               }
                               gmsSST->Push(Vc->myRank, Vc->vid);
                           }
@@ -691,41 +678,43 @@ volatile int Group::JoinsProcessed = 0;
                   Copy(Vc, oldSuspected);
               }
 
-              if (Vc->IAmLeader() && g->JoinsPending())
+              if (Vc->IAmLeader() && g->JoinsPending()) //This is God's-eye-view magic. How would the leader actually know it has joins pending?
               {
                   g->ReceiveJoin(Vc);
               }
 
+              //Each of these if statements could also be a predicate, I think
+
               int M;
-              if (myRank == Leader && (M = MinAcked(Vc, Vc->Failed)) > gmsSST->row[myRank]->nCommitted)
+              if (myRank == Leader && (M = MinAcked(Vc, Vc->failed)) > gmsSST->row[myRank].nCommitted)
               {
-                  gmsSST->row[myRank]->nCommitted = M; // Leader commits a new request
+                  gmsSST->row[myRank].nCommitted = M; // Leader commits a new request
                   gmsSST->Push(Vc->myRank, Vc->vid);
               }
 
-              if (gmsSST->row[Leader]->nChanges > gmsSST->row[myRank]->nAcked)
+              if (gmsSST->row[Leader].nChanges > gmsSST->row[myRank].nAcked)
               {
                   WedgeView(Vc, gmsSST, myRank); // True if RDMC has halted new sends, receives in Vc
                   if (myRank != Leader)
                   {
-                      Array::Copy(gmsSST->row[Leader]->Changes, gmsSST->row[myRank]->Changes, gmsSST->row[myRank]->Changes.size()); // Echo (copy) the vector including the new changes
-                      gmsSST->row[myRank]->nChanges = gmsSST->row[Leader]->nChanges; // Echo the count
-                      gmsSST->row[myRank]->nCommitted = gmsSST->row[Leader]->nCommitted;
+                      std::copy(gmsSST->row[Leader].changes.begin(), gmsSST->row[Leader].changes.end(), gmsSST->row[myRank].changes.begin()); // Echo (copy) the vector including the new changes
+                      gmsSST->row[myRank].nChanges = gmsSST->row[Leader].nChanges; // Echo the count
+                      gmsSST->row[myRank].nCommitted = gmsSST->row[Leader].nCommitted;
                   }
 
-                  gmsSST->row[myRank]->nAcked = gmsSST->row[Leader]->nChanges; // Notice a new request, acknowledge it
+                  gmsSST->row[myRank].nAcked = gmsSST->row[Leader].nChanges; // Notice a new request, acknowledge it
                   gmsSST->Push(Vc->myRank, Vc->vid);
               }
 
-              if (gmsSST->row[Leader]->nCommitted > Vc->vid)
+              if (gmsSST->row[Leader].nCommitted > Vc->vid)
               {
                   gmsSST->Disable(); // Disables the SST rule evaluation for this SST
                   WedgeView(Vc, gmsSST, myRank);
-                  std::shared_ptr<ipAddr> q = gmsSST->row[myRank]->Changes[GMSSST::ModIndexer(Vc->vid)];
+                  ipAddr q = gmsSST->row[myRank].changes[GMSSST::ModIndexer(Vc->vid)];
                   std::shared_ptr<View> Vnext = std::make_shared<View>();
                   Vnext->vid = Vc->vid + 1;
                   Vnext->IKnowIAmLeader = Vc->IKnowIAmLeader;
-                  std::shared_ptr<ipAddr> myIPAddr = Vc->members[myRank];
+                  ipAddr myIPAddr = Vc->members[myRank];
                   bool failed;
                   int whoFailed = Vc->RankOf(q);
                   if (whoFailed != -1)
@@ -748,7 +737,7 @@ volatile int Group::JoinsProcessed = 0;
                       if (n != whoFailed)
                       {
                           Vnext->members[m] = Vc->members[n];
-                          Vnext->Failed[m] = Vc->Failed[n];
+                          Vnext->failed[m] = Vc->failed[n];
                           ++m;
                       }
                   }
@@ -756,13 +745,13 @@ volatile int Group::JoinsProcessed = 0;
                   Vnext->who = q;
                   if ((Vnext->myRank = Vnext->RankOf(myIPAddr)) == -1)
                   {
-                      std::cout << std::string(_T("Some other process reported that I failed.  Process ")) << myIPAddr << std::string(_T(" terminating")) << std::endl;
+                      std::cout << std::string("Some other process reported that I failed.  Process ") << myIPAddr << std::string(" terminating") << std::endl;
                       return;
                   }
 
                   if (Vnext->gmsSST != nullptr)
                   {
-                      throw std::exception(_T("Overwritting the SST"));
+                      throw std::exception("Overwritting the SST");
                   }
 
                   Vc->gmsSST->Pull(Vc);
@@ -780,7 +769,7 @@ volatile int Group::JoinsProcessed = 0;
 
                   if (Vc->IAmLeader() && !failed)
                   {
-                      g->CommitJoin(Vnext, q);
+                      g->CommitJoin(*Vnext, q);
                   }
 
                   Vnext->gmsSST->Enable();
@@ -809,10 +798,10 @@ volatile int Group::JoinsProcessed = 0;
       {
           for (int n = 0; n < Vc->n; n++)
           {
-              Vc->rdmc[n]->Wedge(); // RDMC finishes sending, stops new sends or receives in Vc
+              Vc->rdmc[n].Wedge(); // RDMC finishes sending, stops new sends or receives in Vc
           }
 
-          gmsSST->row[myRank]->Wedged = true;
+          gmsSST->row[myRank].wedged = true;
       }
 
       void Program::AwaitMetaWedged(const std::shared_ptr<View>& Vc)
@@ -820,15 +809,15 @@ volatile int Group::JoinsProcessed = 0;
           int cnt = 0;
           for (int n = 0; n < Vc->n; n++)
           {
-              while (!Vc->Failed[n] && !Vc->gmsSST->row[n]->Wedged)
+              while (!Vc->failed[n] && !Vc->gmsSST->row[n].wedged)
               {
                   /* busy-wait */
                   if (cnt++ % 100 == 0)
                   {
-                      std::cout << std::string(_T("Process ")) << Vc->members[Vc->myRank] << std::string(_T("... loop in AwaitMetaWedged / ")) << Vc->gmsSST->row[n]->gmsSSTRowInstance << std::endl;
+                      std::cout << std::string("Process ") << Vc->members[Vc->myRank] << std::string("... loop in AwaitMetaWedged / ") << Vc->gmsSST->row[n].gmsSSTRowInstance << std::endl;
                   }
 
-                  delay(10);
+                  std::this_thread::sleep_for(std::chrono::milliseconds(10));
                   Vc->gmsSST->Pull(Vc);
               }
           }
@@ -837,7 +826,7 @@ volatile int Group::JoinsProcessed = 0;
       int Program::AwaitLeaderGlobalMinReady(const std::shared_ptr<View>& Vc)
       {
           int Leader = Vc->RankOfLeader();
-          while (!Vc->gmsSST->row[Leader]->GlobalMinReady)
+          while (!Vc->gmsSST->row[Leader].globalMinReady)
           {
               Leader = Vc->RankOfLeader();
               Vc->gmsSST->Pull(Vc);
@@ -848,13 +837,13 @@ volatile int Group::JoinsProcessed = 0;
       void Program::DeliverInOrder(const std::shared_ptr<View>& Vc, int Leader)
       {
           // Ragged cleanup is finished, deliver in the implied order
-          std::string deliveryOrder = std::string(_T("Delivery Order (View ")) + Vc->vid + std::string(_T(") { "));
+          std::string deliveryOrder = std::string("Delivery Order (View ") + std::to_string(Vc->vid) + std::string(" { ");
           for (int n = 0; n < Vc->n; n++)
           {
-              deliveryOrder += Vc->gmsSST->myPid + std::string(_T(":0..")) + Vc->gmsSST->row[Leader]->GlobalMin[n] + std::string(_T(" "));
+              deliveryOrder += Vc->gmsSST->myPid + std::string(":0..") + std::to_string(Vc->gmsSST->row[Leader].globalMin[n]) + std::string(" ");
           }
 
-          std::cout << deliveryOrder << std::string(_T("}")) << std::endl;
+          std::cout << deliveryOrder << std::string("}") << std::endl;
       }
 
       void Program::RaggedEdgeCleanup(const std::shared_ptr<View>& Vc)
@@ -865,14 +854,14 @@ volatile int Group::JoinsProcessed = 0;
           int Leader = Vc->RankOfLeader(); // We don’t want this to change under our feet
           if (Vc->IAmLeader())
           {
-              std::cout << std::string(_T("Running RaggedEdgeCleanup: ")) << Vc << std::endl;
+              std::cout << std::string("Running RaggedEdgeCleanup: ") << Vc << std::endl;
               bool found = false;
               Vc->gmsSST->Pull(Vc);
               for (int n = 0; n < Vc->n && !found; n++)
               {
-                  if (Vc->gmsSST->row[n]->GlobalMinReady)
+                  if (Vc->gmsSST->row[n].globalMinReady)
                   {
-                      Array::Copy(Vc->gmsSST->row[myRank]->GlobalMin, Vc->gmsSST->row[n]->GlobalMin, Vc->n);
+                      std::copy_n(Vc->gmsSST->row[myRank].globalMin.begin(), Vc->n, Vc->gmsSST->row[n].globalMin.begin());
                       found = true;
                   }
               }
@@ -881,29 +870,31 @@ volatile int Group::JoinsProcessed = 0;
               {
                   for (int n = 0; n < Vc->n; n++)
                   {
-                      int min = Vc->gmsSST->row[myRank]->nReceived[n];
+                      int min = Vc->gmsSST->row[myRank].nReceived[n];
                       for (int r = 0; r < Vc->n; r++)
                       {
-                          if (!Vc->Failed[r] && min > Vc->gmsSST->row[r]->nReceived[n])
+                          if (!Vc->failed[r] && min > Vc->gmsSST->row[r].nReceived[n])
                           {
-                              min = Vc->gmsSST->row[r]->nReceived[n];
+                              min = Vc->gmsSST->row[r].nReceived[n];
                           }
                       }
 
-                      Vc->gmsSST->row[myRank]->GlobalMin[n] = min;
+                      Vc->gmsSST->row[myRank].globalMin[n] = min;
                   }
               }
 
-              Vc->gmsSST->row[myRank]->GlobalMinReady = true;
+              Vc->gmsSST->row[myRank].globalMinReady = true;
               Vc->gmsSST->Push(Vc->myRank, Vc->vid);
-              std::cout << std::string(_T("RaggedEdgeCleanup: FINAL = ")) << Vc << std::endl;
+              std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc << std::endl;
           }
           else
           {
               // Learn the leader’s data and push it before acting upon it
               Leader = AwaitLeaderGlobalMinReady(Vc);
-              Array::Copy(Vc->gmsSST->row[myRank]->GlobalMin, Vc->gmsSST->row[Leader]->GlobalMin, Vc->n);
-              Vc->gmsSST->row[myRank]->GlobalMinReady = true;
+              //Why on earth does this copy FROM my row TO Leader's row? It's like that in the original C# too, but it must be an error.
+              //This should copy FROM the leader's row TO my row, if we want to learn the leader's data and then push it.
+              std::copy_n(Vc->gmsSST->row[myRank].globalMin.begin(), Vc->n, Vc->gmsSST->row[Leader].globalMin.begin());
+              Vc->gmsSST->row[myRank].globalMinReady = true;
               Vc->gmsSST->Push(Vc->myRank, Vc->vid);
           }
 
