@@ -6,7 +6,7 @@ add_subdirectory(rdmc EXCLUDE_FROM_ALL)
 add_subdirectory(sst EXCLUDE_FROM_ALL)
 add_subdirectory(experiments)
 
-add_library(derecho derecho_group.cpp)
+add_library(derecho derecho_group.cpp filewriter.cpp)
 target_link_libraries(derecho rdmacm ibverbs boost_system rt pthread atomic rdmc sst)
 
 add_executable(main main.cpp)

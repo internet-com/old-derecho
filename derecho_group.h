@@ -8,6 +8,7 @@
 #include <tuple>
 #include <map>
 #include <set>
+#include <string>
 #include <queue>
 #include <vector>
 #include <cassert>
@@ -15,11 +16,13 @@
 
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
+#include "filewriter.h"
 
 using std::cout;
 using std::endl;
 using std::vector;
 using std::pair;
+using std::string;
 
 namespace derecho {
   typedef std::function<void (int, long long int, char*, long long int)> message_callback;
@@ -88,10 +91,12 @@ namespace derecho {
 
     sst::SST<Row, sst::Mode::Writes> *sst;    
 
+    std::unique_ptr<filewriter> ssd_writer;
+
     void send_loop ();
   public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback global_stability_callback, string ouput_filename="", rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
     // get a position in the buffer before sending
     char* get_position (long long unsigned int msg_size);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*

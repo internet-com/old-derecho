@@ -10,7 +10,14 @@ using std::unique_lock;
 using std::lock_guard;
 
 namespace derecho {
-  derecho_group::derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback _global_stability_callback, rdmc::send_algorithm _type, unsigned int _window_size) {
+	derecho_group::derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_msg_size, long long unsigned int _block_size, message_callback _global_stability_callback, string output_filename, rdmc::send_algorithm _type, unsigned int _window_size) {
+
+    if (output_filename != "") {
+      ssd_writer = std::make_unique<filewriter>([](filewriter::message m) {
+			  // TODO
+      }, output_filename);
+    }
+
     // copy the parameters
     members = _members;
     num_members = members.size();
@@ -149,6 +156,16 @@ namespace derecho {
 	long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
 	if (least_undelivered_seq_num <= min_stable_num) {
 	  msg_info msg = locally_stable_messages.begin()->second;
+
+	  if(ssd_writer){
+        filewriter::message m;
+        m.sender = msg.sender_id;
+	    m.message_number = msg.index * num_members + msg.sender_id;
+		m.data = buffers[msg.sender_id].get() + msg.offset;
+		m.length = msg.size;
+		ssd_writer->write_message(m);
+	  }
+	  
 	  global_stability_callback (msg.sender_id, msg.index, buffers[msg.sender_id].get() + msg.offset, msg.size);
 	  sst[member_index].delivered_num = least_undelivered_seq_num;
 	  sst.put (offsetof (Row, delivered_num), sizeof (least_undelivered_seq_num));
