@@ -8,13 +8,13 @@
 #include <iostream>
 #include <string>
 
-#include "derecho_group.h"
 
 using std::string;
 using std::cin;
 using std::cout;
 using std::endl;
 
+#include "derecho_group.h"
 #include "experiments/block_size.h"
 #include "managed_group.h"
 #include "view.h"

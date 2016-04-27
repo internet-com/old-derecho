@@ -6,6 +6,7 @@
  */
 
 #include <vector>
+#include <cstring>
 
 #include "view_utils.h"
 #include "view.h"
@@ -18,7 +19,7 @@ bool NotEqual(const View& theView, const std::vector<bool>& old)
     {
         for (int who = 0; who < View::N; who++)
         {
-            if ((*theView.gmsSST)[r].Suspected[who] && !old[who])
+            if ((*theView.gmsSST)[r].suspected[who] && !old[who])
             {
                 return true;
             }
@@ -38,10 +39,10 @@ void Copy(const View& Vc, std::vector<bool>& old)
 
 bool ChangesContains(const View& Vc, const ip_addr& q)
 {
-    DerechoRow<View::N>& myRow = (*Vc.gmsSST)[Vc.my_rank];
+    auto& myRow = (*Vc.gmsSST)[Vc.my_rank];
     for (int n = myRow.nCommitted; n < myRow.nChanges; n++)
     {
-        const ip_addr& p = myRow.changes[n % View::N];
+        const ip_addr p(const_cast<cstring&>(myRow.changes[n % View::N]));
         if (!p.empty() && p == q)
         {
             return true;
@@ -83,11 +84,8 @@ void Merge(View& Vc, int myRank) {
     // Merge the change lists
     for (int n = 0; n < Vc.num_members; n++) {
         if ((*Vc.gmsSST)[myRank].nChanges < (*Vc.gmsSST)[n].nChanges) {
-            std::copy((*Vc.gmsSST)[n].changes[0], (*Vc.gmsSST)[n].changes[View::N], (*Vc.gmsSST)[myRank].changes[0]);
+            gmssst::set((*Vc.gmsSST)[myRank].changes, (*Vc.gmsSST)[n].changes);
             (*Vc.gmsSST)[myRank].nChanges = (*Vc.gmsSST)[n].nChanges;
-            if ((*Vc.gmsSST)[myRank].nChanges > GMSTableRow<View::N>::maxChanges) {
-                GMSTableRow<View::N>::maxChanges = (*Vc.gmsSST)[myRank].nChanges;
-            }
         }
 
         if ((*Vc.gmsSST)[myRank].nCommitted < (*Vc.gmsSST)[n].nCommitted) // How many I know to have been committed
@@ -100,7 +98,7 @@ void Merge(View& Vc, int myRank) {
         if (Vc.failed[n]) {
             // Make sure that the failed process is listed in the Changes vector as a proposed change
             for (int c = (*Vc.gmsSST)[myRank].nCommitted; c < (*Vc.gmsSST)[myRank].nChanges && !found; c++) {
-                if ((*Vc.gmsSST)[myRank].changes[c % View::N] == Vc.members[n]) {
+                if (gmssst::equals((*Vc.gmsSST)[myRank].changes[c % View::N], Vc.members[n].c_str())) {
                     // Already listed
                     found = true;
                 }
@@ -111,11 +109,8 @@ void Merge(View& Vc, int myRank) {
         }
 
         if (!found) {
-            (*Vc.gmsSST)[myRank].changes[(*Vc.gmsSST)[myRank].nChanges % View::N] = Vc.members[n];
+            gmssst::set((*Vc.gmsSST)[myRank].changes[(*Vc.gmsSST)[myRank].nChanges % View::N], Vc.members[n]);
             (*Vc.gmsSST)[myRank].nChanges++;
-            if ((*Vc.gmsSST)[myRank].nChanges > GMSTableRow<View::N>::maxChanges) {
-                GMSTableRow<View::N>::maxChanges = (*Vc.gmsSST)[myRank].nChanges;
-            }
         }
     }
     Vc.gmsSST->put();

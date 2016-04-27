@@ -18,7 +18,7 @@ using std::shared_ptr;
 
 
 int View::rank_of_leader() const {
-    for(size_t r = 0; r < my_rank; ++r) {
+    for(int r = 0; r < my_rank; ++r) {
         if(!failed[r]) {
             return r;
         }
@@ -27,7 +27,7 @@ int View::rank_of_leader() const {
 }
 
 int View::rank_of(const ip_addr& who) const {
-    for(size_t rank = 0; rank < num_members; ++rank) {
+    for(int rank = 0; rank < num_members; ++rank) {
         if(members[rank] == who) {
             return rank;
         }
@@ -42,7 +42,7 @@ int View::rank_of(const ip_addr& who) const {
  * @return Member p's current belief of who the leader is
  */
 int View::rank_of_leader(const uint32_t& p) const {
-    for(size_t r = 0; r < num_members; ++r) {
+    for(int r = 0; r < num_members; ++r) {
         if(!(*gmsSST)[p].suspected[r])
             return r;
     }
@@ -84,7 +84,7 @@ bool View::IAmLeader() const {
 }
 
 std::string View::ToString() const {
-    string s = std::string("View ") + vid + string(": MyRank=") + my_rank + string("... ");
+    string s = std::string("View ") + std::to_string(vid) + string(": MyRank=") + std::to_string(my_rank) + string("... ");
     string ms = " ";
     for (int m = 0; m < num_members; m++) {
         ms += string(members[m]) + string("  ");
@@ -93,18 +93,18 @@ std::string View::ToString() const {
     s += string("Members={") + ms + string("}, ");
     string fs = (" ");
     for (int m = 0; m < num_members; m++) {
-        fs += string(failed[m]) ? string(" T ") : string(" F ");
+        fs += failed[m] ? string(" T ") : string(" F ");
     }
 
-    s += string("Failed={") + fs + string(" }, nFailed=") + string(nFailed);
+    s += string("Failed={") + fs + string(" }, nFailed=") + std::to_string(nFailed);
     shared_ptr<ip_addr> dep = Departed();
     if (dep != nullptr) {
-        s += string(", Departed: ") + string(*dep);
+        s += string(", Departed: ") + *dep;
     }
 
     shared_ptr<ip_addr> join = Joined();
     if (join != nullptr) {
-        s += string(", Joined: ") + string(*join);
+        s += string(", Joined: ") + *join;
     }
 
 //    s += string("\n") + gmsSST->ToString();

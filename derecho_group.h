@@ -12,9 +12,9 @@
 #include <vector>
 #include <memory>
 
+#include "derecho_row.h"
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
-#include "gms_sst_row.h"
 
 namespace derecho {
 
@@ -48,6 +48,8 @@ struct MessageTrackingRow {
          * at this node. Messages are only delievered once stable, so it must be
          * at least stable_num. */
         long long int delivered_num;
+//        MessageTrackingRow() = default;
+//        MessageTrackingRow(MessageTrackingRow& o) = delete;
 };
 
 struct msg_info {
@@ -57,21 +59,15 @@ struct msg_info {
         long long unsigned int size;
 };
 
-/**
- * The GMS and derecho_group will share the same SST for efficiency, and we
- * define its row as simply the union of the row variables needed by each class.
- */
-template<unsigned int N>
-struct DerechoRow : public GMSTableRow<N>, public MessageTrackingRow {};
 
 /** combines sst and rdmc to give an abstraction of a group where anyone can send
  * template parameter is the maximum possible group size - used for the GMS SST row-struct */
 template<unsigned int N>
 class derecho_group {
-        /**  number of members */
-        int num_members;
         /** vector of member id's */
         std::vector<int> members;
+        /**  number of members */
+        int num_members;
         /** index of the local node in the members vector, which should also be its row index in the SST */
         int member_index;
         /** Block size used for message transfer.
@@ -88,7 +84,7 @@ class derecho_group {
         /** Indicates whether this sending group is paused pending a reconfiguration.
          * Once wedged, no more messages will be sent or delivered in this group.
          * Atomic because it's shared with the background sender thread. */
-        std::atomic<bool> wedged = false;
+        std::atomic<bool> wedged;
 
         /** pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free */
         std::vector<long long unsigned int> start, end;
@@ -144,5 +140,8 @@ class derecho_group {
         /** Debugging function; prints the current state of the SST to stdout. */
         void sst_print();
 };
-}
+} //namespace derecho
+
+#include "derecho_group_impl.h"
+
 #endif /* DERECHO_GROUP_H */

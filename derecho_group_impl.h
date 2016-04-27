@@ -1,4 +1,7 @@
+#pragma once
+
 #include "derecho_group.h"
+
 #include <cassert>
 #include <algorithm>
 #include <chrono>
@@ -36,7 +39,9 @@ derecho_group<N>::derecho_group(vector<int> _members, int node_rank, std::shared
         rdmc::send_algorithm _type, unsigned int _window_size) :
             members(_members), num_members(members.size()), block_size(_block_size), buffer_size(_buffer_size), type(_type),
             window_size(_window_size), global_stability_callback(_global_stability_callback), background_threads(),
-            thread_shutdown(false), sst(_sst) {
+            sst(_sst) {
+    thread_shutdown = false;
+    wedged = false;
     // find my member_index
     for (int i = 0; i < num_members; ++i) {
         if (members[i] == node_rank) {
@@ -75,18 +80,19 @@ derecho_group<N>::derecho_group(vector<int> _members, int node_rank, std::shared
         auto rdmc_receive_handler =
                 [this, i](char *data, size_t size) {
                     lock_guard <mutex> lock (msg_state_mtx);
-                    (*sst)[member_index].nRecieved[i]++;
-                    locally_stable_messages[(*sst)[member_index].nRecieved[i]*num_members + i] = {i,
-                            (*sst)[member_index].nRecieved[i], (long long unsigned int) (data-buffers[i].get()), size};
-                    long long int* min_ptr = std::min_element((*sst)[member_index].nRecieved[0], (*sst)[member_index].nRecieved[num_members]);
-                    int index = std::distance((*sst)[member_index].nRecieved[0], min_ptr);
-                    long long int new_seq_num = (*min_ptr + 1) * num_members + index-1;
+                    (*sst)[member_index].nReceived[i]++;
+                    locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i,
+                            (*sst)[member_index].nReceived[i], (long long unsigned int) (data-buffers[i].get()), size};
+                    auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
+                    int index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
+                    auto new_seq_num = (*min_ptr + 1) * num_members + index-1;
                     if (new_seq_num > (*sst)[member_index].seq_num) {
                         (*sst)[member_index].seq_num = new_seq_num;
 //                        sst->put (offsetof (DerechoRow<N>, seq_num), sizeof (new_seq_num));
                         sst->put();
                     } else {
-                        sst->put(offsetof(DerechoRow<N>, nReceived[i]), sizeof((*sst)[member_index].nRecieved[i]));
+                        size_t size_nReceived = sizeof((*sst)[member_index].nReceived[i]);
+                        sst->put(offsetof(DerechoRow<N>, nReceived) + i * size_nReceived, size_nReceived);
                     }
                 };
         // i is the group number
@@ -98,7 +104,7 @@ derecho_group<N>::derecho_group(vector<int> _members, int node_rank, std::shared
                     [this, i](size_t length) -> rdmc::receive_destination {
                         return {mrs[i], (buffer_size-start[i] < length)? 0:(size_t)start[i]};
                     },
-                    [this, i](char* data, size_t size) {
+                    [&](char* data, size_t size) {
                         rdmc_receive_handler(data, size);
                         //signal background writer thread
                         derecho_cv.notify_one();
@@ -229,7 +235,7 @@ void derecho_group<N>::send_loop() {
             return false;
         }
         msg_info msg = pending_sends.front ();
-        if ((*sst)[member_index].nRecieved[member_index] < msg.index-1) {
+        if ((*sst)[member_index].nReceived[member_index] < msg.index-1) {
             return false;
         }
 

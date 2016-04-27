@@ -11,9 +11,9 @@
 #include <cstdint>
 #include <memory>
 
-#include "gms_sst_row.h"
 #include "sst/sst.h"
 #include "derecho_group.h"
+#include "derecho_row.h"
 
 namespace derecho {
 

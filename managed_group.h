@@ -54,9 +54,9 @@ class ManagedGroup {
         void receive_join(tcp::socket& client_socket);
 
         /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
-        static View start_group(const ip_addr& my_ip);
+        static std::unique_ptr<View> start_group(const ip_addr& my_ip);
         /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-        static View join_existing(const ip_addr& leader_ip, const int leader_port);
+        static std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
 
         //Ken's helper methods
         static void deliver_in_order(const View& Vc, int Leader);
@@ -76,7 +76,7 @@ class ManagedGroup {
         void transition_sst_and_rdmc(View& newView, int whichFailed);
 
     public:
-        View curr_view;
+        std::unique_ptr<View> curr_view; //must be a pointer so we can re-assign it
 
         /** Constructor, starts or joins a managed Derecho group.
          * If my_ip == leader_ip, starts a new group with this node as the leader.
