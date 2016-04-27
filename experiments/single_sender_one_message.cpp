@@ -59,7 +59,7 @@ int main () {
     cout << endl;
   };
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::DerechoGroup g (members, node_rank, buffer_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 

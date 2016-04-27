@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <memory>
 
-#include "sst/sst.h"
 #include "derecho_group.h"
+#include "sst/sst.h"
 #include "derecho_row.h"
 
 namespace derecho {
@@ -22,6 +22,8 @@ class View {
     public:
         /** Upper bound on the number of members that will ever be in any one view. */
         static constexpr int N = 10;
+
+        using DerechoSST = sst::SST<DerechoRow<N>>;
 
         /** Sequential view ID: 0, 1, ... */
         int vid;
@@ -37,8 +39,8 @@ class View {
         /** For member p, returns rankOf(p) */
         int my_rank;
         /** RDMC manager object containing one RDMC group for each sender */
-        std::unique_ptr<derecho_group<N>> rdmc_sending_group;
-        std::shared_ptr<sst::SST<DerechoRow<N>>> gmsSST;
+        std::unique_ptr<DerechoGroup<N>> rdmc_sending_group;
+        std::shared_ptr<DerechoSST> gmsSST;
 
         void newView(const View& Vc);
 

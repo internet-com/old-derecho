@@ -14,6 +14,7 @@
 #include <atomic>
 
 #include "managed_group.h"
+
 #include "derecho_group.h"
 #include "derecho_row.h"
 #include "view.h"
@@ -27,12 +28,13 @@ using std::vector;
 using std::make_shared;
 using std::make_unique;
 using std::unique_ptr;
+using sst::SST;
 
 ManagedGroup::ManagedGroup(const int gms_port, const ip_addr& my_ip, const ip_addr& leader_ip, long long unsigned int _buffer_size, long long unsigned int _block_size,
                 message_callback global_stability_callback, rdmc::send_algorithm _type, unsigned int _window_size) :
-        gms_port(gms_port), thread_shutdown(false), background_threads() {
+        last_suspected(View::N), gms_port(gms_port), preds_disabled(false), thread_shutdown(false), background_threads(), next_view(nullptr) {
     if (my_ip != leader_ip){
-        this->curr_view = join_existing(leader_ip, gms_port);
+        curr_view = join_existing(leader_ip, gms_port);
     } else {
         curr_view = start_group(my_ip);
     }
@@ -41,11 +43,239 @@ ManagedGroup::ManagedGroup(const int gms_port, const ip_addr& my_ip, const ip_ad
     setup_sst_and_rdmc(_buffer_size, _block_size, global_stability_callback, _type, _window_size);
 
     background_threads.emplace_back(std::thread{[&](){
-        tcp::connection_listener ss(gms_port);
+        tcp::connection_listener serversocket(gms_port);
         while (!thread_shutdown)
-            pending_joins.locked().access.emplace_back(ss.accept());
+            pending_joins.locked().access.emplace_back(serversocket.accept());
     }});
-    background_threads.emplace_back(std::thread(&ManagedGroup::monitor_changes,this));
+
+    register_predicates();
+}
+
+void ManagedGroup::register_predicates() {
+
+    using DerechoSST = View::DerechoSST;
+
+    auto suspected_changed = [this](const DerechoSST& sst) {
+        return suspected_not_equal(sst, last_suspected);
+    };
+    auto suspected_changed_trig = [this](DerechoSST& gmsSST) {
+        View& Vc = *curr_view;
+        int myRank = curr_view->my_rank;
+        //These fields had better be synchronized.
+        assert(gmsSST.get_local_index() == curr_view->my_rank);
+        // Aggregate suspicions into gmsSST[myRank].Suspected;
+        for (int r = 0; r < Vc.num_members; r++)
+        {
+            for (int who = 0; who < Vc.num_members; who++)
+            {
+                gmssst::set(gmsSST[myRank].suspected[who], gmsSST[myRank].suspected[who] || gmsSST[r].suspected[who]);
+            }
+        }
+
+        for (int q = 0; q < Vc.num_members; q++)
+        {
+            if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
+            {
+                if (Vc.nFailed + 1 >= View::N / 2)
+                {
+                    throw std::runtime_error("Majority of a Derecho group simultaneously failed … shutting down");
+                }
+
+                gmsSST.freeze(q); // Cease to accept new updates from q
+                Vc.rdmc_sending_group->wedge();
+                gmssst::set(gmsSST[myRank].wedged, true); // RDMC has halted new sends and receives in theView
+                Vc.failed[q] = true;
+                Vc.nFailed++;
+
+                if (Vc.nFailed > Vc.num_members / 2 || (Vc.nFailed == Vc.num_members / 2 && Vc.num_members % 2 == 0))
+                {
+                    throw std::runtime_error("Potential partitioning event: this node is no longer in the majority and must shut down!");
+                }
+
+                gmsSST.put();
+                if (Vc.IAmLeader() && !changes_contains(gmsSST, Vc.members[q])) // Leader initiated
+                {
+                    if ((gmsSST[myRank].nChanges - gmsSST[myRank].nCommitted) == View::N)
+                    {
+                        throw std::runtime_error("Ran out of room in the pending changes list");
+                    }
+
+                    gmssst::set(gmsSST[myRank].changes[gmsSST[myRank].nChanges % View::N], Vc.members[q]); // Reports the failure (note that q NotIn members)
+                    gmssst::increment(gmsSST[myRank].nChanges);
+                    std::cout << std::string("NEW SUSPICION: adding ") << Vc.members[q] << std::string(" to the CHANGES/FAILED list") << std::endl;
+                    gmsSST.put();
+                }
+            }
+        }
+        copy_suspected(gmsSST, last_suspected);
+    };
+
+    auto start_join_pred = [this](const DerechoSST& sst) {
+        return !preds_disabled && curr_view->IAmLeader() && has_pending_join();
+    };
+    auto start_join_trig = [this](DerechoSST& sst) {
+        joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
+        pending_joins.locked().access.pop_front(); //because C++ list doesn't properly implement queues, this returns void
+        receive_join(joining_client_socket);
+    };
+
+
+    auto change_commit_ready = [this](const DerechoSST& gmsSST) {
+        return !preds_disabled && curr_view->my_rank == curr_view->rank_of_leader()
+                && min_acked(gmsSST, curr_view->failed) > gmsSST[gmsSST.get_local_index()].nCommitted;
+    };
+    auto commit_change = [this](DerechoSST& gmsSST) {
+        gmsSST[gmsSST.get_local_index()].nCommitted = min_acked(gmsSST, curr_view->failed); // Leader commits a new request
+        gmsSST.put();
+    };
+
+    auto leader_proposed_change = [this](const DerechoSST& gmsSST) {
+        return !preds_disabled
+                && gmsSST[curr_view->rank_of_leader()].nChanges > gmsSST[gmsSST.get_local_index()].nAcked;
+    };
+    auto ack_proposed_change = [this](DerechoSST& gmsSST) {
+        //These fields had better be synchronized.
+        assert(gmsSST.get_local_index() == curr_view->my_rank);
+        int myRank = gmsSST.get_local_index();
+        int leader = curr_view->rank_of_leader();
+        wedge_view(*curr_view);
+        if (myRank != leader)
+        {
+            gmssst::set(gmsSST[myRank].changes, gmsSST[leader].changes); // Echo (copy) the vector including the new changes
+            gmsSST[myRank].nChanges = gmsSST[leader].nChanges; // Echo the count
+            gmsSST[myRank].nCommitted = gmsSST[leader].nCommitted;
+        }
+
+        gmsSST[myRank].nAcked = gmsSST[leader].nChanges; // Notice a new request, acknowledge it
+        gmsSST.put();
+    };
+
+    auto leader_committed_next_view = [this](const DerechoSST& gmsSST) {
+        return !preds_disabled && gmsSST[curr_view->rank_of_leader()].nCommitted > curr_view->vid;
+    };
+    auto start_view_change = [this](DerechoSST& gmsSST)  {
+        preds_disabled = true; // Disables all the other SST predicates, except suspected_changed and the one I'm about to register
+
+        View& Vc = *curr_view;
+        int myRank = curr_view->my_rank;
+        //These fields had better be synchronized.
+        assert(gmsSST.get_local_index() == curr_view->my_rank);
+
+        wedge_view(Vc);
+        ip_addr currChangeIP(const_cast<cstring &>(gmsSST[myRank].changes[Vc.vid % View::N]));
+        next_view = std::make_unique<View>();
+        next_view->vid = Vc.vid + 1;
+        next_view->IKnowIAmLeader = Vc.IKnowIAmLeader;
+        ip_addr myIPAddr = Vc.members[myRank];
+        bool failed;
+        int whoFailed = Vc.rank_of(currChangeIP);
+        if (whoFailed != -1)
+        {
+            failed = true;
+            next_view->nFailed = Vc.nFailed - 1;
+            next_view->num_members = Vc.num_members - 1;
+        }
+        else
+        {
+            failed = false;
+            next_view->nFailed = Vc.nFailed;
+            next_view->num_members = Vc.num_members;
+            next_view->members[next_view->num_members++] = currChangeIP;
+        }
+
+        int m = 0;
+        for (int n = 0; n < Vc.num_members; n++)
+        {
+            if (n != whoFailed)
+            {
+                next_view->members[m] = Vc.members[n];
+                next_view->failed[m] = Vc.failed[n];
+                ++m;
+            }
+        }
+
+        next_view->who = std::make_shared<ip_addr>(currChangeIP);
+        if ((next_view->my_rank = next_view->rank_of(myIPAddr)) == -1)
+        {
+            std::cout << std::string("Some other process reported that I failed.  Process ") << myIPAddr << std::string(" terminating") << std::endl;
+            return;
+        }
+
+        if (next_view->gmsSST != nullptr)
+        {
+            throw std::runtime_error("Overwriting the SST");
+        }
+
+        //At this point we need to await "meta wedged."
+        //To do that, we create a predicate that will fire when meta wedged is true, and put the rest of the code in its trigger.
+
+        auto is_meta_wedged = [&Vc] (const DerechoSST& gmsSST) {
+            for(int n = 0; n < gmsSST.get_num_rows(); ++n) {
+                if(!Vc.failed[n] && !gmsSST[n].wedged) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        auto meta_wedged_continuation = [this, failed, whoFailed] (DerechoSST& gmsSST) {
+
+            if(curr_view->IAmLeader()) {
+                //The leader doesn't need to wait any more, it can execute continuously from here.
+
+                leader_ragged_edge_cleanup(*curr_view); // Finalize deliveries in Vc
+                if(!failed) {
+                    //Send the view to the newly joined client before we try to do SST and RDMC setup
+                    commit_join(*next_view, joining_client_socket);
+                }
+                //This will block until everyone responds to SST/RDMC initial handshakes
+                transition_sst_and_rdmc(*next_view, whoFailed);
+                next_view->gmsSST->put();
+
+                //Overwrite the current view with the next view, causing it to get destroyed
+                curr_view = std::move(next_view);
+                curr_view->newView(*curr_view); // Announce the new view to the application
+
+                // First task with my new view...
+                if (IAmTheNewLeader(*curr_view)) // I'm the new leader and everyone who hasn't failed agrees
+                {
+                    merge_changes(*curr_view); // Create a combined list of Changes
+                }
+            } else {
+                //Non-leaders need another level of continuation. This necessitates copying code, unfortunately...
+
+                View& curr_view_captured = *curr_view;
+                auto leader_globalMin_is_ready = [&curr_view_captured](const DerechoSST& gmsSST) {
+                    return gmsSST[curr_view_captured.rank_of_leader()].globalMinReady;
+                };
+                auto globalMin_ready_continuation = [this, whoFailed](DerechoSST& gmsSST) {
+                    follower_ragged_edge_cleanup(*curr_view);
+                    //This will block until everyone responds to SST/RDMC initial handshakes
+                    transition_sst_and_rdmc(*next_view, whoFailed);
+                    next_view->gmsSST->put();
+
+                    //Overwrite the current view with the next view, causing it to get destroyed
+                    curr_view = std::move(next_view);
+                    curr_view->newView(*curr_view); // Announce the new view to the application
+
+                    // First task with my new view...
+                    if (IAmTheNewLeader(*curr_view)) // I'm the new leader and everyone who hasn't failed agrees
+                    {
+                        merge_changes(*curr_view); // Create a combined list of Changes
+                    }
+                };
+                gmsSST.predicates.insert(leader_globalMin_is_ready, globalMin_ready_continuation, sst::PredicateType::ONE_TIME);
+            }
+
+        };
+        gmsSST.predicates.insert(is_meta_wedged, meta_wedged_continuation, sst::PredicateType::ONE_TIME);
+
+    };
+
+    curr_view->gmsSST->predicates.insert(suspected_changed, suspected_changed_trig, sst::PredicateType::RECURRENT);
+	curr_view->gmsSST->predicates.insert(start_join_pred, start_join_trig, sst::PredicateType::RECURRENT);
+	curr_view->gmsSST->predicates.insert(change_commit_ready, commit_change, sst::PredicateType::RECURRENT);
+	curr_view->gmsSST->predicates.insert(leader_proposed_change, ack_proposed_change, sst::PredicateType::RECURRENT);
+	curr_view->gmsSST->predicates.insert(leader_committed_next_view, start_view_change, sst::PredicateType::RECURRENT);
 }
 
 ManagedGroup::~ManagedGroup() {
@@ -72,8 +302,10 @@ void ManagedGroup::setup_sst_and_rdmc(long long unsigned int buffer_size, long l
         member_ranks[i] = i;
     }
     curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(member_ranks, curr_view->my_rank);
-    (*curr_view->gmsSST)[0].nReceived[0] = 21;
-    curr_view->rdmc_sending_group = make_unique<derecho_group<View::N>>(member_ranks, curr_view->my_rank,
+    for(int r = 0; r < curr_view->num_members; ++r) {
+        gmssst::init((*curr_view->gmsSST)[r]);
+    }
+    curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::N>>(member_ranks, curr_view->my_rank,
             curr_view->gmsSST, buffer_size, block_size, global_stability_callback, type, window_size);
 }
 
@@ -95,7 +327,7 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
         member_ranks[i] = i;
     }
     newView.gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(member_ranks, newView.my_rank);
-    newView.rdmc_sending_group = make_unique<derecho_group<View::N>>(member_ranks, newView.my_rank,
+    newView.rdmc_sending_group = make_unique<DerechoGroup<View::N>>(member_ranks, newView.my_rank,
             newView.gmsSST, *curr_view->rdmc_sending_group);
 
     int m = 0;
@@ -108,6 +340,7 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
             volatile auto& new_row = (*newView.gmsSST)[m++];
             volatile auto& old_row = (*curr_view->gmsSST)[n];
             gmssst::template init_from_existing<View::N>(new_row, old_row);
+            new_row.vid = newView.vid;
         }
     }
 
@@ -185,6 +418,47 @@ void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket)
     client_socket.write((char*) &new_view.num_members, sizeof(new_view.num_members));
 }
 
+/* ------------------------- Static helper methods ------------------------- */
+
+bool ManagedGroup::suspected_not_equal(const View::DerechoSST& gmsSST, const vector<bool> old) {
+    for (int r = 0; r < gmsSST.get_num_rows(); r++) {
+        for (int who = 0; who < View::N; who++) {
+            if (gmsSST[r].suspected[who] && !old[who]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void ManagedGroup::copy_suspected(const View::DerechoSST& gmsSST, vector<bool>& old) {
+    for(int who = 0; who < gmsSST.get_num_rows(); ++who) {
+        old[who] = gmsSST[gmsSST.get_local_index()].suspected[who];
+    }
+}
+
+bool ManagedGroup::changes_contains(const View::DerechoSST& gmsSST, const ip_addr& q) {
+    auto& myRow = gmsSST[gmsSST.get_local_index()];
+    for (int n = myRow.nCommitted; n < myRow.nChanges; n++) {
+        const ip_addr p(const_cast<cstring&>(myRow.changes[n % View::N]));
+        if (!p.empty() && p == q) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const bool (&failed)[View::N]) {
+    int myRank = gmsSST.get_local_index();
+    int min = gmsSST[myRank].nAcked;
+    for (int n = 0; n < gmsSST.get_num_rows(); n++) {
+        if (!failed[n] && gmsSST[n].nAcked < min) {
+            min = gmsSST[n].nAcked;
+        }
+    }
+
+    return min;
+}
 
 int ManagedGroup::await_leader_globalMin_ready(const View& Vc) {
     int Leader = Vc.rank_of_leader();
@@ -223,63 +497,74 @@ void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
     std::cout << deliveryOrder << std::string("}") << std::endl;
 }
 
-void ManagedGroup::ragged_edge_cleanup(View& Vc) {
-    await_meta_wedged(Vc);
+void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
     int myRank = Vc.my_rank;
-    // This logic depends on the transitivity of the K1 operator, as discussed last week
-    int Leader = Vc.rank_of_leader(); // We don’t want this to change under our feet
-    if (Vc.IAmLeader())
+    int Leader = Vc.rank_of_leader(); // We don't want this to change under our feet
+    std::cout << std::string("Running RaggedEdgeCleanup: ") << Vc.ToString() << std::endl;
+    bool found = false;
+    for (int n = 0; n < Vc.num_members && !found; n++)
     {
-        std::cout << std::string("Running RaggedEdgeCleanup: ") << Vc.ToString() << std::endl;
-        bool found = false;
-//        Vc.gmsSST->Pull(Vc);
-        for (int n = 0; n < Vc.num_members && !found; n++)
+        if ((*Vc.gmsSST)[n].globalMinReady)
         {
-            if ((*Vc.gmsSST)[n].globalMinReady)
-            {
 
-                gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[n].globalMin, Vc.num_members);
-//                std::copy_n((*Vc.gmsSST)[n].globalMin, Vc.num_members, (*Vc.gmsSST)[myRank].globalMin);
-                found = true;
-            }
+            gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[n].globalMin, Vc.num_members);
+            found = true;
         }
+    }
 
-        if (!found)
+    if (!found)
+    {
+        for (int n = 0; n < Vc.num_members; n++)
         {
-            for (int n = 0; n < Vc.num_members; n++)
+            int min = (*Vc.gmsSST)[myRank].nReceived[n];
+            for (int r = 0; r < Vc.num_members; r++)
             {
-                int min = (*Vc.gmsSST)[myRank].nReceived[n];
-                for (int r = 0; r < Vc.num_members; r++)
+                if (/*!Vc.failed[r] && */min > (*Vc.gmsSST)[r].nReceived[n])
                 {
-                    if (!Vc.failed[r] && min > (*Vc.gmsSST)[r].nReceived[n])
-                    {
-                        min = (*Vc.gmsSST)[r].nReceived[n];
-                    }
+                    min = (*Vc.gmsSST)[r].nReceived[n];
                 }
-
-                (*Vc.gmsSST)[myRank].globalMin[n] = min;
             }
-        }
 
-        (*Vc.gmsSST)[myRank].globalMinReady = true;
-        Vc.gmsSST->put();
-        std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc.ToString() << std::endl;
+            (*Vc.gmsSST)[myRank].globalMin[n] = min;
+        }
     }
-    else
-    {
-        // Learn the leader’s data and push it before acting upon it
-        Leader = await_leader_globalMin_ready(Vc);
-        gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin, Vc.num_members);
-        (*Vc.gmsSST)[myRank].globalMinReady = true;
-        Vc.gmsSST->put();
-    }
+
+    (*Vc.gmsSST)[myRank].globalMinReady = true;
+    Vc.gmsSST->put();
+    std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc.ToString() << std::endl;
 
     deliver_in_order(Vc, Leader);
 }
 
+void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
+    std::cout << std::string("Running RaggedEdgeCleanup: ") << Vc.ToString() << std::endl;
+    int myRank = Vc.my_rank;
+    // Learn the leader's data and push it before acting upon it
+    int Leader = Vc.rank_of_leader();
+    gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin, Vc.num_members);
+    (*Vc.gmsSST)[myRank].globalMinReady = true;
+    Vc.gmsSST->put();
+    std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc.ToString() << std::endl;
+
+    deliver_in_order(Vc, Leader);
+}
+
+/* ------------------------------------------------------------------------- */
+
 void ManagedGroup::report_failure(const ip_addr& who) {
     int r = curr_view->rank_of(who);
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
+	int cnt = 0;
+	for (r = 0; r < View::N; r++) {
+		if ((*curr_view->gmsSST)[curr_view->my_rank].suspected[r]) {
+			++cnt;
+		}
+	}
+
+	if (cnt >= curr_view->num_members / 2)
+	{
+		throw new std::runtime_error("Potential partitioning event: this node is no longer in the majority and must shut down!");
+	}
     curr_view->gmsSST->put();
 }
 
@@ -289,182 +574,7 @@ void ManagedGroup::leave() {
     thread_shutdown = true;
 }
 
-void ManagedGroup::monitor_changes() {
-    std::vector<bool> oldSuspected = std::vector<bool>(View::N);
-    while(!thread_shutdown) {
-        View& Vc = *curr_view;
-        int Leader = curr_view->rank_of_leader(), myRank = curr_view->my_rank;
-        sst::SST<DerechoRow<View::N>>& gmsSST = *curr_view->gmsSST;
-
-        //This part should be a predicate that GMS registers with its SST
-        if (NotEqual(*curr_view, oldSuspected)) //This means there's a change in theView.suspected
-        {
-            // Aggregate suspicions into gmsSST[myRank].Suspected;
-            for (int r = 0; r < Vc.num_members; r++)
-            {
-                for (int who = 0; who < Vc.num_members; who++)
-                {
-                    gmssst::set(gmsSST[myRank].suspected[who], gmsSST[myRank].suspected[who] || gmsSST[r].suspected[who]);
-                }
-            }
-
-            for (int q = 0; q < Vc.num_members; q++)
-            {
-                if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
-                {
-                    if (Vc.nFailed + 1 >= View::N / 2)
-                    {
-                        throw std::runtime_error("Majority of a Derecho group simultaneously failed … shutting down");
-                    }
-
-                    gmsSST.freeze(q); // Cease to accept new updates from q
-                    Vc.rdmc_sending_group->wedge();
-                    gmssst::set(gmsSST[myRank].wedged, true); // RDMC has halted new sends and receives in theView
-                    Vc.failed[q] = true;
-                    Vc.nFailed++;
-
-                    if (Vc.nFailed > Vc.num_members / 2 || (Vc.nFailed == Vc.num_members / 2 && Vc.num_members % 2 == 0))
-                    {
-                        throw std::runtime_error("Potential partitioning event: this node is no longer in the majority and must shut down!");
-                    }
-
-                    gmsSST.put();
-                    if (Vc.IAmLeader() && !ChangesContains(Vc, Vc.members[q])) // Leader initiated
-                    {
-                        if ((gmsSST[myRank].nChanges - gmsSST[myRank].nCommitted) == View::N)
-                        {
-                            throw std::runtime_error("Ran out of room in the pending changes list");
-                        }
-
-                        gmssst::set(gmsSST[myRank].changes[gmsSST[myRank].nChanges % View::N], Vc.members[q]); // Reports the failure (note that q NotIn members)
-                        gmssst::increment(gmsSST[myRank].nChanges);
-                        std::cout << std::string("NEW SUSPICION: adding ") << Vc.members[q] << std::string(" to the CHANGES/FAILED list") << std::endl;
-                        gmsSST.put();
-                    }
-                }
-            }
-            Copy(*curr_view, oldSuspected);
-        }
-
-        //Save this to use for sending the client the new view information
-        tcp::socket joining_client_socket;
-
-        if(curr_view->IAmLeader() && has_pending_join()) {
-            joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
-            pending_joins.locked().access.pop_front(); //because C++ list doesn't properly implement queues, this returns void
-            receive_join(joining_client_socket);
-        }
-
-        //Each of these if statements could also be a predicate, I think
-
-        int M;
-        if (myRank == Leader && (M = MinAcked(Vc, Vc.failed)) > gmsSST[myRank].nCommitted)
-        {
-            gmsSST[myRank].nCommitted = M; // Leader commits a new request
-            gmsSST.put();
-        }
-
-        if (gmsSST[Leader].nChanges > gmsSST[myRank].nAcked)
-        {
-            WedgeView(Vc, gmsSST, myRank); // True if RDMC has halted new sends, receives in Vc
-            if (myRank != Leader)
-            {
-                gmssst::set(gmsSST[myRank].changes, gmsSST[Leader].changes); // Echo (copy) the vector including the new changes
-                gmsSST[myRank].nChanges = gmsSST[Leader].nChanges; // Echo the count
-                gmsSST[myRank].nCommitted = gmsSST[Leader].nCommitted;
-            }
-
-            gmsSST[myRank].nAcked = gmsSST[Leader].nChanges; // Notice a new request, acknowledge it
-            gmsSST.put();
-        }
-
-        if (gmsSST[Leader].nCommitted > Vc.vid)
-        {
-            //Not actually necessary right now; gmsSST has no predicates, other than the ones derecho_group installed
-//            gmsSST.disable(); // Disables the SST rule evaluation for this SST
-
-            WedgeView(Vc, gmsSST, myRank);
-            ip_addr currChangeIP(const_cast<cstring &>(gmsSST[myRank].changes[Vc.vid % View::N]));
-            unique_ptr<View> Vnext = std::make_unique<View>();
-            Vnext->vid = Vc.vid + 1;
-            Vnext->IKnowIAmLeader = Vc.IKnowIAmLeader;
-            ip_addr myIPAddr = Vc.members[myRank];
-            bool failed;
-            int whoFailed = Vc.rank_of(currChangeIP);
-            if (whoFailed != -1)
-            {
-                failed = true;
-                Vnext->nFailed = Vc.nFailed - 1;
-                Vnext->num_members = Vc.num_members - 1;
-            }
-            else
-            {
-                failed = false;
-                Vnext->nFailed = Vc.nFailed;
-                Vnext->num_members = Vc.num_members;
-                Vnext->members[Vnext->num_members++] = currChangeIP;
-            }
-
-            int m = 0;
-            for (int n = 0; n < Vc.num_members; n++)
-            {
-                if (n != whoFailed)
-                {
-                    Vnext->members[m] = Vc.members[n];
-                    Vnext->failed[m] = Vc.failed[n];
-                    ++m;
-                }
-            }
-
-            Vnext->who = std::make_shared<ip_addr>(currChangeIP);
-            if ((Vnext->my_rank = Vnext->rank_of(myIPAddr)) == -1)
-            {
-                std::cout << std::string("Some other process reported that I failed.  Process ") << myIPAddr << std::string(" terminating") << std::endl;
-                return;
-            }
-
-            if (Vnext->gmsSST != nullptr)
-            {
-                throw std::runtime_error("Overwriting the SST");
-            }
-
-//            Vc.gmsSST->Pull(Vc);
-            // The intent of these next lines is that we move entirely to Vc+1 and cease to use Vc
-            ragged_edge_cleanup(Vc); // Finalize deliveries in Vc
-
-            //Send the view to the newly joined client before we try to do SST and RDMC setup
-            if (Vc.IAmLeader() && !failed)
-            {
-                commit_join(*Vnext, joining_client_socket);
-            }
-
-            //This will block until everyone responds to SST/RDMC initial handshakes
-            transition_sst_and_rdmc(*Vnext, whoFailed);
-            Vnext->gmsSST->put();
-
-            //Overwrite the current view with the next view, causing it to get destroyed
-            curr_view = std::move(Vnext);
-            curr_view->newView(*curr_view); // Announce the new view to the application
-
-            // Finally, some cleanup.  These could be in a background thread
-            /* The old RDMC instance will get cleaned up when its destructor is called,
-             * which will happen when the old view goes out of scope
-             * The old SST instance will get cleaned up when its destructor is called,
-             * which will happen when the old view goes out of scope (or after the derecho_group
-             * gets destroyed, whichever happpens last, since the view and the derecho_group
-             * both have a shared_ptr to the SST)
-             */
-
-            // First task with my new view...
-            if (IAmTheNewLeader(*curr_view)) // I’m the new leader and everyone who hasn’t failed agrees
-            {
-                Merge(*curr_view, curr_view->my_rank); // Create a combined list of Changes
-            }
-        }
-    } //end while(!thread_shutdown)
-}
-
- derecho_group<View::N>& ManagedGroup::current_derecho_group() {
+ DerechoGroup<View::N>& ManagedGroup::current_derecho_group() {
      return *curr_view->rdmc_sending_group;
  }
 

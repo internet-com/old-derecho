@@ -53,7 +53,7 @@ int main () {
   
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Sender: " << sender_id << ", index: " << index << endl;};
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::DerechoGroup g (members, node_rank, buffer_size, block_size, stability_callback);
 
   for (int i = 0; i < num_messages; ++i) {
     // random message size between 1 and 100

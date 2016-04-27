@@ -14,19 +14,11 @@
 
 namespace derecho {
 
-bool NotEqual(const View& theView, const std::vector<bool>& old);
-
-void Copy(const View& Vc, std::vector<bool>& old);
-
-bool ChangesContains(const View& Vc, const ip_addr& q);
-
-int MinAcked(const View& Vc,const bool (&failed)[View::N]);
-
 bool IAmTheNewLeader(View& Vc);
 
-void Merge(View& Vc, int myRank);
+void merge_changes(View& Vc);
 
-void WedgeView(View& Vc, sst::SST<DerechoRow<View::N>>& gmsSST, int myRank);
+void wedge_view(View& Vc);
 
 } //namespace derecho
 

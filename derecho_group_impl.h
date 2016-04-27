@@ -1,11 +1,11 @@
 #pragma once
 
-#include "derecho_group.h"
-
 #include <cassert>
 #include <algorithm>
 #include <chrono>
 #include <thread>
+
+#include "derecho_group.h"
 
 
 namespace derecho {
@@ -34,7 +34,7 @@ using std::endl;
  * that can be in progress at once before blocking sends).
  */
 template<unsigned int N>
-derecho_group<N>::derecho_group(vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback _global_stability_callback,
         rdmc::send_algorithm _type, unsigned int _window_size) :
             members(_members), num_members(members.size()), block_size(_block_size), buffer_size(_buffer_size), type(_type),
@@ -201,12 +201,12 @@ derecho_group<N>::derecho_group(vector<int> _members, int node_rank, std::shared
     sst->predicates.insert(derecho_pred, derecho_trig, sst::PredicateType::RECURRENT);
     
     // start sender thread
-    background_threads.emplace_back(std::thread(&derecho_group::send_loop, this));
+    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
 
 }
 
 template<unsigned int N>
-derecho_group<N>::~derecho_group() {
+DerechoGroup<N>::~DerechoGroup() {
     thread_shutdown = true;
     if(!groups_are_destroyed) {
         destroy_rdmc_groups();
@@ -216,7 +216,7 @@ derecho_group<N>::~derecho_group() {
     }
 }
 template<unsigned int N>
-void derecho_group<N>::destroy_rdmc_groups() {
+void DerechoGroup<N>::destroy_rdmc_groups() {
     for (int i = 0; i < num_members; ++i) {
         rdmc::destroy_group(i);
     }
@@ -224,12 +224,12 @@ void derecho_group<N>::destroy_rdmc_groups() {
 }
 
 template<unsigned int N>
-void derecho_group<N>::wedge() {
+void DerechoGroup<N>::wedge() {
     wedged = true;
 }
 
 template<unsigned int N>
-void derecho_group<N>::send_loop() {
+void DerechoGroup<N>::send_loop() {
     auto should_send = [&]() {
         if (pending_sends.empty () || wedged) {
             return false;
@@ -261,7 +261,7 @@ void derecho_group<N>::send_loop() {
 }
 
 template<unsigned int N>
-char* derecho_group<N>::get_position(long long unsigned int msg_size) {
+char* DerechoGroup<N>::get_position(long long unsigned int msg_size) {
     // if the size of the message is greater than the (buffer size)/window_size, then return null
     if (msg_size > buffer_size / window_size) {
         cout << "Can't send messages of size larger than the size of the circular buffer divided by the window size" << endl;
@@ -308,7 +308,7 @@ char* derecho_group<N>::get_position(long long unsigned int msg_size) {
 }
 
 template<unsigned int N>
-void derecho_group<N>::send() {
+void DerechoGroup<N>::send() {
     {
         lock_guard<mutex> lock(msg_state_mtx);
         assert(next_message);
@@ -319,7 +319,7 @@ void derecho_group<N>::send() {
 }
 
 template<unsigned int N>
-void derecho_group<N>::sst_print() {
+void DerechoGroup<N>::sst_print() {
     cout << "Printing SST" << endl;
     for (int i = 0; i < num_members; ++i) {
         cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << endl;

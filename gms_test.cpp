@@ -54,7 +54,7 @@ int main (int argc, char *argv[]) {
     derecho::ManagedGroup managed_group(GMS_PORT, my_ip, server_ip, buffer_size, block_size, stability_callback);
 
     for (int i = 0; i < num_messages; ++i) {
-        derecho::derecho_group<derecho::View::N>& g = managed_group.current_derecho_group();
+        derecho::DerechoGroup<derecho::View::N>& g = managed_group.current_derecho_group();
         char* buf = g.get_position (msg_size);
         while (!buf) {
             buf = g.get_position (msg_size);

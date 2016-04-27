@@ -63,7 +63,7 @@ struct msg_info {
 /** combines sst and rdmc to give an abstraction of a group where anyone can send
  * template parameter is the maximum possible group size - used for the GMS SST row-struct */
 template<unsigned int N>
-class derecho_group {
+class DerechoGroup {
         /** vector of member id's */
         std::vector<int> members;
         /**  number of members */
@@ -122,12 +122,12 @@ class derecho_group {
         void send_loop();
     public:
         /** Constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks, and an SST to use for tracking receipts (this will be shared with the GMS). */
-        derecho_group(std::vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, long long unsigned int _buffer_size, long long unsigned int _block_size,
+        DerechoGroup(std::vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, long long unsigned int _buffer_size, long long unsigned int _block_size,
                 message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
         /** Constructor to initialize a new derecho_group from an old one, preserving the same settings but providing a new list of members. */
-        derecho_group(std::vector<int> _members, int node_rank,std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, const derecho_group& old_group) :
-            derecho_group(_members, node_rank, _sst, old_group.buffer_size, old_group.block_size, old_group.global_stability_callback, old_group.type, old_group.window_size) {};
-        ~derecho_group();
+        DerechoGroup(std::vector<int> _members, int node_rank,std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, const DerechoGroup& old_group) :
+            DerechoGroup(_members, node_rank, _sst, old_group.buffer_size, old_group.block_size, old_group.global_stability_callback, old_group.type, old_group.window_size) {};
+        ~DerechoGroup();
         /** get a pointer into the buffer, to write data into it before sending */
         char* get_position(long long unsigned int msg_size);
         /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*

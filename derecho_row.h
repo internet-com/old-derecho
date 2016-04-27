@@ -1,10 +1,3 @@
-/*
- * gms_sst_row.h
- *
- *  Created on: Apr 15, 2016
- *      Author: edward
- */
-
 #ifndef DERECHO_ROW_H_
 #define DERECHO_ROW_H_
 
@@ -72,7 +65,7 @@ struct DerechoRow {
 template<unsigned int N>
 using GMSTableRow = DerechoRow<N>;
 
-static_assert(std::is_pod<DerechoRow<10>>::value, "Error! Row type must be POD.");
+//static_assert(std::is_pod<DerechoRow<10>>::value, "Error! Row type must be POD.");
 
 
 /**
@@ -134,7 +127,36 @@ void set(volatile Arr(& dst)[L1], const volatile Arr(& src)[L2], const size_t& n
 }
 
 
+/**
+ * Pseudo-constructor for DerechoRow, to work around the fact that POD can't
+ * have constructors. Ensures that all members are initialized to a safe initial
+ * value (i.e. suspected[] is all false), including setting changes[] to empty
+ * C-strings.
+ * @param newRow The instance of DerechoRow to initialize.
+ */
+template<unsigned int N>
+void init(volatile DerechoRow<N>& newRow) {
+    newRow.vid = 0;
+    for(size_t i = 0; i < N; ++i) {
+        newRow.suspected[i] = false;
+        newRow.globalMin[i] = 0;
+        newRow.nReceived[i] = 0;
+        memset(const_cast<cstring (&)>(newRow.changes[i]), 0, sizeof(cstring));
+    }
+    newRow.nChanges = 0;
+    newRow.nCommitted = 0;
+    newRow.nAcked = 0;
+    newRow.wedged = false;
+    newRow.globalMinReady = false;
+}
 
+
+/**
+ * Transfers data from one DerechoRow instance to another; specifically, copies
+ * changes, nChanges, nCommitted, and nAcked.
+ * @param newRow The instance to initialize.
+ * @param existingRow The instance to copy data from.
+ */
 template<unsigned int N>
 void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTableRow<N>& existingRow) {
     static thread_local std::mutex copy_mutex;
@@ -145,6 +167,8 @@ void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTable
     newRow.nChanges = existingRow.nChanges;
     newRow.nCommitted = existingRow.nCommitted;
     newRow.nAcked = existingRow.nAcked;
+    newRow.wedged = false;
+    newRow.globalMinReady = false;
 }
 
 template<unsigned int N>

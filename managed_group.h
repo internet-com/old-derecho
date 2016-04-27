@@ -34,10 +34,20 @@ struct LockedQueue {
 class ManagedGroup {
     private:
 
+        /** Contains client sockets for all pending joins, except the current one.*/
         LockedQueue<tcp::socket> pending_joins;
 
+        /** The socket connected to the client that is currently joining, if any */
+        tcp::socket joining_client_socket;
+		/** A cached copy of the last known value of this node's suspected[] array.
+		 * Helps the SST predicate detect when there's been a change to suspected[].*/ 
+		std::vector<bool> last_suspected;
+
+		/** The port that this instance of the GMS communicates on. */
         const int gms_port;
 
+        /** Indicates whether the GMS wants to disable all of its predicates except "suspected_changed" */
+        std::atomic<bool> preds_disabled;
         /** A flag to signal background threads to shut down; set to true when the group is destroyed. */
         std::atomic<bool> thread_shutdown;
         /** Holds references to background threads, so that we can shut them down during destruction. */
@@ -62,10 +72,16 @@ class ManagedGroup {
         static void deliver_in_order(const View& Vc, int Leader);
         static void await_meta_wedged(const View& Vc);
         static int await_leader_globalMin_ready(const View& Vc);
-        static void ragged_edge_cleanup(View& Vc);
+        static void leader_ragged_edge_cleanup(View& Vc);
+        static void follower_ragged_edge_cleanup(View& Vc);
 
-        /** "Main loop" of the GMS that checks for joins and failures and reacts to them. */
-        void monitor_changes();
+        static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool> old);
+        static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);
+        static bool changes_contains(const View::DerechoSST& gmsSST, const ip_addr& q);
+        static int min_acked(const View::DerechoSST& gmsSST, const bool (&failed)[View::N]);
+
+		/** Constructor helper method to encapsulate creating all the predicates. */
+		void register_predicates();
 
         /** Creates the SST and derecho_group for the current view, using the current view's member list.
          * The parameters are all the possible parameters for constructing derecho_group. */
@@ -74,6 +90,10 @@ class ManagedGroup {
         /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
          * (and copying over the SST data from the current view). */
         void transition_sst_and_rdmc(View& newView, int whichFailed);
+
+        /** May hold a pointer to the partially-constructed next view, if we are
+         * in the process of transitioning to a new view. */
+        std::unique_ptr<View> next_view;
 
     public:
         std::unique_ptr<View> curr_view; //must be a pointer so we can re-assign it
@@ -94,7 +114,7 @@ class ManagedGroup {
         void report_failure(const ip_addr& who);
         /** Gets a reference to the current derecho_group for the group being managed.
          * Clients can use this to send and receive messages. */
-        derecho_group<View::N>& current_derecho_group();
+        DerechoGroup<View::N>& current_derecho_group();
 
 };
 

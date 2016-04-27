@@ -13,57 +13,6 @@
 
 namespace derecho {
 
-bool NotEqual(const View& theView, const std::vector<bool>& old)
-{
-    for (int r = 0; r < theView.num_members; r++)
-    {
-        for (int who = 0; who < View::N; who++)
-        {
-            if ((*theView.gmsSST)[r].suspected[who] && !old[who])
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-void Copy(const View& Vc, std::vector<bool>& old)
-{
-    int myRank = Vc.my_rank;
-    for (int who = 0; who < Vc.num_members; who++)
-    {
-        old[who] = Vc.gmsSST->get(myRank).suspected[who];
-    }
-}
-
-bool ChangesContains(const View& Vc, const ip_addr& q)
-{
-    auto& myRow = (*Vc.gmsSST)[Vc.my_rank];
-    for (int n = myRow.nCommitted; n < myRow.nChanges; n++)
-    {
-        const ip_addr p(const_cast<cstring&>(myRow.changes[n % View::N]));
-        if (!p.empty() && p == q)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-
-int MinAcked(const View& Vc, const bool (&failed)[View::N] ) {
-    int myRank = Vc.my_rank;
-    int min = (*Vc.gmsSST)[myRank].nAcked;
-    for (int n = 0; n < Vc.num_members; n++) {
-        if (!failed[n] && (*Vc.gmsSST)[n].nAcked < min) {
-            min = (*Vc.gmsSST)[n].nAcked;
-        }
-    }
-
-    return min;
-}
-
 bool IAmTheNewLeader(View& Vc) {
     if (Vc.IKnowIAmLeader) {
         return false; // I am the OLD leader
@@ -80,7 +29,8 @@ bool IAmTheNewLeader(View& Vc) {
     return true;
 }
 
-void Merge(View& Vc, int myRank) {
+void merge_changes(View& Vc) {
+    int myRank = Vc.my_rank;
     // Merge the change lists
     for (int n = 0; n < Vc.num_members; n++) {
         if ((*Vc.gmsSST)[myRank].nChanges < (*Vc.gmsSST)[n].nChanges) {
@@ -117,9 +67,9 @@ void Merge(View& Vc, int myRank) {
 //    Vc.gmsSST->Push(Vc.myRank, Vc.vid);
 }
 
-void WedgeView(View& Vc, sst::SST<DerechoRow<View::N>>& gmsSST, int myRank) {
+void wedge_view(View& Vc) {
     Vc.rdmc_sending_group->wedge(); // RDMC finishes sending, stops new sends or receives in Vc
-    gmsSST[myRank].wedged = true;
+    (*Vc.gmsSST)[Vc.my_rank].wedged = true;
 }
 
 } //namespace derecho

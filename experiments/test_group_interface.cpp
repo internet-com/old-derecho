@@ -45,7 +45,7 @@ int main () {
 
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
-  derecho::derecho_group g (members, node_rank, buffer_size, block_size, stability_callback);
+  derecho::DerechoGroup g (members, node_rank, buffer_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 
