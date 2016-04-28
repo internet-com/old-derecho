@@ -13,6 +13,10 @@ using std::cout;
 using std::endl;
 using std::cin;
 using std::vector;
+using derecho::DerechoGroup;
+using derecho::DerechoRow;
+
+constexpr int MAX_GROUP_SIZE = 8;
 
 int main () {
   srand(time(NULL));
@@ -35,7 +39,9 @@ int main () {
     cout << "Message " << index << " by node " << sender_id << " of size " << msg_size << " is stable " << endl;
   };
   
-  derecho::derecho_group g (members, node_rank, max_msg_size, stability_callback, block_size);
+  std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
+          std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, max_msg_size, stability_callback, block_size);
 
   int num_messages = 100;
   if (node_rank == 0) {

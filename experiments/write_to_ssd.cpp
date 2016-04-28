@@ -13,6 +13,10 @@ using std::cout;
 using std::endl;
 using std::cin;
 using std::vector;
+using derecho::DerechoGroup;
+using derecho::DerechoRow;
+
+constexpr int MAX_GROUP_SIZE = 8;
 
 int main (int argc, char *argv[]) {
   srand(time(NULL));
@@ -43,8 +47,8 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::derecho_group g (members, node_rank, msg_size, stability_callback, block_size);
-
+  auto derecho_sst = std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, msg_size, stability_callback, block_size);
   struct timespec start_time;
   // start timer
   clock_gettime(CLOCK_REALTIME, &start_time);
