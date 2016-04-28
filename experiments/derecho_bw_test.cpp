@@ -2,6 +2,8 @@
 #include <fstream>
 #include <vector>
 #include <time.h>
+#include <memory>
+
 
 #include "../derecho_group.h"
 #include "../rdmc/util.h"
@@ -18,6 +20,10 @@ using std::cout;
 using std::endl;
 using std::cin;
 using std::vector;
+using derecho::DerechoGroup;
+using derecho::DerechoRow;
+
+constexpr int MAX_GROUP_SIZE = 8; //size of Fractus
 
 int main (int argc, char *argv[]) {
   srand(time(NULL));
@@ -63,7 +69,9 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::DerechoGroup g (members, node_rank, buffer_size, block_size, stability_callback);
+  std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
+          std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, buffer_size, block_size, stability_callback);
 
   struct timespec start_time;
   // start timer
@@ -98,4 +106,5 @@ int main (int argc, char *argv[]) {
   fout.open(filename, std::ofstream::app);
   fout << msg_size << " " << total_bw << endl;
   fout.close();  
+  delete sst;
 }

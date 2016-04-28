@@ -17,6 +17,10 @@ using std::cout;
 using std::endl;
 using std::cin;
 using std::vector;
+using derecho::DerechoGroup;
+using derecho::DerechoRow;
+
+constexpr int MAX_GROUP_SIZE = 8;
 
 int main () {
   uint32_t node_rank;
@@ -45,7 +49,9 @@ int main () {
 
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
   
-  derecho::DerechoGroup g (members, node_rank, buffer_size, block_size, stability_callback);
+  std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
+          std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, buffer_size, block_size, stability_callback);
 
   cout << "Derecho group created" << endl;
 
