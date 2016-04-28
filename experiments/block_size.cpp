@@ -15,6 +15,7 @@ size_t get_block_size (long long int msg_size) {
   case 10000000:
   case 100000000:
   case 1000000000:
+  case 10000000000:    
     return 1000000;
   default:
     std::cout << "Not handled" << std::endl;

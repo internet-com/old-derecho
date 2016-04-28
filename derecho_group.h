@@ -23,19 +23,10 @@ using std::pair;
 
 namespace derecho {
   typedef std::function<void (int, long long int, char*, long long int)> message_callback;
-  
-  enum MESSAGE_STATUS {
-    BEING_GENERATED,
-    GENERATED,
-    READY_TO_SEND,
-    RDMC_RECEIVED,
-    K0_PROCESSED
-  };
 
-  struct Row {
-    long long int seq_num;
-    long long int stable_num;
-    long long int delivered_num;
+  struct __attribute__ ((__packed__)) header {
+    uint32_t header_size;
+    uint32_t pause_sending_turns;
   };
 
   struct msg_info {
@@ -44,7 +35,13 @@ namespace derecho {
     long long unsigned int offset;
     long long unsigned int size;
   };
-  
+
+  struct Row {
+    long long int seq_num;
+    long long int stable_num;
+    long long int delivered_num;
+  };
+
   // combines sst and rdmc to give an abstraction of a group where anyone can send
   // template parameter is for the group size - used for the SST row-struct
   class derecho_group {
@@ -57,8 +54,8 @@ namespace derecho {
     // block size used for message transfer
     // we keep it simple; one block size for messages from all senders
     long long unsigned int block_size;
-    // size of the circular buffer
-    long long unsigned int buffer_size;
+    // maximum size of any message that can be sent
+    long long unsigned int max_msg_size;
     // send algorithm for constructing a multicast from point-to-point unicast
     // binomial pipeline by default
     rdmc::send_algorithm type;
@@ -66,11 +63,10 @@ namespace derecho {
     // callback for when a message is globally stable
     message_callback global_stability_callback;
 
-    // pointers for each circular buffer - buffer from start to end-1 (with possible wrap around) is free
-    vector <long long unsigned int> start, end;
-    
+    int send_slot;
+    vector<int> recv_slots;
     // buffers to store incoming/outgoing messages
-    vector <std::unique_ptr<char[]> > buffers;
+    vector<std::unique_ptr<char[]>> buffers;
     // memory regions wrapping the buffers for RDMA ops
     vector <std::shared_ptr<rdma::memory_region> > mrs;
     
@@ -93,14 +89,14 @@ namespace derecho {
     void send_loop ();
   public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-    derecho_group (vector <int> _members, int node_rank, long long unsigned int _buffer_size, long long unsigned int _block_size, message_callback global_stability_callback, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND, unsigned int _window_size = 3);
+    derecho_group (vector <int> _members, int node_rank, long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size, unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
     // get a position in the buffer before sending
-    char* get_position (long long unsigned int msg_size);
+    char* get_position (long long unsigned int payload_size, int pause_sending_turns = 0);
     // note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
     // this still allows making multiple send calls without acknowledgement; at a single point in time, however, there is only one message per sender in the RDMC pipeline
     void send ();
 
-    void sst_print ();
+    void print ();
   };
 }
 #endif /* DERECHO_GROUP_H */

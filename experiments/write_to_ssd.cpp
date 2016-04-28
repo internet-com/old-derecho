@@ -9,6 +9,9 @@
 #include "log_results.h"
 #include "initialize.h"
 
+using std::cout;
+using std::endl;
+using std::cin;
 using std::vector;
 
 int main (int argc, char *argv[]) {
@@ -23,21 +26,25 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
-
+  
   long long unsigned int msg_size = atoll(argv[1]);
   long long unsigned int block_size = get_block_size (msg_size);
   int num_messages = 1000;
-  
+
+  std::ofstream fssd;
+  fssd.open ("messages");
   bool done = false;
-  auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+  auto stability_callback = [&fssd, &num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
+    fssd.write (buf, msg_size);
+    fssd.flush();
     if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+      cout << "Done" << endl;
       done = true;
     }
   };
   
   derecho::derecho_group g (members, node_rank, msg_size, stability_callback, block_size);
-  
+
   struct timespec start_time;
   // start timer
   clock_gettime(CLOCK_REALTIME, &start_time);
@@ -49,11 +56,13 @@ int main (int argc, char *argv[]) {
     g.send();
   }
   while (!done) {
+    
   }
   struct timespec end_time;
   clock_gettime(CLOCK_REALTIME, &end_time);
+  fssd.close();
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec)*(long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
   double bw = (msg_size * num_messages * num_nodes * 8 + 0.0)/nanoseconds_elapsed;
-  double avg_bw = aggregate_bandwidth(members, node_rank, bw);
-  log_results(msg_size, avg_bw, "data_derecho_bw");
+  double avg_bw = aggregate_bandwidth(members, node_rank, bw);  
+  log_results(msg_size, avg_bw, "data_ssd_bw");
 }
