@@ -4,23 +4,11 @@
 #include <time.h>
 
 #include "../derecho_group.h"
-<<<<<<< HEAD
-#include "../rdmc/util.h"
-#include "../rdmc/message.h"
-#include "../rdmc/verbs_helper.h"
-#include "../rdmc/rdmc.h"
-#include "../rdmc/microbenchmarks.h"
-#include "../rdmc/group_send.h"
-#include "../sst/sst.h"
-#include "../sst/tcp.h"
-#include "block_size.h"
-=======
 #include "../rdmc/rdmc.h"
 #include "block_size.h"
 #include "aggregate_bandwidth.h"
 #include "log_results.h"
 #include "initialize.h"
->>>>>>> final
 
 using std::cout;
 using std::endl;
