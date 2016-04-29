@@ -125,6 +125,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     
     // create the SST writes table
 //    sst = new sst::SST<DerechoRow<N>, sst::Mode::Writes>(members, node_rank);
+    cout << "Initializing DerechoGroup" << endl;
     for (int i = 0; i < num_members; ++i) {
         for(int j = 0; j < num_members; ++j) {
             (*sst)[i].nReceived[j] = -1;
@@ -204,6 +205,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     // start sender thread
     background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
 
+    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+
 }
 
 template<unsigned int N>
@@ -213,10 +216,13 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 
 template<unsigned int N>
 DerechoGroup<N>::~DerechoGroup() {
+    sst->disable_all_predicates();
     thread_shutdown = true;
     for (int i = 0; i < num_members; ++i) {
         rdmc::destroy_group(i + rdmc_group_num_offset);
     }
+    derecho_cv.notify_all();
+    cout << "DerechoGroup: Done destroying RDMC groups" << endl;
     for(auto& thread : background_threads) {
         thread.join();
     }
@@ -257,6 +263,7 @@ void DerechoGroup<N>::send_loop() {
             pending_sends.pop();
         }
     }
+    cout <<  "DerechoGroup send thread shutting down" << endl;
 }
 
 template<unsigned int N>

@@ -37,7 +37,7 @@ class ManagedGroup {
 
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
-        std::map<node_id_t, std::string> member_ips_by_id;
+        std::map<node_id_t, ip_addr> member_ips_by_id;
 
         /** Contains client sockets for all pending joins, except the current one.*/
         LockedQueue<tcp::socket> pending_joins;
@@ -71,7 +71,7 @@ class ManagedGroup {
         void receive_join(tcp::socket& client_socket);
 
         /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
-        static std::unique_ptr<View> start_group(const ip_addr& my_ip);
+        std::unique_ptr<View> start_group(const node_id_t my_id);
         /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
         static std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
 
@@ -106,10 +106,9 @@ class ManagedGroup {
         std::unique_ptr<View> curr_view; //must be a pointer so we can re-assign it
 
         /** Constructor, starts or joins a managed Derecho group.
-         * If my_ip == leader_ip, starts a new group with this node as the leader.
          * The rest of the parameters are the parameters for the derecho_group that should
          * be constructed for communications within this managed group. */
-        ManagedGroup(const int gms_port, const ip_addr& my_ip, const ip_addr& leader_ip,
+        ManagedGroup(const int gms_port, const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
                 long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size,
                 unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
 

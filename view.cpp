@@ -23,7 +23,7 @@ View::View(int num_members) : vid(0), members(num_members), member_ips(num_membe
         my_rank(0), rdmc_sending_group(nullptr),  gmsSST(nullptr) {}
 
 int View::rank_of_leader() const {
-    for(int r = 0; r < my_rank; ++r) {
+    for(int r = 0; r < num_members; ++r) {
         if(!failed[r]) {
             return r;
         }

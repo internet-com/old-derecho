@@ -7,15 +7,19 @@
 
 #include <iostream>
 #include <string>
+#include <cstdlib>
+#include <map>
 
 
 using std::string;
 using std::cin;
 using std::cout;
 using std::endl;
+using std::map;
 
 #include "derecho_group.h"
 #include "experiments/block_size.h"
+#include "rdmc/util.h"
 #include "managed_group.h"
 #include "view.h"
 
@@ -24,51 +28,44 @@ static const int GMS_PORT = 12345;
 int main (int argc, char *argv[]) {
 
     if(argc < 2) {
-        cout << "You must provide at least one IP address. Local IP is required, server's IP is optional." << endl;
+        cout << "Error: Expected leader's node ID as the first argument." << endl;
         return -1;
     }
+    uint32_t server_rank = std::atoi(argv[1]);
 
-    string my_ip(argv[1]);
-    string server_ip(my_ip);
-    if(argc > 2) {
-        server_ip = string(argv[2]);
-    }
+    uint32_t node_rank;
+    uint32_t num_nodes;
 
-    long long unsigned int msg_size;
-    cout << "Enter the message size to test with: " ;
-    cin >> msg_size;
+    map<uint32_t, std::string> node_addresses;
 
-    long long unsigned int block_size = get_block_size (msg_size);
-    long long unsigned int buffer_size = msg_size * 10;
-    cout << "Parameters: " << endl << "buffer_size=" << buffer_size << ", block_size=" << block_size << ", msg_size=" << msg_size << endl;
+    query_addresses(node_addresses, node_rank);
+    num_nodes = node_addresses.size();
+    long long unsigned int max_msg_size = 100;
+    long long unsigned int block_size = 10;
+
     int num_messages = 1000;
 
+    auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Sender: " << sender_id << ", index: " << index << endl;};
 
-    int num_nodes = 8;
-    bool done = false;
-    auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
-        if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
-            done = true;
-        }
-    };
 
-    derecho::ManagedGroup managed_group(GMS_PORT, my_ip, server_ip, msg_size, stability_callback, block_size);
+    derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
 
     for (int i = 0; i < num_messages; ++i) {
-        derecho::DerechoGroup<derecho::View::N>& g = managed_group.current_derecho_group();
-        char* buf = g.get_position (msg_size);
+        auto& g = managed_group.current_derecho_group();
+        // random message size between 1 and 100
+        unsigned int msg_size = (rand()%7 + 2) * 10;
+        char *buf = g.get_position (msg_size);
         while (!buf) {
-            buf = g.get_position (msg_size);
+            buf= g.get_position (msg_size);
         }
         for (unsigned int j = 0; j < msg_size; ++j) {
             buf[j] = 'a'+i;
         }
         g.send();
     }
-    while (!done) {
-
+    while (true) {
     }
+
 
     managed_group.leave();
 }

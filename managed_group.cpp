@@ -10,6 +10,8 @@
 #include <memory>
 #include <exception>
 #include <stdexcept>
+#include <iostream>
+#include <iterator>
 #include <cstring>
 #include <atomic>
 
@@ -28,20 +30,56 @@ using std::vector;
 using std::make_shared;
 using std::make_unique;
 using std::unique_ptr;
+using std::cout;
+using std::endl;
 using sst::SST;
 
-ManagedGroup::ManagedGroup(const int gms_port, const ip_addr& my_ip, const ip_addr& leader_ip, long long unsigned int _max_payload_size, message_callback global_stability_callback,
+ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id, long long unsigned int _max_payload_size, message_callback global_stability_callback,
         long long unsigned int _block_size, unsigned int _window_size, rdmc::send_algorithm _type) :
-        last_suspected(View::N), gms_port(gms_port), preds_disabled(false), thread_shutdown(false), background_threads(), next_view(nullptr) {
-    if (my_ip != leader_ip){
-        curr_view = join_existing(leader_ip, gms_port);
+        member_ips_by_id(member_ips), last_suspected(View::N), gms_port(gms_port), preds_disabled(false), thread_shutdown(false), background_threads(), next_view(nullptr) {
+    cout << "Doing global setup of SST and RDMC" << endl;
+    //TODO: pull these out
+    rdmc::initialize(member_ips_by_id, my_id);
+    sst::tcp::tcp_initialize(my_id, member_ips_by_id);
+    sst::verbs_initialize();
+
+    if (my_id != leader_id){
+        curr_view = join_existing(member_ips_by_id[leader_id], gms_port);
     } else {
-        curr_view = start_group(my_ip);
+        curr_view = start_group(my_id);
+        tcp::connection_listener serversocket(gms_port);
+        tcp::socket client_socket = serversocket.accept();
+        ip_addr& joiner_ip = client_socket.remote_ip;
+        curr_view->num_members++;
+        curr_view->member_ips.push_back(joiner_ip);
+        for (const auto& entry : member_ips_by_id) {
+            if (entry.second == joiner_ip) {
+                curr_view->members.push_back(entry.first);
+                break;
+            }
+        }
+        curr_view->failed.push_back(false);
+
+        client_socket.write((char*) &curr_view->vid, sizeof(curr_view->vid));
+        client_socket.write((char*) &curr_view->num_members, sizeof(curr_view->num_members));
+        for (auto nodeID : curr_view->members) {
+            client_socket.write((char*) &nodeID, sizeof(nodeID));
+        }
+        for (auto & str : curr_view->member_ips) {
+            //includes null-terminator
+            const int str_size = str.size() + 1;
+            client_socket.write((char*) &str_size, sizeof(str_size));
+            client_socket.write(str.c_str(), str_size);
+        }
+        for (bool fbool : curr_view->failed) {
+            client_socket.write((char*) &fbool, sizeof(fbool));
+        }
     }
-    curr_view->my_rank = curr_view->rank_of(my_ip);
-    for(int rank = 0; rank < curr_view->num_members; ++rank) {
-        member_ips_by_id[curr_view->members[rank]] = curr_view->member_ips[rank];
-    }
+    curr_view->my_rank = curr_view->rank_of(my_id);
+    //Temporarily disabled because all member IP->ID mappings are fixed at startup
+//    for(int rank = 0; rank < curr_view->num_members; ++rank) {
+//        member_ips_by_id[curr_view->members[rank]] = curr_view->member_ips[rank];
+//    }
     
     setup_sst_and_rdmc(_max_payload_size, global_stability_callback, _block_size, _window_size, _type);
 
@@ -79,7 +117,7 @@ void ManagedGroup::register_predicates() {
         {
             if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
             {
-                if (Vc.nFailed + 1 >= View::N / 2)
+                if (Vc.nFailed + 1 >= Vc.num_members / 2)
                 {
                     throw std::runtime_error("Majority of a Derecho group simultaneously failed … shutting down");
                 }
@@ -118,6 +156,7 @@ void ManagedGroup::register_predicates() {
         return !preds_disabled && curr_view->IAmLeader() && has_pending_join() && joining_client_socket.is_empty();
     };
     auto start_join_trig = [this](DerechoSST& sst) {
+        cout << "GMS received a new client connection" << endl;
         joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
         pending_joins.locked().access.pop_front(); //because C++ list doesn't properly implement queues, this returns void
         receive_join(joining_client_socket);
@@ -134,6 +173,9 @@ void ManagedGroup::register_predicates() {
     };
 
     auto leader_proposed_change = [this](const DerechoSST& gmsSST) {
+        if(curr_view->rank_of_leader() < 0 || curr_view->rank_of_leader() > curr_view->num_members-1) {
+            cout << "Error! curr_view->rank_of_leader() returned " << curr_view->rank_of_leader() << endl;
+        }
         return !preds_disabled
                 && gmsSST[curr_view->rank_of_leader()].nChanges > gmsSST[gmsSST.get_local_index()].nAcked;
     };
@@ -245,6 +287,9 @@ void ManagedGroup::register_predicates() {
                 curr_view = std::move(next_view);
                 curr_view->newView(*curr_view); // Announce the new view to the application
 
+                //Register predicates in the new view
+                register_predicates();
+
                 // First task with my new view...
                 if (IAmTheNewLeader(*curr_view)) // I'm the new leader and everyone who hasn't failed agrees
                 {
@@ -266,6 +311,9 @@ void ManagedGroup::register_predicates() {
                     //Overwrite the current view with the next view, causing it to get destroyed
                     curr_view = std::move(next_view);
                     curr_view->newView(*curr_view); // Announce the new view to the application
+
+                    //Register predicates in the new view
+                    register_predicates();
 
                     // First task with my new view...
                     if (IAmTheNewLeader(*curr_view)) // I'm the new leader and everyone who hasn't failed agrees
@@ -300,16 +348,15 @@ ManagedGroup::~ManagedGroup() {
 void ManagedGroup::setup_sst_and_rdmc(long long unsigned int max_payload_size, message_callback global_stability_callback,
         long long unsigned int block_size, unsigned int window_size, rdmc::send_algorithm type) {
 
-    //TODO: pull these out
-    rdmc::initialize(member_ips_by_id, curr_view->my_rank);
-    sst::tcp::tcp_initialize(curr_view->my_rank, member_ips_by_id);
-    sst::verbs_initialize();
+    cout << "Starting SST and DerechoGroup with members ";
+    std::copy(curr_view->members.begin(), curr_view->members.end(), std::ostream_iterator<node_id_t>(cout));
+    cout << "; I am node " << curr_view->members[curr_view->my_rank] << endl;
 
-    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(curr_view->members, curr_view->my_rank);
+    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(curr_view->members, curr_view->members[curr_view->my_rank]);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
-    curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::N>>(curr_view->members, curr_view->my_rank,
+    curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::N>>(curr_view->members, curr_view->members[curr_view->my_rank],
             curr_view->gmsSST, max_payload_size, global_stability_callback, block_size, window_size, type);
 }
 
@@ -325,18 +372,18 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //    }
 //    rdmc::initialize(ips_by_rank, newView.my_rank);
 
-    if(whichFailed == -1) { //This is a join
-        rdmc::add_address(newView.members.back(), newView.member_ips.back());
-    }
-
-    //TODO: SST needs an "add one member" method; this attempts to re-connect to all the existing members
-    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
-    vector<int> member_ranks(newView.num_members);
-    for(int i = 0; i < newView.num_members; ++i) {
-        member_ranks[i] = i;
-    }
-    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(newView.members, newView.my_rank);
-    newView.rdmc_sending_group = make_unique<DerechoGroup<View::N>>(newView.members, newView.my_rank,
+    cout << "Reinitializing SST and RDMC to transition to view " << newView.vid << endl;
+    cout << "New members are ";
+    std::copy(newView.members.begin(), newView.members.end(), std::ostream_iterator<node_id_t>(cout));
+    cout << " and I am node " << newView.members[newView.my_rank] << endl;
+//    if(whichFailed == -1) { //This is a join
+//        rdmc::add_address(newView.members.back(), newView.member_ips.back());
+//    }
+//
+//    //TODO: SST needs an "add one member" method; this attempts to re-connect to all the existing members
+//    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
+    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(newView.members, newView.members[newView.my_rank]);
+    newView.rdmc_sending_group = make_unique<DerechoGroup<View::N>>(newView.members, newView.members[newView.my_rank],
             newView.gmsSST, *curr_view->rdmc_sending_group);
 
     int m = 0;
@@ -355,24 +402,28 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 
 }
 
-unique_ptr<View> ManagedGroup::start_group(const ip_addr& my_ip) {
+unique_ptr<View> ManagedGroup::start_group(const node_id_t my_id) {
+    cout << "Starting new empty group with myself as leader." << endl;
     unique_ptr<View> newView = std::make_unique<View>(1);
-    newView->member_ips[0] = my_ip;
+    newView->members[0] = my_id;
+    newView->member_ips[0] = member_ips_by_id[my_id];
     newView->failed[0] = false;
     newView->IKnowIAmLeader = true;
     return newView;
 }
 
 unique_ptr<View> ManagedGroup::join_existing(const ip_addr& leader_ip, const int leader_port) {
+    cout << "Joining group by contacting node at " << leader_ip << endl;
     tcp::socket leader_socket{leader_ip, leader_port};
-    node_id_t myNodeID;
+//    node_id_t myNodeID;
     int viewID;
     int numMembers;
+    //Temporarily disabled because all node IDs are fixed at startup
     //First the leader sends the node ID this client has been assigned
-    bool success = leader_socket.read((char*)&myNodeID,sizeof(myNodeID));
-    assert(success);
+//    bool success = leader_socket.read((char*)&myNodeID,sizeof(myNodeID));
+//    assert(success);
     //The leader will send the members of View in the order they're declared
-    success = leader_socket.read((char*)&viewID,sizeof(viewID));
+    bool success = leader_socket.read((char*)&viewID,sizeof(viewID));
     assert(success);
     bool success2 = leader_socket.read((char*)&numMembers,sizeof(numMembers));
     assert(success2);
@@ -417,8 +468,8 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
         throw std::runtime_error("Too many changes to allow a Join right now");
     }
 
-    node_id_t largest_id = member_ips_by_id.rbegin()->first;
-    joining_client_id = largest_id + 1;
+//    node_id_t largest_id = member_ips_by_id.rbegin()->first;
+//    joining_client_id = largest_id + 1;
 
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % View::N;
     gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
@@ -433,7 +484,8 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
 }
 
 void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket) {
-    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
+    //Temporarily disabled because all node IDs are globally fixed at startup
+//    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
     client_socket.write((char*) &new_view.vid, sizeof(new_view.vid));
     client_socket.write((char*) &new_view.num_members, sizeof(new_view.num_members));
     for (auto nodeID : new_view.members) {
