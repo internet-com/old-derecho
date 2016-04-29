@@ -65,26 +65,30 @@ struct MessageTrackingRow {
 template<unsigned int N>
 class DerechoGroup {
         /** vector of member id's */
-        std::vector<int> members;
+        std::vector<node_id_t> members;
         /**  number of members */
-        int num_members;
+        const int num_members;
         /** index of the local node in the members vector, which should also be its row index in the SST */
         int member_index;
         /** Block size used for message transfer.
          * we keep it simple; one block size for messages from all senders */
-        long long unsigned int block_size;
+        const long long unsigned int block_size;
         // maximum size of any message that can be sent
-        long long unsigned int max_msg_size;
+        const long long unsigned int max_msg_size;
         /** Send algorithm for constructing a multicast from point-to-point unicast.
          *  Binomial pipeline by default. */
-        rdmc::send_algorithm type;
-        unsigned int window_size;
+        const rdmc::send_algorithm type;
+        const unsigned int window_size;
         /** callback for when a message is globally stable */
-        message_callback global_stability_callback;
+        const message_callback global_stability_callback;
+        /** Offset to add to member ranks to form RDMC group numbers. */
+        const uint16_t rdmc_group_num_offset;
+
         /** Indicates whether this sending group is paused pending a reconfiguration.
          * Once wedged, no more messages will be sent or delivered in this group.
          * Atomic because it's shared with the background sender thread. */
         std::atomic<bool> wedged;
+
 
         int send_slot;
         vector<int> recv_slots;
@@ -112,20 +116,17 @@ class DerechoGroup {
         /** Holds references to background threads, so that we can shut them down during destruction. */
         std::vector<std::thread> background_threads;
 
-        /** Helper variable to indicate that this group has been partially destroyed by calling destroy_rdmc_groups(). */
-        bool groups_are_destroyed = false;
-
         /** The SST, shared between this group and its GMS. */
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> sst;
 
         void send_loop();
     public:
         // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
-        DerechoGroup(std::vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+        DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
                 long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size,
                 unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
         /** Constructor to initialize a new derecho_group from an old one, preserving the same settings but providing a new list of members. */
-        DerechoGroup(std::vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, const DerechoGroup& old_group);
+        DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, const DerechoGroup& old_group);
         ~DerechoGroup();
         /** get a pointer into the buffer, to write data into it before sending */
         char* get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
@@ -135,8 +136,6 @@ class DerechoGroup {
         void send();
         /** Stops all sending and receiving in this group, in preparation for shutting it down. */
         void wedge();
-        /** Tears down all the RDMC groups used in this group, in preparation for destroying it. */
-        void destroy_rdmc_groups();
         /** Debugging function; prints the current state of the SST to stdout. */
         void debug_print();
 };

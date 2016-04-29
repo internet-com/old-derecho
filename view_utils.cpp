@@ -48,7 +48,7 @@ void merge_changes(View& Vc) {
         if (Vc.failed[n]) {
             // Make sure that the failed process is listed in the Changes vector as a proposed change
             for (int c = (*Vc.gmsSST)[myRank].nCommitted; c < (*Vc.gmsSST)[myRank].nChanges && !found; c++) {
-                if (gmssst::equals((*Vc.gmsSST)[myRank].changes[c % View::N], Vc.members[n].c_str())) {
+                if ((*Vc.gmsSST)[myRank].changes[c % View::N] == Vc.members[n]) {
                     // Already listed
                     found = true;
                 }

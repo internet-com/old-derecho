@@ -39,6 +39,9 @@ ManagedGroup::ManagedGroup(const int gms_port, const ip_addr& my_ip, const ip_ad
         curr_view = start_group(my_ip);
     }
     curr_view->my_rank = curr_view->rank_of(my_ip);
+    for(int rank = 0; rank < curr_view->num_members; ++rank) {
+        member_ips_by_id[curr_view->members[rank]] = curr_view->member_ips[rank];
+    }
     
     setup_sst_and_rdmc(_max_payload_size, global_stability_callback, _block_size, _window_size, _type);
 
@@ -110,8 +113,9 @@ void ManagedGroup::register_predicates() {
         copy_suspected(gmsSST, last_suspected);
     };
 
+    //Only start one join at a time
     auto start_join_pred = [this](const DerechoSST& sst) {
-        return !preds_disabled && curr_view->IAmLeader() && has_pending_join();
+        return !preds_disabled && curr_view->IAmLeader() && has_pending_join() && joining_client_socket.is_empty();
     };
     auto start_join_trig = [this](DerechoSST& sst) {
         joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
@@ -142,11 +146,12 @@ void ManagedGroup::register_predicates() {
         if (myRank != leader)
         {
             gmssst::set(gmsSST[myRank].changes, gmsSST[leader].changes); // Echo (copy) the vector including the new changes
-            gmsSST[myRank].nChanges = gmsSST[leader].nChanges; // Echo the count
-            gmsSST[myRank].nCommitted = gmsSST[leader].nCommitted;
+            gmssst::set(gmsSST[myRank].joiner_ip, gmsSST[leader].joiner_ip); //Echo the new member's IP
+            gmssst::set(gmsSST[myRank].nChanges, gmsSST[leader].nChanges); // Echo the count
+            gmssst::set(gmsSST[myRank].nCommitted, gmsSST[leader].nCommitted);
         }
 
-        gmsSST[myRank].nAcked = gmsSST[leader].nChanges; // Notice a new request, acknowledge it
+        gmssst::set(gmsSST[myRank].nAcked, gmsSST[leader].nChanges); // Notice a new request, acknowledge it
         gmsSST.put();
     };
 
@@ -162,13 +167,13 @@ void ManagedGroup::register_predicates() {
         assert(gmsSST.get_local_index() == curr_view->my_rank);
 
         wedge_view(Vc);
-        ip_addr currChangeIP(const_cast<cstring &>(gmsSST[myRank].changes[Vc.vid % View::N]));
+        node_id_t currChangeID = gmsSST[myRank].changes[Vc.vid % View::N];
         next_view = std::make_unique<View>();
         next_view->vid = Vc.vid + 1;
         next_view->IKnowIAmLeader = Vc.IKnowIAmLeader;
-        ip_addr myIPAddr = Vc.members[myRank];
+        node_id_t myID = Vc.members[myRank];
         bool failed;
-        int whoFailed = Vc.rank_of(currChangeIP);
+        int whoFailed = Vc.rank_of(currChangeID);
         if (whoFailed != -1)
         {
             failed = true;
@@ -180,7 +185,10 @@ void ManagedGroup::register_predicates() {
             failed = false;
             next_view->nFailed = Vc.nFailed;
             next_view->num_members = Vc.num_members;
-            next_view->members[next_view->num_members++] = currChangeIP;
+            int new_member_rank = next_view->num_members++;
+            next_view->members[new_member_rank] = currChangeID;
+            next_view->member_ips[new_member_rank] = std::string(const_cast<cstring &>(gmsSST[myRank].joiner_ip));
+            member_ips_by_id[currChangeID] = next_view->member_ips[new_member_rank];
         }
 
         int m = 0;
@@ -194,11 +202,11 @@ void ManagedGroup::register_predicates() {
             }
         }
 
-        next_view->who = std::make_shared<ip_addr>(currChangeIP);
-        if ((next_view->my_rank = next_view->rank_of(myIPAddr)) == -1)
+        next_view->who = std::make_shared<node_id_t>(currChangeID);
+        if ((next_view->my_rank = next_view->rank_of(myID)) == -1)
         {
-            std::cout << std::string("Some other process reported that I failed.  Process ") << myIPAddr << std::string(" terminating") << std::endl;
-            return;
+            std::cout << std::string("Some other process reported that I failed.  Process ") << myID << std::string(" terminating") << std::endl;
+            throw std::runtime_error("Some other process reported that I failed.");
         }
 
         if (next_view->gmsSST != nullptr)
@@ -226,6 +234,8 @@ void ManagedGroup::register_predicates() {
                 if(!failed) {
                     //Send the view to the newly joined client before we try to do SST and RDMC setup
                     commit_join(*next_view, joining_client_socket);
+                    //Close the client's socket
+                    joining_client_socket = tcp::socket();
                 }
                 //This will block until everyone responds to SST/RDMC initial handshakes
                 transition_sst_and_rdmc(*next_view, whoFailed);
@@ -289,23 +299,17 @@ ManagedGroup::~ManagedGroup() {
 
 void ManagedGroup::setup_sst_and_rdmc(long long unsigned int max_payload_size, message_callback global_stability_callback,
         long long unsigned int block_size, unsigned int window_size, rdmc::send_algorithm type) {
-    //ASSUMPTION: The index of an IP address in View::members is the "rank" of the node with that IP address
-    map<uint32_t, std::string> ips_by_rank;
-    for(int rank = 0; rank < curr_view->num_members; ++rank) {
-        ips_by_rank[rank] = curr_view->members[rank];
-    }
-    rdmc::initialize(ips_by_rank, curr_view->my_rank);
-    sst::tcp::tcp_initialize(curr_view->my_rank, ips_by_rank);
+
+    //TODO: pull these out
+    rdmc::initialize(member_ips_by_id, curr_view->my_rank);
+    sst::tcp::tcp_initialize(curr_view->my_rank, member_ips_by_id);
     sst::verbs_initialize();
-    vector<int> member_ranks(curr_view->num_members);
-    for(int i = 0; i < curr_view->num_members; ++i) {
-        member_ranks[i] = i;
-    }
-    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(member_ranks, curr_view->my_rank);
+
+    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(curr_view->members, curr_view->my_rank);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
-    curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::N>>(member_ranks, curr_view->my_rank,
+    curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::N>>(curr_view->members, curr_view->my_rank,
             curr_view->gmsSST, max_payload_size, global_stability_callback, block_size, window_size, type);
 }
 
@@ -315,19 +319,24 @@ void ManagedGroup::setup_sst_and_rdmc(long long unsigned int max_payload_size, m
  * @param whichFailed The rank of the node in the old view that failed, if any.
  */
 void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
-    map<uint32_t, std::string> ips_by_rank;
-    for(int rank = 0; rank < newView.num_members; ++rank) {
-        ips_by_rank[rank] = newView.members[rank];
-    }
+//    map<uint32_t, std::string> ips_by_rank;
+//    for(int rank = 0; rank < newView.num_members; ++rank) {
+//        ips_by_rank[rank] = newView.members[rank];
+//    }
 //    rdmc::initialize(ips_by_rank, newView.my_rank);
 
-    sst::tcp::tcp_initialize(newView.my_rank, ips_by_rank);
+    if(whichFailed == -1) { //This is a join
+        rdmc::add_address(newView.members.back(), newView.member_ips.back());
+    }
+
+    //TODO: SST needs an "add one member" method; this attempts to re-connect to all the existing members
+    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
     vector<int> member_ranks(newView.num_members);
     for(int i = 0; i < newView.num_members; ++i) {
         member_ranks[i] = i;
     }
-    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(member_ranks, newView.my_rank);
-    newView.rdmc_sending_group = make_unique<DerechoGroup<View::N>>(member_ranks, newView.my_rank,
+    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::N>>>(newView.members, newView.my_rank);
+    newView.rdmc_sending_group = make_unique<DerechoGroup<View::N>>(newView.members, newView.my_rank,
             newView.gmsSST, *curr_view->rdmc_sending_group);
 
     int m = 0;
@@ -347,10 +356,8 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 }
 
 unique_ptr<View> ManagedGroup::start_group(const ip_addr& my_ip) {
-    unique_ptr<View> newView = std::make_unique<View>();
-    newView->vid = 0;
-    newView->num_members = 1;
-    newView->members[0] = my_ip;
+    unique_ptr<View> newView = std::make_unique<View>(1);
+    newView->member_ips[0] = my_ip;
     newView->failed[0] = false;
     newView->IKnowIAmLeader = true;
     return newView;
@@ -358,28 +365,44 @@ unique_ptr<View> ManagedGroup::start_group(const ip_addr& my_ip) {
 
 unique_ptr<View> ManagedGroup::join_existing(const ip_addr& leader_ip, const int leader_port) {
     tcp::socket leader_socket{leader_ip, leader_port};
-    unique_ptr<View> newView = std::make_unique<View>();
-    bool success = leader_socket.read((char*)&newView->vid,sizeof(newView->vid));
+    node_id_t myNodeID;
+    int viewID;
+    int numMembers;
+    //First the leader sends the node ID this client has been assigned
+    bool success = leader_socket.read((char*)&myNodeID,sizeof(myNodeID));
     assert(success);
-    constexpr int N = View::N;
+    //The leader will send the members of View in the order they're declared
+    success = leader_socket.read((char*)&viewID,sizeof(viewID));
+    assert(success);
+    bool success2 = leader_socket.read((char*)&numMembers,sizeof(numMembers));
+    assert(success2);
+    unique_ptr<View> newView = std::make_unique<View>(numMembers);
+    newView->vid = viewID;
+    for (int i = 0; i < numMembers; ++i){
+        bool success = leader_socket.read((char*)&newView->members[i],
+                sizeof(decltype(newView->members)::value_type));
+        assert(success);
+    }
     //protocol for sending strings: size, followed by string
     //including null terminator
-    for (int i = 0; i < N; ++i){
+    for (int i = 0; i < numMembers; ++i){
         int str_size{-1};
         bool success = leader_socket.read((char*)&str_size,sizeof(str_size));
         assert(success);
         char str_rec[str_size];
         bool success2 = leader_socket.read(str_rec,str_size);
         assert(success2);
-        newView->members[i] = str_rec;
+        newView->member_ips[i] = str_rec;
     }
-    for (int i = 0; i < N; ++i){
-        bool success = leader_socket.read((char*)&newView->failed[i],
-                sizeof(newView->failed));
+    //Receive failed[], and also calculate nFailed
+    for (int i = 0; i < numMembers; ++i){
+        bool newView_failed_i;
+        bool success = leader_socket.read((char*) &newView_failed_i,
+                sizeof(newView_failed_i));
         assert(success);
+        newView->failed[i] = newView_failed_i;
+        if(newView->failed[i]) newView->nFailed++;
     }
-    bool success2 = leader_socket.read((char*)&newView->num_members,sizeof(newView->num_members));
-    assert(success2);
 
     return newView;
 }
@@ -394,8 +417,13 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
         throw std::runtime_error("Too many changes to allow a Join right now");
     }
 
+    node_id_t largest_id = member_ips_by_id.rbegin()->first;
+    joining_client_id = largest_id + 1;
+
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % View::N;
-    gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joiner_ip);
+    gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
+    gmssst::set(gmsSST[curr_view->my_rank].joiner_ip, joiner_ip);
+
     gmssst::increment(gmsSST[curr_view->my_rank].nChanges);
 
     curr_view->rdmc_sending_group->wedge(); // RDMC finishes sending, then stops sending or receiving in Vc
@@ -405,8 +433,13 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
 }
 
 void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket) {
+    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
     client_socket.write((char*) &new_view.vid, sizeof(new_view.vid));
-    for (auto & str : new_view.members) {
+    client_socket.write((char*) &new_view.num_members, sizeof(new_view.num_members));
+    for (auto nodeID : new_view.members) {
+        client_socket.write((char*) &nodeID, sizeof(nodeID));
+    }
+    for (auto & str : new_view.member_ips) {
         //includes null-terminator
         const int str_size = str.size() + 1;
         client_socket.write((char*) &str_size, sizeof(str_size));
@@ -415,7 +448,6 @@ void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket)
     for (bool fbool : new_view.failed) {
         client_socket.write((char*) &fbool, sizeof(fbool));
     }
-    client_socket.write((char*) &new_view.num_members, sizeof(new_view.num_members));
 }
 
 /* ------------------------- Static helper methods ------------------------- */
@@ -437,21 +469,22 @@ void ManagedGroup::copy_suspected(const View::DerechoSST& gmsSST, vector<bool>& 
     }
 }
 
-bool ManagedGroup::changes_contains(const View::DerechoSST& gmsSST, const ip_addr& q) {
+bool ManagedGroup::changes_contains(const View::DerechoSST& gmsSST, const node_id_t q) {
     auto& myRow = gmsSST[gmsSST.get_local_index()];
     for (int n = myRow.nCommitted; n < myRow.nChanges; n++) {
-        const ip_addr p(const_cast<cstring&>(myRow.changes[n % View::N]));
-        if (!p.empty() && p == q) {
+        int p_index = n % View::N;
+        const node_id_t p(const_cast<node_id_t&>(myRow.changes[p_index]));
+        if (p_index < myRow.nChanges && p == q) {
             return true;
         }
     }
     return false;
 }
 
-int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const bool (&failed)[View::N]) {
+int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const vector<bool>& failed) {
     int myRank = gmsSST.get_local_index();
     int min = gmsSST[myRank].nAcked;
-    for (int n = 0; n < gmsSST.get_num_rows(); n++) {
+    for (size_t n = 0; n < failed.size(); n++) {
         if (!failed[n] && gmsSST[n].nAcked < min) {
             min = gmsSST[n].nAcked;
         }
@@ -490,7 +523,7 @@ void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
     // Ragged cleanup is finished, deliver in the implied order
     std::string deliveryOrder = std::string("Delivery Order (View ") + std::to_string(Vc.vid) + std::string(" { ");
     for (int n = 0; n < Vc.num_members; n++) {
-        deliveryOrder += Vc.members[Vc.my_rank] + std::string(":0..")
+        deliveryOrder += std::to_string(Vc.members[Vc.my_rank]) + std::string(":0..")
         + std::to_string((*Vc.gmsSST)[Leader].globalMin[n]) + std::string(" ");
     }
 
@@ -551,7 +584,7 @@ void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
 
 /* ------------------------------------------------------------------------- */
 
-void ManagedGroup::report_failure(const ip_addr& who) {
+void ManagedGroup::report_failure(const node_id_t who) {
     int r = curr_view->rank_of(who);
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
 	int cnt = 0;

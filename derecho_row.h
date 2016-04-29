@@ -9,6 +9,7 @@
 namespace derecho {
 
 using ip_addr = std::string;
+using node_id_t = uint32_t;
 
 using cstring = char[50];
 
@@ -27,7 +28,10 @@ struct DerechoRow {
          * N/2. If request i is a Join, changes[i] is not in current View's
          * members. If request i is a Departure, changes[i] is in current View's
          * members. */
-        cstring changes[N]; //If total never exceeds N/2, why is this N?
+        node_id_t changes[N]; //If the total never exceeds N/2, why is this N?
+        /** If the next pending view change include a join, this is the IP address
+         *  of the joining node. */
+        cstring joiner_ip;
         /** How many changes to the view are pending. */
         int nChanges;
         /** How many proposed view changes have reached the commit point. */
@@ -82,6 +86,18 @@ namespace gmssst {
  */
 template<typename Elem>
 void set(volatile Elem& e, const Elem& value){
+    e = value;
+    std::atomic_signal_fence(std::memory_order_acq_rel);
+}
+
+/**
+ * Thread-safe setter for GMSTableRow members; ensures there is a
+ * std::atomic_signal_fence after writing the value.
+ * @param e A reference to a member of GMSTableRow.
+ * @param value The value to set that reference to.
+ */
+template<typename Elem>
+void set(volatile Elem& e, volatile const Elem& value){
     e = value;
     std::atomic_signal_fence(std::memory_order_acq_rel);
 }
@@ -141,7 +157,7 @@ void init(volatile DerechoRow<N>& newRow) {
         newRow.suspected[i] = false;
         newRow.globalMin[i] = 0;
         newRow.nReceived[i] = 0;
-        memset(const_cast<cstring (&)>(newRow.changes[i]), 0, sizeof(cstring));
+        newRow.changes[i] = 0;
     }
     newRow.nChanges = 0;
     newRow.nCommitted = 0;
@@ -161,9 +177,9 @@ template<unsigned int N>
 void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTableRow<N>& existingRow) {
     static thread_local std::mutex copy_mutex;
     std::unique_lock<std::mutex> lock(copy_mutex);
-    memcpy(const_cast<cstring (&) [N]>(newRow.changes),
-            const_cast<const cstring (&) [N]>(existingRow.changes),
-            N * sizeof(cstring));
+    memcpy(const_cast<node_id_t*>(newRow.changes),
+            const_cast<const node_id_t*>(existingRow.changes),
+            N * sizeof(node_id_t));
     newRow.nChanges = existingRow.nChanges;
     newRow.nCommitted = existingRow.nCommitted;
     newRow.nAcked = existingRow.nAcked;

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "derecho_group.h"
 #include "sst/sst.h"
@@ -27,14 +28,20 @@ class View {
 
         /** Sequential view ID: 0, 1, ... */
         int vid;
-        /** Members in view k */
-        ip_addr members[N];
-        /** True if members[i] is considered to have failed */
-        bool failed[N];
-        int nFailed = 0;
-        /** Process that joined or departed since the prior view; null if this is the first view */
-        std::shared_ptr<ip_addr> who;
-        /** Number of members */
+        /** Node IDs of members in the current view, indexed by their SST rank. */
+        std::vector<node_id_t> members;
+        /** IP addresses of members in the current view, indexed by their SST rank. */
+        std::vector<ip_addr> member_ips;
+        /** failed[i] is true if members[i] is considered to have failed.
+         * Once a member is failed, it will be removed from the members list in a future view. */
+        std::vector<bool> failed;
+        /** Number of current outstanding failures in this view. After
+         * transitioning to a new view that excludes a failed member, this count
+         * will decrease by one. */
+        int nFailed;
+        /** ID of the node that joined or departed since the prior view; null if this is the first view */
+        std::shared_ptr<node_id_t> who;
+        /** Number of members in this view */
         int num_members;
         /** For member p, returns rankOf(p) */
         int my_rank;
@@ -42,22 +49,29 @@ class View {
         std::unique_ptr<DerechoGroup<N>> rdmc_sending_group;
         std::shared_ptr<DerechoSST> gmsSST;
 
+        /** Creates a completely empty new View. Vectors such as members will
+         * be empty (size 0), so the client will need to resize them. */
+        View();
+        /** Creates an empty new View with num_members members.
+         * The vectors will have room for num_members elements. */
+        View(int num_members);
         void newView(const View& Vc);
 
-        /** Returns a pointer to the (IP address of the) member who recently joined,
-         * or null if the most recent change was not a join. */
-        std::shared_ptr<ip_addr> Joined() const;
-        /** Returns a pointer to the (IP address of the) member who recently departed,
-         * or null if the most recent change was not a departure. */
-        std::shared_ptr<ip_addr> Departed() const;
-
         int rank_of(const ip_addr& who) const;
+        int rank_of(const node_id_t& who) const;
         int rank_of_leader() const;
         int rank_of_leader(const uint32_t& p) const;
 
         bool IKnowIAmLeader = false; // I am the leader (and know it)
 
         bool IAmLeader() const;
+
+        /** Returns a pointer to the (IP address of the) member who recently joined,
+         * or null if the most recent change was not a join. */
+        std::shared_ptr<node_id_t> Joined() const;
+        /** Returns a pointer to the (IP address of the) member who recently departed,
+         * or null if the most recent change was not a departure. */
+        std::shared_ptr<node_id_t> Departed() const;
 
         std::string ToString() const;
 };

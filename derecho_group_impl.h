@@ -34,17 +34,15 @@ using std::endl;
  * that can be in progress at once before blocking sends).
  */
 template<unsigned int N>
-DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         long long unsigned int _max_payload_size, message_callback _global_stability_callback, long long unsigned int _block_size,
         unsigned int _window_size, rdmc::send_algorithm _type) :
             members(_members), num_members(members.size()), block_size(_block_size), max_msg_size(_max_payload_size + sizeof(header)),
-            type(_type), window_size(_window_size), global_stability_callback(_global_stability_callback), background_threads(),
-            sst(_sst) {
-    thread_shutdown = false;
-    wedged = false;
+            type(_type), window_size(_window_size), global_stability_callback(_global_stability_callback), rdmc_group_num_offset(0),
+            wedged(false),thread_shutdown(false), background_threads(), sst(_sst) {
     // find my member_index
     for (int i = 0; i < num_members; ++i) {
-        if (members[i] == node_rank) {
+        if (members[i] == my_node_id) {
             member_index = i;
             break;
         }
@@ -70,7 +68,7 @@ DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_p
         std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(),max_msg_size*window_size);
         mrs.push_back(mr);
         for (int j = 0; j < num_members; ++j) {
-            rotated_members[j] = (uint32_t) members[(i + j) % num_members];
+            rotated_members[j] = members[(i + j) % num_members];
         }
         // When RDMC receives a message, it should store it in locally_stable_messages and update the received count
         auto rdmc_receive_handler =
@@ -101,7 +99,7 @@ DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_p
         if (i == member_index) { 
             //In the group in which this node is the sender, we need to signal the writer thread 
             //to continue when we see that one of our messages was delivered.
-            rdmc::create_group(i, rotated_members, block_size, type, 
+            rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
                     [this, i](size_t length) -> rdmc::receive_destination {
                         auto offset = max_msg_size * recv_slots[i];
                         recv_slots[i] = (recv_slots[i]+1)%window_size;
@@ -114,7 +112,7 @@ DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_p
                     },
                     [](boost::optional<uint32_t>) {});
         } else {
-            rdmc::create_group(i, rotated_members, block_size, type, 
+            rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
                     [this, i](size_t length) -> rdmc::receive_destination {
                         auto offset = max_msg_size * recv_slots[i];
                         recv_slots[i] = (recv_slots[i]+1)%window_size;
@@ -209,26 +207,19 @@ DerechoGroup<N>::DerechoGroup(vector<int> _members, int node_rank, std::shared_p
 }
 
 template<unsigned int N>
-DerechoGroup<N>::DerechoGroup(std::vector<int> _members, int node_rank, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        const DerechoGroup& old_group) : DerechoGroup(_members, node_rank, _sst, old_group.max_msg_size - sizeof(header),
+DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+        const DerechoGroup& old_group) : DerechoGroup(_members, my_node_id, _sst, old_group.max_msg_size - sizeof(header),
                 old_group.global_stability_callback, old_group.block_size, old_group.window_size, old_group.type) {}
 
 template<unsigned int N>
 DerechoGroup<N>::~DerechoGroup() {
     thread_shutdown = true;
-    if(!groups_are_destroyed) {
-        destroy_rdmc_groups();
+    for (int i = 0; i < num_members; ++i) {
+        rdmc::destroy_group(i + rdmc_group_num_offset);
     }
     for(auto& thread : background_threads) {
         thread.join();
     }
-}
-template<unsigned int N>
-void DerechoGroup<N>::destroy_rdmc_groups() {
-    for (int i = 0; i < num_members; ++i) {
-        rdmc::destroy_group(i);
-    }
-    groups_are_destroyed = true;
 }
 
 template<unsigned int N>
@@ -262,7 +253,7 @@ void DerechoGroup<N>::send_loop() {
         derecho_cv.wait(lock, should_wake);
         if (!thread_shutdown){
             msg_info msg = pending_sends.front();
-            rdmc::send(member_index, mrs[member_index], msg.offset, msg.size);
+            rdmc::send(member_index + rdmc_group_num_offset, mrs[member_index], msg.offset, msg.size);
             pending_sends.pop();
         }
     }

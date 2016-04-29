@@ -5,6 +5,7 @@
 #include <list>
 #include <string>
 #include <utility>
+#include <map>
 
 #include "view.h"
 #include "rdmc/connection.h"
@@ -34,11 +35,17 @@ struct LockedQueue {
 class ManagedGroup {
     private:
 
+        /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
+         * Currently, this mapping must be completely known at startup. */
+        std::map<node_id_t, std::string> member_ips_by_id;
+
         /** Contains client sockets for all pending joins, except the current one.*/
         LockedQueue<tcp::socket> pending_joins;
 
         /** The socket connected to the client that is currently joining, if any */
         tcp::socket joining_client_socket;
+        /** The node ID that has been assigned to the client that is currently joining, if any. */
+        node_id_t joining_client_id;
 		/** A cached copy of the last known value of this node's suspected[] array.
 		 * Helps the SST predicate detect when there's been a change to suspected[].*/ 
 		std::vector<bool> last_suspected;
@@ -54,7 +61,7 @@ class ManagedGroup {
         std::vector<std::thread> background_threads;
 
         /** Sends a joining node the new view that has been constructed to include it.*/
-        static void commit_join(const View& new_view, tcp::socket& client_socket);
+        void commit_join(const View& new_view, tcp::socket& client_socket);
 
         bool has_pending_join(){
             return pending_joins.locked().access.size() > 0;
@@ -77,8 +84,8 @@ class ManagedGroup {
 
         static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool> old);
         static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);
-        static bool changes_contains(const View::DerechoSST& gmsSST, const ip_addr& q);
-        static int min_acked(const View::DerechoSST& gmsSST, const bool (&failed)[View::N]);
+        static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
+        static int min_acked(const View::DerechoSST& gmsSST, const std::vector<bool>& failed);
 
 		/** Constructor helper method to encapsulate creating all the predicates. */
 		void register_predicates();
@@ -111,7 +118,7 @@ class ManagedGroup {
         void leave();
 
         /** Reports to the GMS that the given node has failed. */
-        void report_failure(const ip_addr& who);
+        void report_failure(const node_id_t who);
         /** Gets a reference to the current derecho_group for the group being managed.
          * Clients can use this to send and receive messages. */
         DerechoGroup<View::N>& current_derecho_group();

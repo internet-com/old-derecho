@@ -71,13 +71,8 @@ int main () {
     members[i] = i;
   }
 
-  // create the vector of members for SST -_-
-  vector<int> sst_members(num_nodes);
-  for(uint16_t i = 0; i < num_nodes; i++) {
-    sst_members[i] = i;
-  }
   // create a new shared state table with all the members
-  SST<Row, Mode::Writes> *sst = new SST<Row, Mode::Writes> (sst_members, node_rank);
+  SST<Row, Mode::Writes> *sst = new SST<Row, Mode::Writes> (members, node_rank);
 
   for (int i = 0; i < 1000; ++i) {
     (*sst)[node_rank].done[i] = false;
