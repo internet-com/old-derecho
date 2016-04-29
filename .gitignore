@@ -1,8 +1,10 @@
-libderecho.a
+libderecho.so
 CMakeCache.txt
 Makefile
 cmake_install.cmake
 CMakeFiles/*
+.project
+.cproject
 derecho
 scripts/
 /main
