@@ -49,8 +49,11 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     }
     assert(window_size >= 1);
 
-    send_slot = 0;
-    recv_slots.resize(num_members,0);
+	for(unsigned int i = 0; i < window_size * num_members; i++){
+		free_message_buffers.emplace_back(max_msg_size);
+	}
+    // send_slot = 0;
+    // recv_slots.resize(num_members,0);
 
     // rotated list of members - used for creating n internal RDMC groups
     vector<uint32_t> rotated_members(num_members);
@@ -62,11 +65,11 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
          * even though any arrangement of receivers in the members vector is possible
          */
         // allocate buffer for the group
-        std::unique_ptr<char[]> buffer(new char[max_msg_size*window_size]);
-        buffers.push_back(std::move(buffer));
+        //std::unique_ptr<char[]> buffer(new char[max_msg_size*window_size]);
+        //buffers.push_back(std::move(buffer));
         // create a memory region encapsulating the buffer
-        std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(),max_msg_size*window_size);
-        mrs.push_back(mr);
+        // std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(),max_msg_size*window_size);
+        // mrs.push_back(mr);
         for (int j = 0; j < num_members; ++j) {
             rotated_members[j] = members[(i + j) % num_members];
         }
@@ -80,15 +83,31 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
                     (*sst)[member_index].nReceived[i]++;
-                    locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i,
-                            (*sst)[member_index].nReceived[i], (long long unsigned int) (data-buffers[i].get()), size};
+
+					long long int index = (*sst)[member_index].nReceived[i];
+					long long int sequence_number = index* num_members + i;
+
+					// Move message from current_receives to locally_stable_messages.
+					if(i == member_index){
+						assert(current_send);
+						locally_stable_messages[sequence_number] = std::move(*current_send);
+						current_send = std::experimental::nullopt;
+					}else{
+						auto it = current_receives.find(sequence_number);
+						//						assert(it != current_receives.end());
+						auto& second = it->second;
+						locally_stable_messages.emplace(sequence_number, std::move(second));
+						current_receives.erase(it);
+					}
+					
+					// Add empty messages to locally_stable_messages for each turn that the sender is skipping.
                     for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
                         (*sst)[member_index].nReceived[i]++;
                         locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i, (*sst)[member_index].nReceived[i], 0, 0};
                     }
                     auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
-                    int index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
-                    auto new_seq_num = (*min_ptr + 1) * num_members + index-1;
+                    int min_index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
+                    auto new_seq_num = (*min_ptr + 1) * num_members + min_index-1;
                     if (new_seq_num > (*sst)[member_index].seq_num) {
                         (*sst)[member_index].seq_num = new_seq_num;
 //                        sst->put (offsetof (DerechoRow<N>, seq_num), sizeof (new_seq_num));
@@ -113,20 +132,32 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
             //to continue when we see that one of our messages was delivered.
             rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
                     [this, i](size_t length) -> rdmc::receive_destination {
-                        auto offset = max_msg_size * recv_slots[i];
-                        recv_slots[i] = (recv_slots[i]+1)%window_size;
-                        return {mrs[i],offset};
+						assert(false);
+						return {nullptr, 0};
                     },
                     receive_handler_plus_notify,
                     [](boost::optional<uint32_t>) {});
         } else {
             rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
                     [this, i](size_t length) -> rdmc::receive_destination {
-                        auto offset = max_msg_size * recv_slots[i];
-                        recv_slots[i] = (recv_slots[i]+1)%window_size;
-                        return {mrs[i],offset};
-                    }, 
-                    rdmc_receive_handler, 
+						lock_guard <mutex> lock (msg_state_mtx);
+						assert(!free_message_buffers.empty());
+
+						msg_info msg;
+						msg.sender_id = i;
+						msg.index = (*sst)[member_index].nReceived[i] + 1;
+						msg.size = length;
+						msg.message_buffer = std::move(free_message_buffers.back());
+						free_message_buffers.pop_back();
+
+						rdmc::receive_destination ret{msg.message_buffer.mr, 0};
+						auto sequence_number = msg.index * num_members + i;
+						current_receives[sequence_number] = std::move(msg);
+
+						assert(ret.mr->buffer != nullptr);
+                        return ret;
+                    },
+					rdmc_receive_handler,
                     [](boost::optional<uint32_t>) {});
         }
     }
@@ -182,11 +213,12 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
         if (!locally_stable_messages.empty()) {
             long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
             if (least_undelivered_seq_num <= min_stable_num) {
-                msg_info msg = locally_stable_messages.begin()->second;
+                msg_info& msg = locally_stable_messages.begin()->second;
                 if (msg.size > 0) {
-                    char* buf = buffers[msg.sender_id].get() + msg.offset;
+                    char* buf = msg.message_buffer.buffer.get();
                     header* h = (header*) buf;
                     global_stability_callback (msg.sender_id, msg.index, buf + h->header_size, msg.size);
+					free_message_buffers.push_back(std::move(msg.message_buffer));
                 }
                 sst[member_index].delivered_num = least_undelivered_seq_num;
 //                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
@@ -258,7 +290,7 @@ void DerechoGroup<N>::send_loop() {
         if (pending_sends.empty () || wedged) {
             return false;
         }
-        msg_info msg = pending_sends.front ();
+        msg_info& msg = pending_sends.front ();
         if ((*sst)[member_index].nReceived[member_index] < msg.index-1) {
             return false;
         }
@@ -277,10 +309,8 @@ void DerechoGroup<N>::send_loop() {
     while (!thread_shutdown) {
         derecho_cv.wait(lock, should_wake);
         if (!thread_shutdown){
-            msg_info msg = pending_sends.front();
-            cout << "DerechoGroup sending message " << msg.index << endl;
-            debug_print();
-            rdmc::send(member_index + rdmc_group_num_offset, mrs[member_index], msg.offset, msg.size);
+            current_send = std::move(pending_sends.front());
+            rdmc::send(member_index + rdmc_group_num_offset, current_send->message_buffer.mr, 0, current_send->size);
             pending_sends.pop();
         }
     }
@@ -299,23 +329,37 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
             return NULL;
         }
     }
-    auto pos = max_msg_size*send_slot;
-    send_slot = (send_slot+1)%window_size;
-    next_message = {member_index, future_message_index, pos, msg_size};
-    char* buf = buffers[member_index].get()+pos;
+
+	unique_lock<mutex> lock(msg_state_mtx);
+	if(wedged) return nullptr;
+	if(free_message_buffers.empty()) return nullptr;
+
+	// Create new msg_info
+	msg_info msg;
+	msg.sender_id = member_index;
+	msg.index = future_message_index;
+	msg.size = msg_size;
+	msg.message_buffer = std::move(free_message_buffers.back());
+	free_message_buffers.pop_back();
+
+	// Fill header
+	char* buf = msg.message_buffer.buffer.get();
     ((header*)buf)->header_size = sizeof(header);
     ((header*)buf)->pause_sending_turns = pause_sending_turns;
+
+	next_send = std::move(msg);
     future_message_index += pause_sending_turns+1;
-    return buf+sizeof(header);
+
+	return buf + sizeof(header);
 }
 
 template<unsigned int N>
 void DerechoGroup<N>::send() {
     {
         lock_guard<mutex> lock(msg_state_mtx);
-        assert(next_message);
-        pending_sends.push(*next_message);
-        next_message = boost::none;
+        assert(next_send);
+        pending_sends.push(std::move(*next_send));
+        next_send = std::experimental::nullopt;
     }
     derecho_cv.notify_one();
 }

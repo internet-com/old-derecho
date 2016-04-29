@@ -2,7 +2,7 @@
 #define DERECHO_GROUP_H
 
 #include <functional>
-#include <boost/optional.hpp>
+#include <experimental/optional>
 #include <mutex>
 #include <condition_variable>
 #include <tuple>
@@ -27,11 +27,27 @@ struct __attribute__ ((__packed__)) header {
         uint32_t pause_sending_turns;
 };
 
+struct MessageBuffer {
+        std::unique_ptr<char[]> buffer;
+        std::shared_ptr<rdma::memory_region> mr;
+
+        MessageBuffer(){}
+	    MessageBuffer(size_t size) {
+			buffer = std::unique_ptr<char[]>(new char[size]);
+			mr = std::make_shared<rdma::memory_region>(buffer.get(), size);
+		}
+
+	MessageBuffer(const MessageBuffer&) = delete;
+	MessageBuffer(MessageBuffer&&) = default;
+	MessageBuffer& operator=(const MessageBuffer&) = delete;
+	MessageBuffer& operator=(MessageBuffer&&) = default;
+};
+
 struct msg_info {
         int sender_id;
         long long int index;
-        long long unsigned int offset;
         long long unsigned int size;
+        MessageBuffer message_buffer;
 };
 
 /**
@@ -64,7 +80,7 @@ struct MessageTrackingRow {
  * template parameter is the maximum possible group size - used for the GMS SST row-struct */
 template<unsigned int N>
 class DerechoGroup {
-        /** vector of member id's */
+	    /** vector of member id's */
         std::vector<node_id_t> members;
         /**  number of members */
         const int num_members;
@@ -89,23 +105,33 @@ class DerechoGroup {
          * Atomic because it's shared with the background sender thread. */
         std::atomic<bool> wedged;
 
-
-        int send_slot;
-        vector<int> recv_slots;
-        /** buffers to store incoming/outgoing messages */
-        std::vector<std::unique_ptr<char[]> > buffers;
-        /** memory regions wrapping the buffers for RDMA ops */
-        std::vector<std::shared_ptr<rdma::memory_region> > mrs;
+        /** Stores message buffers not currently in use. Protected by 
+         * msg_state_mtx */
+        std::vector<MessageBuffer> free_message_buffers;
+	
+        // int send_slot;
+        // vector<int> recv_slots;
+        // /** buffers to store incoming/outgoing messages */
+        // std::vector<std::unique_ptr<char[]> > buffers;
+        // /** memory regions wrapping the buffers for RDMA ops */
+        // std::vector<std::shared_ptr<rdma::memory_region> > mrs;
 
         /** Index to be used the next time get_position is called.
          * When next_message is not none, then next_message.index = future_message_index-1 */
         long long int future_message_index = 0;
+	
         /** next_message is the message that will be sent when send is called the next time.
          * It is boost::none when there is no message to send. */
-        boost::optional<msg_info> next_message;
-//        /** last_received_messages[i] is the largest index of the message received from sender i */
-//        std::vector<long long int> last_received_messages;
+	    std::experimental::optional<msg_info> next_send;
+        /** Messages that are ready to be sent, but must wait until the current send finishes. */
         std::queue<msg_info> pending_sends;
+	    /** The message that is currently being sent out using RDMC, or boost::none otherwise. */
+        std::experimental::optional<msg_info> current_send;
+
+        /** Messages that are currently being received. */
+        std::map<long long int, msg_info> current_receives;
+
+        /** Messages that have finished sending/receiving but aren't yet globally stable */
         std::map<long long int, msg_info> locally_stable_messages;
         long long int next_message_to_deliver = 0;
         std::mutex msg_state_mtx;
