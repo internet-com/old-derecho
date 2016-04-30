@@ -72,7 +72,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
         }
         // When RDMC receives a message, it should store it in locally_stable_messages and update the received count
         auto rdmc_receive_handler =
-                [this, i](char *data, size_t size) {
+                [this, i](char* data, size_t size) {
                     assert(this->sst);
                     assert(&sst == &(this->sst));
                     cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
@@ -95,9 +95,16 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                         sst->put();
                     } else {
 //                        size_t size_nReceived = sizeof((*sst)[member_index].nReceived[i]);
-                        sst->put();
 //                        sst->put(offsetof(DerechoRow<N>, nReceived) + i * size_nReceived, size_nReceived);
+                        sst->put();
                     }
+                };
+        //Capture rdmc_receive_handler by copy! The reference to it won't be valid after this constructor ends!
+        auto receive_handler_plus_notify =
+                [this, rdmc_receive_handler](char* data, size_t size) {
+                    rdmc_receive_handler(data, size);
+                    //signal background writer thread
+                    derecho_cv.notify_one();
                 };
         // i is the group number
         // receive destination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
@@ -110,33 +117,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                         recv_slots[i] = (recv_slots[i]+1)%window_size;
                         return {mrs[i],offset};
                     },
-                    [this, i](char* data, size_t size) {
-                        assert(this->sst);
-                        assert(&sst == &(this->sst));
-                        cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
-                        cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
-                        lock_guard <mutex> lock (msg_state_mtx);
-                        header* h = (header*) data;
-                        (*sst)[member_index].nReceived[i]++;
-                        locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i,
-                                (*sst)[member_index].nReceived[i], (long long unsigned int) (data-buffers[i].get()), size};
-                        for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
-                            (*sst)[member_index].nReceived[i]++;
-                            locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i, (*sst)[member_index].nReceived[i], 0, 0};
-                        }
-                        auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
-                        int index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
-                        auto new_seq_num = (*min_ptr + 1) * num_members + index-1;
-                        if (new_seq_num > (*sst)[member_index].seq_num) {
-                            (*sst)[member_index].seq_num = new_seq_num;
-                            sst->put();
-                        } else {
-                            sst->put();
-                        }
-//                        rdmc_receive_handler(data, size);
-                        //signal background writer thread
-                        derecho_cv.notify_one();
-                    },
+                    receive_handler_plus_notify,
                     [](boost::optional<uint32_t>) {});
         } else {
             rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
