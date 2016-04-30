@@ -32,9 +32,8 @@ int main (int argc, char *argv[]) {
         return -1;
     }
     uint32_t server_rank = std::atoi(argv[1]);
-
-    uint32_t node_rank;
     uint32_t num_nodes;
+    uint32_t node_rank;
 
     map<uint32_t, std::string> node_addresses;
 
@@ -45,25 +44,35 @@ int main (int argc, char *argv[]) {
 
     int num_messages = 1000;
 
-    auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Sender: " << sender_id << ", index: " << index << endl;};
+    bool done = false;
+    auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
+        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+        if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+            done = true;
+        }
+    };
 
 
     derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
 
+    cout <<  "Finished constructing/joining ManagedGroup" << endl;
+
     for (int i = 0; i < num_messages; ++i) {
-        auto& g = managed_group.current_derecho_group();
         // random message size between 1 and 100
         unsigned int msg_size = (rand()%7 + 2) * 10;
-        char *buf = g.get_position (msg_size);
+        char *buf = managed_group.get_sendbuffer_ptr(msg_size);
+        cout << "After getting sendbuffer for message " << i << endl;
+        managed_group.debug_print_status();
         while (!buf) {
-            buf= g.get_position (msg_size);
+            buf= managed_group.get_sendbuffer_ptr(msg_size);
         }
         for (unsigned int j = 0; j < msg_size; ++j) {
             buf[j] = 'a'+i;
         }
-        g.send();
+//        cout << "Client telling DerechoGroup to send message " << i << " with size " << msg_size << endl;;
+        managed_group.send();
     }
-    while (true) {
+    while (!done) {
     }
 
 

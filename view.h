@@ -22,9 +22,9 @@ namespace derecho {
 class View {
     public:
         /** Upper bound on the number of members that will ever be in any one view. */
-        static constexpr int N = 10;
+        static constexpr int MAX_MEMBERS = 10;
 
-        using DerechoSST = sst::SST<DerechoRow<N>>;
+        using DerechoSST = sst::SST<DerechoRow<MAX_MEMBERS>>;
 
         /** Sequential view ID: 0, 1, ... */
         int vid;
@@ -46,7 +46,7 @@ class View {
         /** For member p, returns rankOf(p) */
         int my_rank;
         /** RDMC manager object containing one RDMC group for each sender */
-        std::unique_ptr<DerechoGroup<N>> rdmc_sending_group;
+        std::unique_ptr<DerechoGroup<MAX_MEMBERS>> rdmc_sending_group;
         std::shared_ptr<DerechoSST> gmsSST;
 
         /** Creates a completely empty new View. Vectors such as members will
@@ -60,7 +60,6 @@ class View {
         int rank_of(const ip_addr& who) const;
         int rank_of(const node_id_t& who) const;
         int rank_of_leader() const;
-        int rank_of_leader(const uint32_t& p) const;
 
         bool IKnowIAmLeader = false; // I am the leader (and know it)
 

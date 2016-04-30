@@ -37,7 +37,7 @@ template<unsigned int N>
 DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         long long unsigned int _max_payload_size, message_callback _global_stability_callback, long long unsigned int _block_size,
         unsigned int _window_size, rdmc::send_algorithm _type) :
-            members(_members), num_members(members.size()), block_size(_block_size), max_msg_size(_max_payload_size + sizeof(header)),
+            members(_members), num_members(members.size()), block_size(_block_size), max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
             type(_type), window_size(_window_size), global_stability_callback(_global_stability_callback), rdmc_group_num_offset(0),
             wedged(false),thread_shutdown(false), background_threads(), sst(_sst) {
     // find my member_index
@@ -73,6 +73,10 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
         // When RDMC receives a message, it should store it in locally_stable_messages and update the received count
         auto rdmc_receive_handler =
                 [this, i](char *data, size_t size) {
+                    assert(this->sst);
+                    assert(&sst == &(this->sst));
+                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
+                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
                     (*sst)[member_index].nReceived[i]++;
@@ -90,8 +94,9 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 //                        sst->put (offsetof (DerechoRow<N>, seq_num), sizeof (new_seq_num));
                         sst->put();
                     } else {
-                        size_t size_nReceived = sizeof((*sst)[member_index].nReceived[i]);
-                        sst->put(offsetof(DerechoRow<N>, nReceived) + i * size_nReceived, size_nReceived);
+//                        size_t size_nReceived = sizeof((*sst)[member_index].nReceived[i]);
+                        sst->put();
+//                        sst->put(offsetof(DerechoRow<N>, nReceived) + i * size_nReceived, size_nReceived);
                     }
                 };
         // i is the group number
@@ -105,8 +110,30 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                         recv_slots[i] = (recv_slots[i]+1)%window_size;
                         return {mrs[i],offset};
                     },
-                    [&](char* data, size_t size) {
-                        rdmc_receive_handler(data, size);
+                    [this, i](char* data, size_t size) {
+                        assert(this->sst);
+                        assert(&sst == &(this->sst));
+                        cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
+                        cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
+                        lock_guard <mutex> lock (msg_state_mtx);
+                        header* h = (header*) data;
+                        (*sst)[member_index].nReceived[i]++;
+                        locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i,
+                                (*sst)[member_index].nReceived[i], (long long unsigned int) (data-buffers[i].get()), size};
+                        for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
+                            (*sst)[member_index].nReceived[i]++;
+                            locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i, (*sst)[member_index].nReceived[i], 0, 0};
+                        }
+                        auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
+                        int index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
+                        auto new_seq_num = (*min_ptr + 1) * num_members + index-1;
+                        if (new_seq_num > (*sst)[member_index].seq_num) {
+                            (*sst)[member_index].seq_num = new_seq_num;
+                            sst->put();
+                        } else {
+                            sst->put();
+                        }
+//                        rdmc_receive_handler(data, size);
                         //signal background writer thread
                         derecho_cv.notify_one();
                     },
@@ -137,6 +164,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     sst->put();
     sst->sync_with_members();
 
+    cout << "In DerechoGroup constructor, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
+
     auto stability_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         return !wedged;
     };
@@ -150,8 +179,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
         }
         if (min_seq_num > sst[member_index].stable_num) {
             sst[member_index].stable_num = min_seq_num;
-            sst.put (offsetof (DerechoRow<N>, stable_num), sizeof (min_seq_num));
-            // sst.put ();
+//            sst.put (offsetof (DerechoRow<N>, stable_num), sizeof (min_seq_num));
+            sst.put ();
         }
     };
     sst->predicates.insert(stability_pred, stability_trig, sst::PredicateType::RECURRENT);
@@ -179,8 +208,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                     global_stability_callback (msg.sender_id, msg.index, buf + h->header_size, msg.size);
                 }
                 sst[member_index].delivered_num = least_undelivered_seq_num;
-                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
-                // sst.put ();
+//                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
+                sst.put ();
                 locally_stable_messages.erase (locally_stable_messages.begin());
             }
         }
@@ -229,6 +258,15 @@ DerechoGroup<N>::~DerechoGroup() {
 }
 
 template<unsigned int N>
+long long unsigned int DerechoGroup<N>::compute_max_msg_size(const long long unsigned int max_payload_size, const long long unsigned int block_size) {
+    auto max_msg_size = max_payload_size + sizeof(header);
+    if (max_msg_size % block_size != 0) {
+        max_msg_size = (max_msg_size / block_size + 1) * block_size;
+    }
+    return max_msg_size;
+}
+
+template<unsigned int N>
 void DerechoGroup<N>::wedge() {
     wedged = true;
 }
@@ -259,6 +297,8 @@ void DerechoGroup<N>::send_loop() {
         derecho_cv.wait(lock, should_wake);
         if (!thread_shutdown){
             msg_info msg = pending_sends.front();
+            cout << "DerechoGroup sending message " << msg.index << endl;
+            debug_print();
             rdmc::send(member_index + rdmc_group_num_offset, mrs[member_index], msg.offset, msg.size);
             pending_sends.pop();
         }
@@ -301,6 +341,7 @@ void DerechoGroup<N>::send() {
 
 template<unsigned int N>
   void DerechoGroup<N>::debug_print () {
+    cout << "In DerechoGroup SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
     cout << "Printing SST" << endl;
     for (int i = 0; i < num_members; ++i) {
       cout << (*sst)[i].seq_num << " " << (*sst)[i].stable_num << " " << (*sst)[i].delivered_num << endl;

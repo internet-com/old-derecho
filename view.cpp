@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <sstream>
 
 #include "view.h"
 
@@ -49,20 +50,6 @@ int View::rank_of(const node_id_t& who) const {
     return -1;
 }
 
-/**
- *
- * @param p The rank of the member from whose perspective the leader should be
- * calculated
- * @return Member p's current belief of who the leader is
- */
-int View::rank_of_leader(const uint32_t& p) const {
-    for(int r = 0; r < num_members; ++r) {
-        if(!(*gmsSST)[p].suspected[r])
-            return r;
-    }
-    return -1;
-}
-
 void View::newView(const View& Vc) {
     std::string viewString = Vc.ToString();
     std::cout <<"Process " << Vc.members[Vc.my_rank] << "New view: " << viewString << std::endl;
@@ -99,31 +86,32 @@ shared_ptr<node_id_t> View::Departed() const {
 }
 
 std::string View::ToString() const {
-    string s = std::string("View ") + std::to_string(vid) + string(": MyRank=") + std::to_string(my_rank) + string("... ");
+    std::stringstream s;
+    s << "View " << vid << ": MyRank=" << my_rank << "... ";
     string ms = " ";
     for (int m = 0; m < num_members; m++) {
         ms += std::to_string(members[m]) + string("  ");
     }
 
-    s += string("Members={") + ms + string("}, ");
+    s << "Members={" << ms << "}, ";
     string fs = (" ");
     for (int m = 0; m < num_members; m++) {
         fs += failed[m] ? string(" T ") : string(" F ");
     }
 
-    s += string("Failed={") + fs + string(" }, nFailed=") + std::to_string(nFailed);
+    s << "Failed={" << fs << " }, nFailed=" << nFailed;
     shared_ptr<node_id_t> dep = Departed();
     if (dep != nullptr) {
-        s += string(", Departed: ") + std::to_string(*dep);
+        s << ", Departed: " << *dep;
     }
 
     shared_ptr<node_id_t> join = Joined();
     if (join != nullptr) {
-        s += string(", Joined: ") + std::to_string(*join);
+        s << ", Joined: " << *join;
     }
 
 //    s += string("\n") + gmsSST->ToString();
-    return s;
+    return s.str();
 }
 
 

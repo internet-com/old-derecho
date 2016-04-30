@@ -18,6 +18,22 @@ using cstring = char[50];
  */
 template<unsigned int N>
 struct DerechoRow {
+
+        //derecho_group members. Copy-pasted from derecho_group.h's MessageTrackingRow
+        /** This variable is the highest sequence number that has been received
+         * in-order by this node; if a node updates seq_num, it has received all
+         * messages up to seq_num in the global round-robin order. */
+        long long int seq_num;
+        /** This represents the highest sequence number that has been received
+         * by every node, as observed by this node. If a node updates stable_num,
+         * then it believes that all messages up to stable_num in the global
+         * round-robin order have been received by every node. */
+        long long int stable_num;
+        /** This represents the highest sequence number that has been delivered
+         * at this node. Messages are only delievered once stable, so it must be
+         * at least stable_num. */
+        long long int delivered_num;
+
         /** View ID associated with this SST */
         int vid;
         /** Array of same length as View::members, where each bool represents
@@ -50,20 +66,6 @@ struct DerechoRow {
         /** Must come after GlobalMin */
         bool globalMinReady;
 
-        //derecho_group members. Copy-pasted from derecho_group.h's MessageTrackingRow
-        /** This variable is the highest sequence number that has been received
-         * in-order by this node; if a node updates seq_num, it has received all
-         * messages up to seq_num in the global round-robin order. */
-        long long int seq_num;
-        /** This represents the highest sequence number that has been received
-         * by every node, as observed by this node. If a node updates stable_num,
-         * then it believes that all messages up to stable_num in the global
-         * round-robin order have been received by every node. */
-        long long int stable_num;
-        /** This represents the highest sequence number that has been delivered
-         * at this node. Messages are only delievered once stable, so it must be
-         * at least stable_num. */
-        long long int delivered_num;
 };
 
 template<unsigned int N>

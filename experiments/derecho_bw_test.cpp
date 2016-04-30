@@ -28,7 +28,7 @@ int main (int argc, char *argv[]) {
   
   initialize(node_rank, num_nodes);
   
-  vector <int> members(num_nodes);
+  vector <uint32_t> members(num_nodes);
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }

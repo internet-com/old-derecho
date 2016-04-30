@@ -6,5 +6,5 @@
 struct Result {
   double bw;
 };
-double aggregate_bandwidth (std::vector<int> members, uint32_t node_rank, double bw);
+double aggregate_bandwidth (std::vector<uint32_t> members, uint32_t node_rank, double bw);
 #endif

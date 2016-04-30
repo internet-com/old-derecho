@@ -116,11 +116,17 @@ class ManagedGroup {
         /** Causes this node to cleanly leave the group by setting itself to "failed." */
         void leave();
 
+        /** Gets a pointer into the managed DerechoGroup's send buffer, at a position where
+         * there are at least payload_size bytes remaining in the buffer. The returned pointer
+         * can be used to write a message into the buffer. (Analogous to DerechoGroup::get_position) */
+        char* get_sendbuffer_ptr(long long unsigned int payload_size, int pause_sending_turns = 0);
+        /** Instructs the managed DerechoGroup to send the next message. This returns immediately;
+         * the send is scheduled to happen some time in the future. */
+        void send();
         /** Reports to the GMS that the given node has failed. */
         void report_failure(const node_id_t who);
-        /** Gets a reference to the current derecho_group for the group being managed.
-         * Clients can use this to send and receive messages. */
-        DerechoGroup<View::N>& current_derecho_group();
+
+        void debug_print_status();
 
 };
 

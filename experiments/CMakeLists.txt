@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(derecho CXX)
-set(CMAKE_CXX_FLAGS "-std=c++14 -Wall -ggdb")
+set(CMAKE_CXX_FLAGS "-std=c++14 -Wall -ggdb -gdwarf-3")
 
 # test_group_interface
 add_executable(test_group_interface test_group_interface.cpp initialize.cpp )

@@ -119,6 +119,8 @@ class DerechoGroup {
         /** The SST, shared between this group and its GMS. */
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> sst;
 
+        static long long unsigned int compute_max_msg_size(const long long unsigned int max_payload_size, const long long unsigned int block_size);
+
         void send_loop();
     public:
         // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
