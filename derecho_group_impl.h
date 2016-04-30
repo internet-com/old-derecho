@@ -1,8 +1,9 @@
 #pragma once
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 #include "derecho_group.h"
@@ -18,6 +19,21 @@ using std::lock_guard;
 using std::cout;
 using std::endl;
 
+
+/**
+ * Helper function to find the index of an element in a container.
+ */
+template <class T, class U>
+size_t index_of(T container, U elem) {
+    size_t n = 0;
+    for(auto it = begin(container); it != end(container); ++it) {
+        if(*it == elem) return n;
+
+        n++;
+    }
+    return container.size();
+}
+	
 /**
  *
  * @param _members A list of node IDs of members in this group
@@ -37,24 +53,107 @@ template<unsigned int N>
 DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         long long unsigned int _max_payload_size, message_callback _global_stability_callback, long long unsigned int _block_size,
         unsigned int _window_size, rdmc::send_algorithm _type) :
-            members(_members), num_members(members.size()), block_size(_block_size), max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
-            type(_type), window_size(_window_size), global_stability_callback(_global_stability_callback), rdmc_group_num_offset(0),
-            wedged(false),thread_shutdown(false), background_threads(), sst(_sst) {
-    // find my member_index
-    for (int i = 0; i < num_members; ++i) {
-        if (members[i] == my_node_id) {
-            member_index = i;
-            break;
-        }
-    }
-    assert(window_size >= 1);
+            members(_members),
+			num_members(members.size()),
+			member_index(index_of(members, my_node_id)),
+			block_size(_block_size),
+			max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
+            type(_type),
+			window_size(_window_size),
+			global_stability_callback(_global_stability_callback),
+			rdmc_group_num_offset(0),
+            sst(_sst) {
 
+    assert(window_size >= 1);
 	for(unsigned int i = 0; i < window_size * num_members; i++){
 		free_message_buffers.emplace_back(max_msg_size);
 	}
-    // send_slot = 0;
-    // recv_slots.resize(num_members,0);
 
+	create_rdmc_groups();
+	initialize_sst_row();
+	register_predicates();
+    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
+    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+}
+
+template<unsigned int N>
+DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+							  DerechoGroup&& old_group) :
+	        members(_members),
+			num_members(members.size()),
+			member_index(index_of(members, my_node_id)),
+			block_size(old_group.block_size),
+			max_msg_size(old_group.max_msg_size),
+            type(old_group.type),
+			window_size(old_group.window_size),
+			global_stability_callback(old_group.global_stability_callback),
+			rdmc_group_num_offset(old_group.rdmc_group_num_offset + old_group.num_members),
+            sst(_sst) {
+
+	// Make sure rdmc_group_num_offset didn't overflow.
+	assert(old_group.rdmc_group_num_offset <= std::numeric_limits<uint16_t>::max() - old_group.num_members - num_members);
+
+	// Convience function that takes a msg_info from the old group and
+	// produces one suitable for this group.
+	auto convert_msg_info = [this](msg_info& msg){
+		msg.sender_id = member_index;
+		msg.index = future_message_index++;
+
+		char* buf = msg.message_buffer.buffer.get();
+		header* h = (header*)buf;
+		future_message_index += h->pause_sending_turns;
+		
+		return std::move(msg);
+	};
+	
+	// Reclaim MessageBuffers from the old group, and supplement them with
+	// additional if the group has grown.
+	lock_guard <mutex> lock (old_group.msg_state_mtx);
+	free_message_buffers.swap(old_group.free_message_buffers);
+	for(unsigned int i = window_size * old_group.num_members; i < window_size * num_members; i++){
+		free_message_buffers.emplace_back(max_msg_size);
+	}
+	for(auto& msg : old_group.current_receives){
+		free_message_buffers.push_back(std::move(msg.second.message_buffer));
+	}
+	old_group.current_receives.clear();
+
+	// Assume that any locally stable messages failed. If we were the sender
+	// than re-attempt, otherwise discard. TODO: Presumably the ragged edge
+	// cleanup will want the chance to deliver some of these.
+	for(auto& p : old_group.locally_stable_messages){
+		if(p.second.size == 0){
+			continue;
+		}
+
+		if(p.second.sender_id == old_group.member_index){
+			pending_sends.push(convert_msg_info(p.second));
+		}else{
+			free_message_buffers.push_back(std::move(p.second.message_buffer));
+		}
+	}
+	old_group.locally_stable_messages.clear();
+	
+	// Any messages that were being sent should be re-attempted.
+	if(old_group.current_send){
+		pending_sends.push(convert_msg_info(*old_group.current_send));
+	}
+	while(!old_group.pending_sends.empty()){
+		pending_sends.push(convert_msg_info(old_group.pending_sends.front()));
+		old_group.pending_sends.pop();
+	}
+	if(old_group.next_send){
+		next_send = convert_msg_info(*old_group.next_send);
+	}
+
+	create_rdmc_groups();
+	initialize_sst_row();
+	register_predicates();
+    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
+    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+}
+
+template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
     // rotated list of members - used for creating n internal RDMC groups
     vector<uint32_t> rotated_members(num_members);
 
@@ -161,10 +260,10 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
                     [](boost::optional<uint32_t>) {});
         }
     }
-    
-    // create the SST writes table
-//    sst = new sst::SST<DerechoRow<N>, sst::Mode::Writes>(members, node_rank);
-    cout << "Initializing DerechoGroup" << endl;
+}
+
+template<unsigned int N>
+void DerechoGroup<N>::initialize_sst_row(){
     for (int i = 0; i < num_members; ++i) {
         for(int j = 0; j < num_members; ++j) {
             (*sst)[i].nReceived[j] = -1;
@@ -175,9 +274,10 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     }
     sst->put();
     sst->sync_with_members();
-
-    cout << "In DerechoGroup constructor, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
-
+}
+	
+template<unsigned int N>
+void DerechoGroup<N>::register_predicates(){
     auto stability_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         return !wedged;
     };
@@ -243,19 +343,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
         next_message_to_deliver++;
     };
     sst->predicates.insert(derecho_pred, derecho_trig, sst::PredicateType::RECURRENT);
-    
-    // start sender thread
-    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
-
-    cout << "DerechoGroup: Registered predicates and started thread" << endl;
-
 }
-
-template<unsigned int N>
-DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        const DerechoGroup& old_group) : DerechoGroup(_members, my_node_id, _sst, old_group.max_msg_size - sizeof(header),
-                old_group.global_stability_callback, old_group.block_size, old_group.window_size, old_group.type) {}
-
+	
 template<unsigned int N>
 DerechoGroup<N>::~DerechoGroup() {
     sst->disable_all_predicates();

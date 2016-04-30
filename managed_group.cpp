@@ -392,8 +392,9 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
     newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank]);
     newView.rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(newView.members, newView.members[newView.my_rank],
-            newView.gmsSST, *curr_view->rdmc_sending_group);
-
+            newView.gmsSST, std::move(*curr_view->rdmc_sending_group));
+	curr_view->rdmc_sending_group.reset();
+	
     int m = 0;
     for (int n = 0; n < newView.num_members; n++)
     {

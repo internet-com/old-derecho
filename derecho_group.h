@@ -85,7 +85,7 @@ class DerechoGroup {
         /**  number of members */
         const int num_members;
         /** index of the local node in the members vector, which should also be its row index in the SST */
-        int member_index;
+        const int member_index;
         /** Block size used for message transfer.
          * we keep it simple; one block size for messages from all senders */
         const long long unsigned int block_size;
@@ -103,7 +103,7 @@ class DerechoGroup {
         /** Indicates whether this sending group is paused pending a reconfiguration.
          * Once wedged, no more messages will be sent or delivered in this group.
          * Atomic because it's shared with the background sender thread. */
-        std::atomic<bool> wedged;
+        std::atomic<bool> wedged{false};
 
         /** Stores message buffers not currently in use. Protected by 
          * msg_state_mtx */
@@ -138,7 +138,7 @@ class DerechoGroup {
         std::condition_variable derecho_cv;
 
         /** A flag to signal background threads to shut down; set to true when the group is destroyed. */
-        std::atomic<bool> thread_shutdown;
+        std::atomic<bool> thread_shutdown{false};
         /** Holds references to background threads, so that we can shut them down during destruction. */
         std::vector<std::thread> background_threads;
 
@@ -148,13 +148,18 @@ class DerechoGroup {
         static long long unsigned int compute_max_msg_size(const long long unsigned int max_payload_size, const long long unsigned int block_size);
 
         void send_loop();
+
+		void create_rdmc_groups();
+		void initialize_sst_row();
+		void register_predicates();
+		
     public:
         // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
         DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
                 long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size,
                 unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
         /** Constructor to initialize a new derecho_group from an old one, preserving the same settings but providing a new list of members. */
-        DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, const DerechoGroup& old_group);
+        DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, DerechoGroup&& old_group);
         ~DerechoGroup();
         /** get a pointer into the buffer, to write data into it before sending */
         char* get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
