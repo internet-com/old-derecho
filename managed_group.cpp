@@ -100,6 +100,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     }
 
     client_listener_thread = std::thread{[this](){
+        try {
         cout << "Spawned connection listener thread." << endl;
 //        tcp::connection_listener serversocket(gms_port);
         while (!thread_shutdown) {
@@ -108,14 +109,23 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
             pending_joins.locked().access.emplace_back(std::move(client_socket));
 //            pending_joins.locked().access.emplace_back(serversocket.accept());
         }
+        } catch (const std::exception& e) {
+            cout << "Client listener thread had an exception: " << e.what() << endl;
+            throw e;
+        }
     }};
 
     old_view_cleanup_thread = std::thread([this]() {
+       try {
        while(!thread_shutdown) {
            unique_lock_t old_views_lock(old_views_mutex);
            old_views_cv.wait(old_views_lock, [this](){return !old_views.empty() || thread_shutdown;});
            old_views.front().reset();
            old_views.pop();
+       }
+       } catch (const std::exception& e) {
+           cout << "Cleanup thread had an exception: " << e.what() << endl;
+           throw e;
        }
     });
 
@@ -154,7 +164,7 @@ void ManagedGroup::register_predicates() {
             {
                 if (Vc.nFailed + 1 >= Vc.num_members / 2)
                 {
-                    throw std::runtime_error("Majority of a Derecho group simultaneously failed … shutting down");
+                    throw derecho_exception("Majority of a Derecho group simultaneously failed ... shutting down");
                 }
 
                 gmsSST.freeze(q); // Cease to accept new updates from q
@@ -165,7 +175,7 @@ void ManagedGroup::register_predicates() {
 
                 if (Vc.nFailed > Vc.num_members / 2 || (Vc.nFailed == Vc.num_members / 2 && Vc.num_members % 2 == 0))
                 {
-                    throw std::runtime_error("Potential partitioning event: this node is no longer in the majority and must shut down!");
+                    throw derecho_exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
                 }
 
                 gmsSST.put();
@@ -173,7 +183,7 @@ void ManagedGroup::register_predicates() {
                 {
                     if ((gmsSST[myRank].nChanges - gmsSST[myRank].nCommitted) == View::MAX_MEMBERS)
                     {
-                        throw std::runtime_error("Ran out of room in the pending changes list");
+                        throw derecho_exception("Ran out of room in the pending changes list");
                     }
 
                     gmssst::set(gmsSST[myRank].changes[gmsSST[myRank].nChanges % View::MAX_MEMBERS], Vc.members[q]); // Reports the failure (note that q NotIn members)
@@ -290,12 +300,12 @@ void ManagedGroup::register_predicates() {
         if ((next_view->my_rank = next_view->rank_of(myID)) == -1)
         {
             std::cout << std::string("Some other process reported that I failed.  Process ") << myID << std::string(" terminating") << std::endl;
-            throw std::runtime_error("Some other process reported that I failed.");
+            throw derecho_exception("Some other process reported that I failed.");
         }
 
         if (next_view->gmsSST != nullptr)
         {
-            throw std::runtime_error("Overwriting the SST");
+            throw derecho_exception("Overwriting the SST");
         }
 
 
@@ -434,15 +444,13 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //    rdmc::initialize(ips_by_rank, newView.my_rank);
 
     cout << "Reinitializing SST and RDMC to transition to View " << newView.ToString() << endl;
-//    cout << "New members are ";
-//    std::copy(newView.members.begin(), newView.members.end(), std::ostream_iterator<node_id_t>(cout));
-//    cout << " and I am node " << newView.members[newView.my_rank] << endl;
+    //Temporarily disabled because all nodes are initialized at the beginning
 //    if(whichFailed == -1) { //This is a join
 //        rdmc::add_address(newView.members.back(), newView.member_ips.back());
 //    }
 //
-//    //TODO: SST needs an "add one member" method; this attempts to re-connect to all the existing members
-//    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
+//    std::map<node_id_t, ip_addr> new_member_map {{newView.members[newView.my_rank], newView.member_ips[newView.my_rank]}, {newView.members.back(), newView.member_ips.back()}};
+//    sst::tcp::tcp_initialize(newView.members[newView.my_rank], new_member_map);
     newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank],
             [this](const uint32_t node_id){report_failure(node_id);});
     newView.rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(newView.members, newView.members[newView.my_rank],
@@ -533,7 +541,7 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
     derechoSST& gmsSST = *curr_view->gmsSST;
     if ((gmsSST[curr_view->my_rank].nChanges - gmsSST[curr_view->my_rank].nCommitted) == View::MAX_MEMBERS/2)
     {
-        throw std::runtime_error("Too many changes to allow a Join right now");
+        throw derecho_exception("Too many changes to allow a Join right now");
     }
 
 //    node_id_t largest_id = member_ips_by_id.rbegin()->first;
@@ -730,7 +738,7 @@ void ManagedGroup::report_failure(const node_id_t who) {
 
 	if (cnt >= curr_view->num_members / 2)
 	{
-		throw new std::runtime_error("Potential partitioning event: this node is no longer in the majority and must shut down!");
+		throw derecho_exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
 	}
     curr_view->gmsSST->put();
 }

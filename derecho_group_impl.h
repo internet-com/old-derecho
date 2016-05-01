@@ -406,6 +406,7 @@ void DerechoGroup<N>::send_loop() {
     auto should_wake = [&](){
         return thread_shutdown || should_send();
     };
+    try {
     unique_lock<mutex> lock(msg_state_mtx);
     while (!thread_shutdown) {
         sender_cv.wait(lock, should_wake);
@@ -416,6 +417,9 @@ void DerechoGroup<N>::send_loop() {
         }
     }
     cout <<  "DerechoGroup send thread shutting down" << endl;
+    } catch (const std::exception& e) {
+        cout << "DerechoGroup send thread had an exception: " << e.what() << endl;
+    }
 }
 
 template<unsigned int N>

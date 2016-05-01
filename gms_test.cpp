@@ -27,7 +27,7 @@ static const int GMS_PORT = 12345;
 
 int main (int argc, char *argv[]) {
 
-    {
+    try {
 
 
     if(argc < 2) {
@@ -85,6 +85,9 @@ int main (int argc, char *argv[]) {
 
     managed_group.leave();
 
+    } catch (const std::exception& e) {
+        cout << "Main got an exception: " << e.what() << endl;
+        throw e;
     }
 
     cout << "Finished destroying managed_group" << endl;

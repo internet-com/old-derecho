@@ -13,6 +13,16 @@
 
 namespace derecho {
 
+struct derecho_exception : public std::exception {
+    public:
+        const std::string message;
+        derecho_exception(const std::string& message) : message(message) {}
+
+        const char * what() const noexcept {
+            return message.c_str();
+        }
+};
+
 template<typename T>
 struct LockedQueue {
     private:
