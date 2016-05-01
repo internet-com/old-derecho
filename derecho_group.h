@@ -99,12 +99,6 @@ class DerechoGroup {
         const message_callback global_stability_callback;
         /** Offset to add to member ranks to form RDMC group numbers. */
         const uint16_t rdmc_group_num_offset;
-
-        /** Indicates whether this sending group is paused pending a reconfiguration.
-         * Once wedged, no more messages will be sent or delivered in this group.
-         * Atomic because it's shared with the background sender thread. */
-        std::atomic<bool> wedged{false};
-
         /** Stores message buffers not currently in use. Protected by 
          * msg_state_mtx */
         std::vector<MessageBuffer> free_message_buffers;
@@ -135,15 +129,20 @@ class DerechoGroup {
         std::map<long long int, msg_info> locally_stable_messages;
         long long int next_message_to_deliver = 0;
         std::mutex msg_state_mtx;
-        std::condition_variable derecho_cv;
+        std::condition_variable sender_cv;
 
-        /** A flag to signal background threads to shut down; set to true when the group is destroyed. */
+        /** Indicates that the group is being destroyed. */
         std::atomic<bool> thread_shutdown{false};
-        /** Holds references to background threads, so that we can shut them down during destruction. */
-        std::vector<std::thread> background_threads;
+        /** The background thread that sends messages with RDMC. */
+        std::thread sender_thread;
 
         /** The SST, shared between this group and its GMS. */
-        std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> sst;
+        std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
+
+        using pred_handle = typename sst::SST<DerechoRow<N>>::Predicates::pred_handle;
+        pred_handle stability_pred_handle;
+        pred_handle delivery_pred_handle;
+        pred_handle sender_pred_handle;
 
         static long long unsigned int compute_max_msg_size(const long long unsigned int max_payload_size, const long long unsigned int block_size);
 
@@ -166,7 +165,7 @@ class DerechoGroup {
         /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
          * This still allows making multiple send calls without acknowledgement; at a single point in time, however,
          * there is only one message per sender in the RDMC pipeline */
-        void send();
+        bool send();
         /** Stops all sending and receiving in this group, in preparation for shutting it down. */
         void wedge();
         /** Debugging function; prints the current state of the SST to stdout. */

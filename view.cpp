@@ -23,6 +23,12 @@ View::View(int num_members) : vid(0), members(num_members), member_ips(num_membe
         failed(num_members), nFailed(0), who(nullptr), num_members(num_members),
         my_rank(0), rdmc_sending_group(nullptr),  gmsSST(nullptr) {}
 
+void View::init_vectors() {
+    members.resize(num_members);
+    member_ips.resize(num_members);
+    failed.resize(num_members);
+}
+
 int View::rank_of_leader() const {
     for(int r = 0; r < num_members; ++r) {
         if(!failed[r]) {
@@ -87,7 +93,7 @@ shared_ptr<node_id_t> View::Departed() const {
 
 std::string View::ToString() const {
     std::stringstream s;
-    s << "View " << vid << ": MyRank=" << my_rank << "... ";
+    s << "View " << vid << ": MyRank=" << my_rank << ". ";
     string ms = " ";
     for (int m = 0; m < num_members; m++) {
         ms += std::to_string(members[m]) + string("  ");

@@ -46,7 +46,7 @@ int main (int argc, char *argv[]) {
 
     bool done = false;
     auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+//        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
         if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
             done = true;
         }
@@ -61,8 +61,8 @@ int main (int argc, char *argv[]) {
         // random message size between 1 and 100
         unsigned int msg_size = (rand()%7 + 2) * 10;
         char *buf = managed_group.get_sendbuffer_ptr(msg_size);
-        cout << "After getting sendbuffer for message " << i << endl;
-        managed_group.debug_print_status();
+//        cout << "After getting sendbuffer for message " << i << endl;
+//        managed_group.debug_print_status();
         while (!buf) {
             buf= managed_group.get_sendbuffer_ptr(msg_size);
         }

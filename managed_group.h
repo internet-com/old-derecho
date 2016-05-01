@@ -3,6 +3,7 @@
 
 #include <mutex>
 #include <list>
+#include <queue>
 #include <string>
 #include <utility>
 #include <map>
@@ -15,13 +16,13 @@ namespace derecho {
 template<typename T>
 struct LockedQueue {
     private:
+        using unique_lock_t = std::unique_lock<std::mutex>;
         std::mutex mutex;
-        using lock_t = std::unique_lock<std::mutex>;
         std::list<T> underlying_list;
     public:
         struct LockedListAccess {
             private:
-                lock_t lock;
+                unique_lock_t lock;
             public:
                 std::list<T> &access;
                 LockedListAccess(std::mutex& m, std::list<T>& a) :
@@ -35,12 +36,19 @@ struct LockedQueue {
 class ManagedGroup {
     private:
 
+        using pred_handle = View::DerechoSST::Predicates::pred_handle;
+
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
         std::map<node_id_t, ip_addr> member_ips_by_id;
 
         /** Contains client sockets for all pending joins, except the current one.*/
         LockedQueue<tcp::socket> pending_joins;
+
+        /** Contains old Views that need to be cleaned up*/
+        std::queue<std::unique_ptr<View>> old_views;
+        std::mutex old_views_mutex;
+        std::condition_variable old_views_cv;
 
         /** The socket connected to the client that is currently joining, if any */
         tcp::socket joining_client_socket;
@@ -53,12 +61,19 @@ class ManagedGroup {
 		/** The port that this instance of the GMS communicates on. */
         const int gms_port;
 
-        /** Indicates whether the GMS wants to disable all of its predicates except "suspected_changed" */
-        std::atomic<bool> preds_disabled;
+        tcp::connection_listener server_socket;
         /** A flag to signal background threads to shut down; set to true when the group is destroyed. */
         std::atomic<bool> thread_shutdown;
-        /** Holds references to background threads, so that we can shut them down during destruction. */
-        std::vector<std::thread> background_threads;
+        /** The background thread that listens for clients connecting on our server socket. */
+        std::thread client_listener_thread;
+        std::thread old_view_cleanup_thread;
+
+        //Handles for all the predicates the GMS registered with the current view's SST.
+        pred_handle suspected_changed_handle;
+        pred_handle start_join_handle;
+        pred_handle change_commit_ready_handle;
+        pred_handle leader_proposed_handle;
+        pred_handle leader_committed_handle;
 
         /** Sends a joining node the new view that has been constructed to include it.*/
         void commit_join(const View& new_view, tcp::socket& client_socket);
@@ -79,6 +94,7 @@ class ManagedGroup {
         static void deliver_in_order(const View& Vc, int Leader);
         static void await_meta_wedged(const View& Vc);
         static int await_leader_globalMin_ready(const View& Vc);
+        static void ragged_edge_cleanup(View& Vc);
         static void leader_ragged_edge_cleanup(View& Vc);
         static void follower_ragged_edge_cleanup(View& Vc);
 
@@ -97,6 +113,11 @@ class ManagedGroup {
         /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
          * (and copying over the SST data from the current view). */
         void transition_sst_and_rdmc(View& newView, int whichFailed);
+
+        /** Lock this before accessing curr_view, since it's shared by multiple threads */
+        std::mutex view_mutex;
+        /** Notified when curr_view changes (i.e. we are finished with a pending view change).*/
+        std::condition_variable view_change_cv;
 
         /** May hold a pointer to the partially-constructed next view, if we are
          * in the process of transitioning to a new view. */

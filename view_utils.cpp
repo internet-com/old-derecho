@@ -35,12 +35,12 @@ void merge_changes(View& Vc) {
     for (int n = 0; n < Vc.num_members; n++) {
         if ((*Vc.gmsSST)[myRank].nChanges < (*Vc.gmsSST)[n].nChanges) {
             gmssst::set((*Vc.gmsSST)[myRank].changes, (*Vc.gmsSST)[n].changes);
-            (*Vc.gmsSST)[myRank].nChanges = (*Vc.gmsSST)[n].nChanges;
+            gmssst::set((*Vc.gmsSST)[myRank].nChanges, (*Vc.gmsSST)[n].nChanges);
         }
 
         if ((*Vc.gmsSST)[myRank].nCommitted < (*Vc.gmsSST)[n].nCommitted) // How many I know to have been committed
         {
-            (*Vc.gmsSST)[myRank].nCommitted = (*Vc.gmsSST)[n].nCommitted;
+            gmssst::set((*Vc.gmsSST)[myRank].nCommitted, (*Vc.gmsSST)[n].nCommitted);
         }
     }
     bool found = false;
@@ -60,7 +60,7 @@ void merge_changes(View& Vc) {
 
         if (!found) {
             gmssst::set((*Vc.gmsSST)[myRank].changes[(*Vc.gmsSST)[myRank].nChanges % View::MAX_MEMBERS], Vc.members[n]);
-            (*Vc.gmsSST)[myRank].nChanges++;
+            gmssst::increment((*Vc.gmsSST)[myRank].nChanges);
         }
     }
     Vc.gmsSST->put();
@@ -69,7 +69,7 @@ void merge_changes(View& Vc) {
 
 void wedge_view(View& Vc) {
     Vc.rdmc_sending_group->wedge(); // RDMC finishes sending, stops new sends or receives in Vc
-    (*Vc.gmsSST)[Vc.my_rank].wedged = true;
+    gmssst::set((*Vc.gmsSST)[Vc.my_rank].wedged, true);
 }
 
 } //namespace derecho

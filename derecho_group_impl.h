@@ -72,7 +72,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 	create_rdmc_groups();
 	initialize_sst_row();
 	register_predicates();
-    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
+    sender_thread = std::thread(&DerechoGroup::send_loop, this);
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
@@ -92,6 +92,9 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 
 	// Make sure rdmc_group_num_offset didn't overflow.
 	assert(old_group.rdmc_group_num_offset <= std::numeric_limits<uint16_t>::max() - old_group.num_members - num_members);
+
+	//Just in case
+	old_group.wedge();
 
 	// Convience function that takes a msg_info from the old group and
 	// produces one suitable for this group.
@@ -149,7 +152,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	create_rdmc_groups();
 	initialize_sst_row();
 	register_predicates();
-    background_threads.emplace_back(std::thread(&DerechoGroup::send_loop, this));
+    sender_thread = std::thread(&DerechoGroup::send_loop, this);
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
@@ -177,8 +180,8 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                 [this, i](char* data, size_t size) {
                     assert(this->sst);
                     assert(&sst == &(this->sst));
-                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
-                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
+//                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
+//                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
                     (*sst)[member_index].nReceived[i]++;
@@ -222,7 +225,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                 [this, rdmc_receive_handler](char* data, size_t size) {
                     rdmc_receive_handler(data, size);
                     //signal background writer thread
-                    derecho_cv.notify_one();
+                    sender_cv.notify_all();
                 };
         // i is the group number
         // receive destination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
@@ -279,7 +282,7 @@ void DerechoGroup<N>::initialize_sst_row(){
 template<unsigned int N>
 void DerechoGroup<N>::register_predicates(){
     auto stability_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
-        return !wedged;
+        return true;
     };
     auto stability_trig = [this] (sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         // compute the min of the seq_num
@@ -295,10 +298,10 @@ void DerechoGroup<N>::register_predicates(){
             sst.put ();
         }
     };
-    sst->predicates.insert(stability_pred, stability_trig, sst::PredicateType::RECURRENT);
+    stability_pred_handle = sst->predicates.insert(stability_pred, stability_trig, sst::PredicateType::RECURRENT);
 
     auto delivery_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
-        return !wedged;
+        return true;
     };
     auto delivery_trig = [this] (sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         lock_guard <mutex> lock (msg_state_mtx);
@@ -327,9 +330,9 @@ void DerechoGroup<N>::register_predicates(){
             }
         }
     };
-    sst->predicates.insert(delivery_pred, delivery_trig, sst::PredicateType::RECURRENT);
+    delivery_pred_handle = sst->predicates.insert(delivery_pred, delivery_trig, sst::PredicateType::RECURRENT);
     
-    auto derecho_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
+    auto sender_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         long long int seq_num = next_message_to_deliver*num_members + member_index;
         for (int i = 0; i < num_members; ++i) {
             if (sst[i].delivered_num < seq_num) {
@@ -338,25 +341,17 @@ void DerechoGroup<N>::register_predicates(){
         }
         return true;
     };
-    auto derecho_trig = [this] (sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
-        derecho_cv.notify_one ();
+    auto sender_trig = [this] (sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
+        sender_cv.notify_all();
         next_message_to_deliver++;
     };
-    sst->predicates.insert(derecho_pred, derecho_trig, sst::PredicateType::RECURRENT);
+    sender_pred_handle = sst->predicates.insert(sender_pred, sender_trig, sst::PredicateType::RECURRENT);
 }
 	
 template<unsigned int N>
 DerechoGroup<N>::~DerechoGroup() {
-    sst->disable_all_predicates();
-    thread_shutdown = true;
-    for (int i = 0; i < num_members; ++i) {
-        rdmc::destroy_group(i + rdmc_group_num_offset);
-    }
-    derecho_cv.notify_all();
-    cout << "DerechoGroup: Done destroying RDMC groups" << endl;
-    for(auto& thread : background_threads) {
-        thread.join();
-    }
+    wedge();
+
 }
 
 template<unsigned int N>
@@ -370,13 +365,30 @@ long long unsigned int DerechoGroup<N>::compute_max_msg_size(const long long uns
 
 template<unsigned int N>
 void DerechoGroup<N>::wedge() {
-    wedged = true;
+    unique_lock<mutex> lock(msg_state_mtx);
+    if(thread_shutdown) //Wedge has already been called
+        return;
+
+    sst->predicates.remove(stability_pred_handle);
+    sst->predicates.remove(delivery_pred_handle);
+    sst->predicates.remove(sender_pred_handle);
+
+    for (int i = 0; i < num_members; ++i) {
+        rdmc::destroy_group(i + rdmc_group_num_offset);
+    }
+
+    thread_shutdown = true;
+    lock.unlock(); //sender_thread takes the same lock, so unlock it here
+    sender_cv.notify_all();
+    if(sender_thread.joinable()){
+        sender_thread.join();
+    }
 }
 
 template<unsigned int N>
 void DerechoGroup<N>::send_loop() {
     auto should_send = [&]() {
-        if (pending_sends.empty () || wedged) {
+        if (pending_sends.empty()) {
             return false;
         }
         msg_info& msg = pending_sends.front ();
@@ -396,7 +408,7 @@ void DerechoGroup<N>::send_loop() {
     };
     unique_lock<mutex> lock(msg_state_mtx);
     while (!thread_shutdown) {
-        derecho_cv.wait(lock, should_wake);
+        sender_cv.wait(lock, should_wake);
         if (!thread_shutdown){
             current_send = std::move(pending_sends.front());
             rdmc::send(member_index + rdmc_group_num_offset, current_send->message_buffer.mr, 0, current_send->size);
@@ -420,7 +432,7 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
     }
 
 	unique_lock<mutex> lock(msg_state_mtx);
-	if(wedged) return nullptr;
+	if(thread_shutdown) return nullptr;
 	if(free_message_buffers.empty()) return nullptr;
 
 	// Create new msg_info
@@ -443,14 +455,16 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
 }
 
 template<unsigned int N>
-void DerechoGroup<N>::send() {
-    {
-        lock_guard<mutex> lock(msg_state_mtx);
-        assert(next_send);
-        pending_sends.push(std::move(*next_send));
-        next_send = std::experimental::nullopt;
+bool DerechoGroup<N>::send() {
+    lock_guard<mutex> lock(msg_state_mtx);
+    if(thread_shutdown) {
+        return false;
     }
-    derecho_cv.notify_one();
+    assert(next_send);
+    pending_sends.push(std::move(*next_send));
+    next_send = std::experimental::nullopt;
+    sender_cv.notify_all();
+    return true;
 }
 
 template<unsigned int N>

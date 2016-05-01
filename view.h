@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 #include "derecho_group.h"
 #include "sst/sst.h"
@@ -56,6 +57,8 @@ class View {
          * The vectors will have room for num_members elements. */
         View(int num_members);
         void newView(const View& Vc);
+        /** When constructing a View piecemeal, call this after num_members has been set. */
+        void init_vectors();
 
         int rank_of(const ip_addr& who) const;
         int rank_of(const node_id_t& who) const;
