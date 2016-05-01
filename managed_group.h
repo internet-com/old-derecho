@@ -122,10 +122,9 @@ class ManagedGroup {
         /** May hold a pointer to the partially-constructed next view, if we are
          * in the process of transitioning to a new view. */
         std::unique_ptr<View> next_view;
-
-    public:
         std::unique_ptr<View> curr_view; //must be a pointer so we can re-assign it
 
+    public:
         /** Constructor, starts or joins a managed Derecho group.
          * The rest of the parameters are the parameters for the derecho_group that should
          * be constructed for communications within this managed group. */
@@ -136,7 +135,8 @@ class ManagedGroup {
         ~ManagedGroup();
         /** Causes this node to cleanly leave the group by setting itself to "failed." */
         void leave();
-
+        /** Creates and returns a vector listing the nodes that are currently members of the group. */
+        std::vector<node_id_t> get_members();
         /** Gets a pointer into the managed DerechoGroup's send buffer, at a position where
          * there are at least payload_size bytes remaining in the buffer. The returned pointer
          * can be used to write a message into the buffer. (Analogous to DerechoGroup::get_position) */
@@ -146,7 +146,8 @@ class ManagedGroup {
         void send();
         /** Reports to the GMS that the given node has failed. */
         void report_failure(const node_id_t who);
-
+        /** Waits until all members of the group have called this function. */
+        void barrier_sync();
         void debug_print_status();
 
 };

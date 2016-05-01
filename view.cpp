@@ -58,7 +58,7 @@ int View::rank_of(const node_id_t& who) const {
 
 void View::newView(const View& Vc) {
     std::string viewString = Vc.ToString();
-    std::cout <<"Process " << Vc.members[Vc.my_rank] << "New view: " << viewString << std::endl;
+    std::cout <<"Process " << Vc.members[Vc.my_rank] << " New view: " << viewString << std::endl;
 }
 
 

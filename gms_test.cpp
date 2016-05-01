@@ -27,6 +27,9 @@ static const int GMS_PORT = 12345;
 
 int main (int argc, char *argv[]) {
 
+    {
+
+
     if(argc < 2) {
         cout << "Error: Expected leader's node ID as the first argument." << endl;
         return -1;
@@ -46,7 +49,7 @@ int main (int argc, char *argv[]) {
 
     bool done = false;
     auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-//        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
         if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
             done = true;
         }
@@ -56,6 +59,9 @@ int main (int argc, char *argv[]) {
     derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
 
     cout <<  "Finished constructing/joining ManagedGroup" << endl;
+
+    while(managed_group.get_members().size() < 4) {
+    }
 
     for (int i = 0; i < num_messages; ++i) {
         // random message size between 1 and 100
@@ -75,6 +81,11 @@ int main (int argc, char *argv[]) {
     while (!done) {
     }
 
+    managed_group.barrier_sync();
 
     managed_group.leave();
+
+    }
+
+    cout << "Finished destroying managed_group" << endl;
 }

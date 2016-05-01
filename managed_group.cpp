@@ -96,6 +96,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
         //Otherwise, you'll immediately think that there's as new proposed view changed because [leader].nChanges > nAcked
         gmssst::init_from_existing((*curr_view->gmsSST)[curr_view->my_rank],(*curr_view->gmsSST)[curr_view->rank_of_leader()]);
         curr_view->gmsSST->put();
+        cout << "New node initialized its row to: " << gmssst::to_string((*curr_view->gmsSST)[curr_view->my_rank]) << endl;
     }
 
     client_listener_thread = std::thread{[this](){
@@ -146,6 +147,7 @@ void ManagedGroup::register_predicates() {
             }
         }
 
+        cout << "Suspected a new failure! My row is: " << gmssst::to_string(gmsSST[myRank]) << endl;
         for (int q = 0; q < Vc.num_members; q++)
         {
             if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
@@ -204,6 +206,7 @@ void ManagedGroup::register_predicates() {
     auto commit_change = [this](DerechoSST& gmsSST) {
         gmssst::set(gmsSST[gmsSST.get_local_index()].nCommitted, min_acked(gmsSST, curr_view->failed)); // Leader commits a new request
         cout << "Leader committing view proposal #" << gmsSST[gmsSST.get_local_index()].nCommitted << endl;
+        cout << "Leader's row is: " << gmssst::to_string(gmsSST[gmsSST.get_local_index()]) << endl;
         gmsSST.put();
     };
 
@@ -295,23 +298,31 @@ void ManagedGroup::register_predicates() {
             throw std::runtime_error("Overwriting the SST");
         }
 
+
         //At this point we need to await "meta wedged."
         //To do that, we create a predicate that will fire when meta wedged is true, and put the rest of the code in its trigger.
 
-        auto is_meta_wedged = [&Vc] (const DerechoSST& gmsSST) {
+        auto is_meta_wedged = [this] (const DerechoSST& gmsSST) mutable {
+            assert(next_view);
             for(int n = 0; n < gmsSST.get_num_rows(); ++n) {
-                if(!Vc.failed[n] && !gmsSST[n].wedged) {
+                if(!curr_view->failed[n] && !gmsSST[n].wedged) {
                     return false;
                 }
             }
             return true;
         };
-        auto meta_wedged_continuation = [this, failed, whoFailed] (DerechoSST& gmsSST) {
+        std::shared_ptr<int> debug_counter(new int{0});
+        auto meta_wedged_continuation = [this, failed, whoFailed,debug_counter] (DerechoSST& gmsSST) {
             cout << "MetaWedged is true, continuing view change" << endl;
+            assert(*debug_counter == 0);
             unique_lock_t lock(view_mutex);
+            assert(next_view);
 
-            auto globalMin_ready_continuation = [this, failed, whoFailed](DerechoSST& gmsSST) {
+            std::shared_ptr<int> debug_counter_2(new int{0});
+            auto globalMin_ready_continuation = [this, failed, whoFailed, debug_counter_2](DerechoSST& gmsSST) {
+                assert(*debug_counter_2 == 0);
                 lock_guard_t lock(view_mutex);
+                assert(next_view);
 
                 ragged_edge_cleanup(*curr_view);
                 if(curr_view->IAmLeader() && !failed) {
@@ -328,12 +339,13 @@ void ManagedGroup::register_predicates() {
                 //This will block until everyone responds to SST/RDMC initial handshakes
                 transition_sst_and_rdmc(*next_view, whoFailed);
                 next_view->gmsSST->put();
-                curr_view->gmsSST->sync_with_members();
+                next_view->gmsSST->sync_with_members();
                 {
                     lock_guard_t old_views_lock(old_views_mutex);
                     old_views.push(std::move(curr_view));
                     old_views_cv.notify_all();
                 }
+                cout << "Moving next_view to curr_view" << endl;
                 curr_view = std::move(next_view);
                 curr_view->newView(*curr_view); // Announce the new view to the application
 
@@ -348,6 +360,8 @@ void ManagedGroup::register_predicates() {
                 {
                     merge_changes(*curr_view); // Create a combined list of Changes
                 }
+                ++(*debug_counter_2);
+                assert(*debug_counter_2 == 1);
             };
 
             if(curr_view->IAmLeader()) {
@@ -356,14 +370,14 @@ void ManagedGroup::register_predicates() {
                 globalMin_ready_continuation(gmsSST);
             } else {
                 //Non-leaders need another level of continuation to wait for GlobalMinReady
-
-                View& curr_view_captured = *curr_view;
-                auto leader_globalMin_is_ready = [&curr_view_captured](const DerechoSST& gmsSST) {
-                    return gmsSST[curr_view_captured.rank_of_leader()].globalMinReady;
+                auto leader_globalMin_is_ready = [this](const DerechoSST& gmsSST) {
+                    assert(next_view);
+                    return gmsSST[curr_view->rank_of_leader()].globalMinReady;
                 };
                 gmsSST.predicates.insert(leader_globalMin_is_ready, globalMin_ready_continuation, sst::PredicateType::ONE_TIME);
             }
 
+            ++(*debug_counter);
         };
         gmsSST.predicates.insert(is_meta_wedged, meta_wedged_continuation, sst::PredicateType::ONE_TIME);
 
@@ -373,7 +387,7 @@ void ManagedGroup::register_predicates() {
 	start_join_handle = curr_view->gmsSST->predicates.insert(start_join_pred, start_join_trig, sst::PredicateType::RECURRENT);
 	change_commit_ready_handle = curr_view->gmsSST->predicates.insert(change_commit_ready, commit_change, sst::PredicateType::RECURRENT);
 	leader_proposed_handle = curr_view->gmsSST->predicates.insert(leader_proposed_change, ack_proposed_change, sst::PredicateType::RECURRENT);
-	leader_committed_handle = curr_view->gmsSST->predicates.insert(leader_committed_next_view, start_view_change, sst::PredicateType::RECURRENT);
+	leader_committed_handle = curr_view->gmsSST->predicates.insert(leader_committed_next_view, start_view_change, sst::PredicateType::ONE_TIME);
 }
 
 ManagedGroup::~ManagedGroup() {
@@ -394,7 +408,8 @@ void ManagedGroup::setup_sst_and_rdmc(long long unsigned int max_payload_size, m
 
     cout << "Starting SST and DerechoGroup with View: " << curr_view->ToString() << endl;
 
-    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(curr_view->members, curr_view->members[curr_view->my_rank]);
+    curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(curr_view->members, curr_view->members[curr_view->my_rank],
+            [this](const uint32_t node_id){report_failure(node_id);});
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
@@ -428,7 +443,8 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //
 //    //TODO: SST needs an "add one member" method; this attempts to re-connect to all the existing members
 //    sst::tcp::tcp_initialize(newView.my_rank, member_ips_by_id);
-    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank]);
+    newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank],
+            [this](const uint32_t node_id){report_failure(node_id);});
     newView.rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(newView.members, newView.members[newView.my_rank],
             newView.gmsSST, std::move(*curr_view->rdmc_sending_group));
 	curr_view->rdmc_sending_group.reset();
@@ -740,6 +756,15 @@ void ManagedGroup::send() {
     }
 }
 
+std::vector<node_id_t> ManagedGroup::get_members() {
+    lock_guard_t lock(view_mutex);
+    return curr_view->members;
+}
+
+void ManagedGroup::barrier_sync() {
+    lock_guard_t lock(view_mutex);
+    curr_view->gmsSST->sync_with_members();
+}
 
 void ManagedGroup::debug_print_status() {
     cout << "Member IPs by ID: {";

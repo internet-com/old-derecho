@@ -5,6 +5,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <sstream>
 
 namespace derecho {
 
@@ -158,7 +159,7 @@ void init(volatile DerechoRow<N>& newRow) {
     for(size_t i = 0; i < N; ++i) {
         newRow.suspected[i] = false;
         newRow.globalMin[i] = 0;
-        newRow.nReceived[i] = 0;
+        newRow.nReceived[i] = -1;
         newRow.changes[i] = 0;
     }
     newRow.nChanges = 0;
@@ -182,6 +183,11 @@ void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTable
     memcpy(const_cast<node_id_t*>(newRow.changes),
             const_cast<const node_id_t*>(existingRow.changes),
             N * sizeof(node_id_t));
+    for(size_t i = 0; i < N; ++i) {
+        newRow.suspected[i] = false;
+        newRow.globalMin[i] = 0;
+        newRow.nReceived[i] = -1;
+    }
     newRow.nChanges = existingRow.nChanges;
     newRow.nCommitted = existingRow.nCommitted;
     newRow.nAcked = existingRow.nAcked;
@@ -190,40 +196,35 @@ void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTable
 }
 
 template<unsigned int N>
-std::string to_string(volatile const GMSTableRow<N>& row) {
-    std::string s = std::string(*row.theIPA) + std::string("@ vid=") + std::string(row.vid)
-            + std::string("[row-time=") + std::string(row.gmsSSTRowTime) + std::string("]: ");
-    std::string tf = " ";
-    for (int n = 0; n < N; n++)
+std::string to_string(volatile const DerechoRow<N>& row) {
+    std::stringstream s;
+    s << "Vid=" << row.vid;
+    s << " Suspected={ ";
+    for (unsigned int n = 0; n < N; n++)
     {
-        tf += (row.suspected[n]? "T": "F") + std::string(" ");
+        s << (row.suspected[n]? "T": "F") << " ";
     }
 
-    s += std::string("Suspected={") + tf + std::string("}, nChanges=") + std::string(row.nChanges)
-            + std::string(", nCommitted=") + std::string(row.nCommitted);
-    std::string ch = " ";
+    s << "}, nChanges=" << row.nChanges << ", nCommitted=" << row.nCommitted;
+    s << ", Changes={ ";
     for (int n = row.nCommitted; n < row.nChanges; n++)
     {
-        ch += row.changes[n % N];
+        s << row.changes[n % N];
     }
-    std::string rs = " ";
-    for (int n = 0; n < N; n++)
+    s << " }, nAcked= " << row.nAcked << ", nReceived={ ";
+    for (unsigned int n = 0; n < N; n++)
     {
-        rs += row.nReceived[n] + std::string(" ");
+        s << row.nReceived[n] << " ";
     }
 
-    s += std::string(", Changes={") + ch + std::string(" }, nAcked=")
-            + row.nAcked + std::string(", nReceived={") + rs + std::string("}");
-    std::string gs = " ";
-    for (int n = 0; n < row.globalMin.size(); n++)
+    s << "}" << ", Wedged = " << (row.wedged? "T": "F") << ", GlobalMin = { ";
+    for (unsigned int n = 0; n < N; n++)
     {
-        gs += row.globalMin[n] + std::string(" ");
+        s << row.globalMin[n] << " ";
     }
 
-    s += std::string(", Wedged = ") + (row.wedged? "T": "F")
-            + std::string(", GlobalMin = {") + gs + std::string("}, GlobalMinReady=")
-            + std::string(row.globalMinReady) + std::string("\n");
-    return s;
+    s << "}, GlobalMinReady=" << row.globalMinReady << "\n";
+    return s.str();
 }
 
 
