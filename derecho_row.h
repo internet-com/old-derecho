@@ -198,8 +198,8 @@ void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTable
 template<unsigned int N>
 std::string to_string(volatile const DerechoRow<N>& row) {
     std::stringstream s;
-    s << "Vid=" << row.vid;
-    s << " Suspected={ ";
+    s << "Vid=" << row.vid << " ";
+    s << "Suspected={ ";
     for (unsigned int n = 0; n < N; n++)
     {
         s << (row.suspected[n]? "T": "F") << " ";

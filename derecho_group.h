@@ -44,7 +44,7 @@ struct MessageBuffer {
 };
 
 struct msg_info {
-        int sender_id;
+        int sender_rank;
         long long int index;
         long long unsigned int size;
         MessageBuffer message_buffer;

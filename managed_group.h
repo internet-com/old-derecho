@@ -51,6 +51,7 @@ class ManagedGroup {
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
         std::map<node_id_t, ip_addr> member_ips_by_id;
+        static bool rdmc_globals_initialized;
 
         /** Contains client sockets for all pending joins, except the current one.*/
         LockedQueue<tcp::socket> pending_joins;
@@ -141,8 +142,9 @@ class ManagedGroup {
         ManagedGroup(const int gms_port, const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
                 long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size,
                 unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
-
         ~ManagedGroup();
+
+        static void global_setup(const map<node_id_t, ip_addr>& member_ips, node_id_t my_id);
         /** Causes this node to cleanly leave the group by setting itself to "failed." */
         void leave();
         /** Creates and returns a vector listing the nodes that are currently members of the group. */

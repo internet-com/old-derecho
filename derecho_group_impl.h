@@ -99,7 +99,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	// Convience function that takes a msg_info from the old group and
 	// produces one suitable for this group.
 	auto convert_msg_info = [this](msg_info& msg){
-		msg.sender_id = member_index;
+		msg.sender_rank = member_index;
 		msg.index = future_message_index++;
 
 		char* buf = msg.message_buffer.buffer.get();
@@ -129,7 +129,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 			continue;
 		}
 
-		if(p.second.sender_id == old_group.member_index){
+		if(p.second.sender_rank == old_group.member_index){
 			pending_sends.push(convert_msg_info(p.second));
 		}else{
 			free_message_buffers.push_back(std::move(p.second.message_buffer));
@@ -179,7 +179,6 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
         auto rdmc_receive_handler =
                 [this, i](char* data, size_t size) {
                     assert(this->sst);
-                    assert(&sst == &(this->sst));
 //                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
 //                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
                     lock_guard <mutex> lock (msg_state_mtx);
@@ -196,7 +195,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						current_send = std::experimental::nullopt;
 					}else{
 						auto it = current_receives.find(sequence_number);
-						cout << "In completion callback: msg index=" << index << ", sender_id=" << i << endl;						
+						cout << "In completion callback: msg index=" << index << ", sender_rank=" << i << endl;
 						assert(it != current_receives.end());
 						auto& second = it->second;
 						locally_stable_messages.emplace(sequence_number, std::move(second));
@@ -247,12 +246,13 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						assert(!free_message_buffers.empty());
 
 						msg_info msg;
-						msg.sender_id = i;
+						msg.sender_rank = i;
 						msg.index = (*sst)[member_index].nReceived[i] + 1;
-						cout << "In incoming message callback: msg index=" << msg.index << ", sender_id=" << msg.sender_id << endl;
+						cout << "In incoming message callback: msg index=" << msg.index << ", sender_rank=" << msg.sender_rank << endl;
 						msg.size = length;
 						msg.message_buffer = std::move(free_message_buffers.back());
 						free_message_buffers.pop_back();
+						cout << "Size is " << free_message_buffers.size() << ". Took a buffer from free_message_buffers for an incoming message." << endl;
 
 						rdmc::receive_destination ret{msg.message_buffer.mr, 0};
 						auto sequence_number = msg.index * num_members + i;
@@ -322,8 +322,9 @@ void DerechoGroup<N>::register_predicates(){
                 if (msg.size > 0) {
                     char* buf = msg.message_buffer.buffer.get();
                     header* h = (header*) buf;
-                    global_stability_callback (msg.sender_id, msg.index, buf + h->header_size, msg.size);
+                    global_stability_callback (msg.sender_rank, msg.index, buf + h->header_size, msg.size);
 					free_message_buffers.push_back(std::move(msg.message_buffer));
+					cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
                 }
                 sst[member_index].delivered_num = least_undelivered_seq_num;
 //                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
@@ -443,11 +444,12 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
 
 	// Create new msg_info
 	msg_info msg;
-	msg.sender_id = member_index;
+	msg.sender_rank = member_index;
 	msg.index = future_message_index;
 	msg.size = msg_size;
 	msg.message_buffer = std::move(free_message_buffers.back());
 	free_message_buffers.pop_back();
+	cout << "Size is " << free_message_buffers.size() << ". get_position() took a buffer from free_message_buffers." << endl;
 
 	// Fill header
 	char* buf = msg.message_buffer.buffer.get();

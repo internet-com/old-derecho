@@ -38,17 +38,17 @@ using sst::SST;
 using lock_guard_t = std::lock_guard<std::mutex>;
 using unique_lock_t = std::unique_lock<std::mutex>;
 
+bool ManagedGroup::rdmc_globals_initialized = false;
+
 ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
         long long unsigned int _max_payload_size, message_callback global_stability_callback,
         long long unsigned int _block_size, unsigned int _window_size, rdmc::send_algorithm _type) :
         member_ips_by_id(member_ips), last_suspected(View::MAX_MEMBERS), gms_port(gms_port), server_socket(gms_port),
         thread_shutdown(false), next_view(nullptr) {
-    cout << "Doing global setup of SST and RDMC" << endl;
-    //TODO: pull these out
-    rdmc::initialize(member_ips_by_id, my_id);
-    sst::tcp::tcp_initialize(my_id, member_ips_by_id);
-    sst::verbs_initialize();
 
+    if (!rdmc_globals_initialized) {
+        global_setup(member_ips, my_id);
+    }
     if (my_id != leader_id){
         curr_view = join_existing(member_ips_by_id[leader_id], gms_port);
     } else {
@@ -136,6 +136,14 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
 //    curr_view->rdmc_sending_group->debug_print();
 }
 
+void ManagedGroup::global_setup(const map<node_id_t, ip_addr>& member_ips, node_id_t my_id) {
+    cout << "Doing global setup of SST and RDMC" << endl;
+    rdmc::initialize(member_ips, my_id);
+    sst::tcp::tcp_initialize(my_id, member_ips);
+    sst::verbs_initialize();
+    rdmc_globals_initialized = true;
+}
+
 void ManagedGroup::register_predicates() {
 
     using DerechoSST = View::DerechoSST;
@@ -157,7 +165,7 @@ void ManagedGroup::register_predicates() {
             }
         }
 
-        cout << "Suspected a new failure! My row is: " << gmssst::to_string(gmsSST[myRank]) << endl;
+        cout << "Suspected a new failure! View is " << curr_view->ToString() << endl << "and my row is: " << gmssst::to_string(gmsSST[myRank]) << endl;
         for (int q = 0; q < Vc.num_members; q++)
         {
             if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
@@ -167,6 +175,7 @@ void ManagedGroup::register_predicates() {
                     throw derecho_exception("Majority of a Derecho group simultaneously failed ... shutting down");
                 }
 
+                cout << "GMS telling SST to freeze row " << q << ", which is node " << Vc.members[q] << endl;
                 gmsSST.freeze(q); // Cease to accept new updates from q
                 Vc.rdmc_sending_group->wedge();
                 gmssst::set(gmsSST[myRank].wedged, true); // RDMC has halted new sends and receives in theView
@@ -321,16 +330,12 @@ void ManagedGroup::register_predicates() {
             }
             return true;
         };
-        std::shared_ptr<int> debug_counter(new int{0});
-        auto meta_wedged_continuation = [this, failed, whoFailed,debug_counter] (DerechoSST& gmsSST) {
+        auto meta_wedged_continuation = [this, failed, whoFailed] (DerechoSST& gmsSST) {
             cout << "MetaWedged is true, continuing view change" << endl;
-            assert(*debug_counter == 0);
             unique_lock_t lock(view_mutex);
             assert(next_view);
 
-            std::shared_ptr<int> debug_counter_2(new int{0});
-            auto globalMin_ready_continuation = [this, failed, whoFailed, debug_counter_2](DerechoSST& gmsSST) {
-                assert(*debug_counter_2 == 0);
+            auto globalMin_ready_continuation = [this, failed, whoFailed](DerechoSST& gmsSST) {
                 lock_guard_t lock(view_mutex);
                 assert(next_view);
 
@@ -370,8 +375,6 @@ void ManagedGroup::register_predicates() {
                 {
                     merge_changes(*curr_view); // Create a combined list of Changes
                 }
-                ++(*debug_counter_2);
-                assert(*debug_counter_2 == 1);
             };
 
             if(curr_view->IAmLeader()) {
@@ -387,7 +390,6 @@ void ManagedGroup::register_predicates() {
                 gmsSST.predicates.insert(leader_globalMin_is_ready, globalMin_ready_continuation, sst::PredicateType::ONE_TIME);
             }
 
-            ++(*debug_counter);
         };
         gmsSST.predicates.insert(is_meta_wedged, meta_wedged_continuation, sst::PredicateType::ONE_TIME);
 
@@ -728,6 +730,7 @@ void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
 void ManagedGroup::report_failure(const node_id_t who) {
     lock_guard_t lock(view_mutex);
     int r = curr_view->rank_of(who);
+    cout << "Node ID " << who << " failure reported, marking suspected[" << r << "]" << endl;
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
 	int cnt = 0;
 	for (r = 0; r < View::MAX_MEMBERS; r++) {

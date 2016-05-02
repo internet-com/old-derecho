@@ -48,13 +48,15 @@ int main (int argc, char *argv[]) {
     int num_messages = 1000;
 
     bool done = false;
-    auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_id, long long int index, char *buf, long long int msg_size) {
-        cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
-        if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+    auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_rank, long long int index, char *buf, long long int msg_size) {
+        cout << "In stability callback; sender rank = " << sender_rank << ", index = " << index << endl;
+        if (index == num_messages-1 && sender_rank == (int)num_nodes-1) {
             done = true;
         }
     };
 
+
+    derecho::ManagedGroup::global_setup(node_addresses, node_rank);
 
     derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
 
