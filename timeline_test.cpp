@@ -28,10 +28,14 @@ unsigned int message_number = 0;
 vector<uint64_t> message_times;
 uint64_t start_time;
 
-unique_ptr<derecho::ManagedGroup> managed_group;
+shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
 	message_times.push_back(get_time());
+
+	while(!managed_group) {
+
+	}
 
 	unsigned int n = managed_group->get_members().size();
 	if(message_number >= n){
@@ -65,12 +69,12 @@ int main (int argc, char *argv[]) {
 		cout << "Sleeping for 10 seconds..." << endl;
 		std::this_thread::sleep_for(10s);
 		cout << "Connecting to group" << endl;
-		managed_group = make_unique<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
 		cout << "About to start sending" << endl;
 		send_messages(10 * SECOND);
 		exit(0);
 	}else{
-		managed_group = make_unique<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
 		cout << "Created group, waiting for others to join." << endl;
 		while(managed_group->get_members().size() < (num_nodes-1)) {
 			std::this_thread::sleep_for(1ms);
