@@ -136,6 +136,8 @@ class DerechoGroup {
         /** The background thread that sends messages with RDMC. */
         std::thread sender_thread;
 
+        std::thread timeout_thread;
+
         /** The SST, shared between this group and its GMS. */
         std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
 

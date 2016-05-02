@@ -18,6 +18,7 @@ using std::unique_lock;
 using std::lock_guard;
 using std::cout;
 using std::endl;
+using std::chrono::milliseconds;
 
 
 /**
@@ -73,6 +74,15 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
+
+    timeout_thread = std::thread([this]() {
+       while(!thread_shutdown) {
+           std::this_thread::sleep_for(milliseconds(500));
+           if(sst)
+               sst->put();
+       }
+    });
+
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
@@ -155,6 +165,13 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
+    timeout_thread = std::thread([this]() {
+        while(!thread_shutdown) {
+            std::this_thread::sleep_for(milliseconds(500));
+            if(sst)
+                sst->put();
+        }
+    });
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
@@ -287,7 +304,7 @@ void DerechoGroup<N>::deliver_message(msg_info& msg) {
         header* h = (header*) (buf);
         global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
         free_message_buffers.push_back(std::move(msg.message_buffer));
-        cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
+//        cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
     }
 }
 
@@ -376,7 +393,9 @@ void DerechoGroup<N>::register_predicates(){
 template<unsigned int N>
 DerechoGroup<N>::~DerechoGroup() {
     wedge();
-
+    if(timeout_thread.joinable()) {
+        timeout_thread.join();
+    }
 }
 
 template<unsigned int N>
@@ -390,9 +409,10 @@ long long unsigned int DerechoGroup<N>::compute_max_msg_size(const long long uns
 
 template<unsigned int N>
 void DerechoGroup<N>::wedge() {
-    unique_lock<mutex> lock(msg_state_mtx);
-    if(thread_shutdown) //Wedge has already been called
+    bool thread_shutdown_existing = thread_shutdown.exchange(true);
+    if(thread_shutdown_existing) { //Wedge has already been called
         return;
+    }
 
     sst->predicates.remove(stability_pred_handle);
     sst->predicates.remove(delivery_pred_handle);
@@ -402,8 +422,6 @@ void DerechoGroup<N>::wedge() {
         rdmc::destroy_group(i + rdmc_group_num_offset);
     }
 
-    thread_shutdown = true;
-    lock.unlock(); //sender_thread takes the same lock, so unlock it here
     sender_cv.notify_all();
     if(sender_thread.joinable()){
         sender_thread.join();

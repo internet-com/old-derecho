@@ -100,7 +100,6 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     }
 
     client_listener_thread = std::thread{[this](){
-        try {
         cout << "Spawned connection listener thread." << endl;
 //        tcp::connection_listener serversocket(gms_port);
         while (!thread_shutdown) {
@@ -109,23 +108,16 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
             pending_joins.locked().access.emplace_back(std::move(client_socket));
 //            pending_joins.locked().access.emplace_back(serversocket.accept());
         }
-        } catch (const std::exception& e) {
-            cout << "Client listener thread had an exception: " << e.what() << endl;
-            throw e;
-        }
     }};
 
     old_view_cleanup_thread = std::thread([this]() {
-       try {
        while(!thread_shutdown) {
            unique_lock_t old_views_lock(old_views_mutex);
            old_views_cv.wait(old_views_lock, [this](){return !old_views.empty() || thread_shutdown;});
-           old_views.front().reset();
-           old_views.pop();
-       }
-       } catch (const std::exception& e) {
-           cout << "Cleanup thread had an exception: " << e.what() << endl;
-           throw e;
+           if(!thread_shutdown) {
+               old_views.front().reset();
+               old_views.pop();
+           }
        }
     });
 
@@ -429,8 +421,6 @@ void ManagedGroup::setup_sst_and_rdmc(long long unsigned int max_payload_size, m
     cout << "SST created with " << curr_view->gmsSST->get_num_rows() << " rows, and my_node_id = " << curr_view->members[curr_view->my_rank] << endl;
     curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(curr_view->members, curr_view->members[curr_view->my_rank],
             curr_view->gmsSST, max_payload_size, global_stability_callback, block_size, window_size, type);
-    cout << "After DerechoGroup construction: " << endl;
-    curr_view->rdmc_sending_group->debug_print();
 }
 
 /**
