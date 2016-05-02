@@ -197,7 +197,6 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						current_send = std::experimental::nullopt;
 					}else{
 						auto it = current_receives.find(sequence_number);
-						cout << "In completion callback: msg index=" << index << ", sender_rank=" << i << endl;
 						assert(it != current_receives.end());
 						auto& second = it->second;
 						locally_stable_messages.emplace(sequence_number, std::move(second));
@@ -250,11 +249,9 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						msg_info msg;
 						msg.sender_rank = i;
 						msg.index = (*sst)[member_index].nReceived[i] + 1;
-						cout << "In incoming message callback: msg index=" << msg.index << ", sender_rank=" << msg.sender_rank << endl;
 						msg.size = length;
 						msg.message_buffer = std::move(free_message_buffers.back());
 						free_message_buffers.pop_back();
-						cout << "Size is " << free_message_buffers.size() << ". Took a buffer from free_message_buffers for an incoming message." << endl;
 
 						rdmc::receive_destination ret{msg.message_buffer.mr, 0};
 						auto sequence_number = msg.index * num_members + i;
@@ -474,7 +471,6 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
 	msg.size = msg_size;
 	msg.message_buffer = std::move(free_message_buffers.back());
 	free_message_buffers.pop_back();
-	cout << "Size is " << free_message_buffers.size() << ". get_position() took a buffer from free_message_buffers." << endl;
 
 	// Fill header
 	char* buf = msg.message_buffer.buffer.get();
