@@ -50,3 +50,5 @@ scripts/
 /run-cmd-fractus.sh
 conntest
 gms_test
+/gms_test2.cpp~
+/gms_test2

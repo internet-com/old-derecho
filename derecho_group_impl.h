@@ -69,8 +69,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 		free_message_buffers.emplace_back(max_msg_size);
 	}
 
-	create_rdmc_groups();
 	initialize_sst_row();
+	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
@@ -149,8 +149,8 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 		next_send = convert_msg_info(*old_group.next_send);
 	}
 
-	create_rdmc_groups();
 	initialize_sst_row();
+	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     cout << "DerechoGroup: Registered predicates and started thread" << endl;
@@ -196,7 +196,8 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						current_send = std::experimental::nullopt;
 					}else{
 						auto it = current_receives.find(sequence_number);
-						//						assert(it != current_receives.end());
+						cout << "In completion callback: msg index=" << index << ", sender_id=" << i << endl;						
+						assert(it != current_receives.end());
 						auto& second = it->second;
 						locally_stable_messages.emplace(sequence_number, std::move(second));
 						current_receives.erase(it);
@@ -248,6 +249,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						msg_info msg;
 						msg.sender_id = i;
 						msg.index = (*sst)[member_index].nReceived[i] + 1;
+						cout << "In incoming message callback: msg index=" << msg.index << ", sender_id=" << msg.sender_id << endl;
 						msg.size = length;
 						msg.message_buffer = std::move(free_message_buffers.back());
 						free_message_buffers.pop_back();

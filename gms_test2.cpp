@@ -60,9 +60,6 @@ int main (int argc, char *argv[]) {
 
     cout <<  "Finished constructing/joining ManagedGroup" << endl;
 
-    while(managed_group.get_members().size() < num_nodes) {
-    }
-
     for (int i = 0; i < num_messages; ++i) {
         // random message size between 1 and 100
         unsigned int msg_size = (rand()%7 + 2) * 10;

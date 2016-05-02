@@ -11,6 +11,8 @@ target_link_libraries(derecho rdmacm ibverbs boost_system rt pthread atomic rdmc
 add_executable(main main.cpp)
 add_executable(conntest connection_test.cpp)
 add_executable(gms_test gms_test.cpp experiments/block_size.cpp)
+add_executable(gms_test2 gms_test2.cpp experiments/block_size.cpp)
 target_link_libraries(main derecho rdmacm ibverbs boost_system rt pthread atomic rdmc sst)
 target_link_libraries(conntest rdmc sst)
 target_link_libraries(gms_test derecho)
+target_link_libraries(gms_test2 derecho)
