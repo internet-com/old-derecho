@@ -48,6 +48,7 @@ void send_messages(uint64_t duration){
 		char* buffer = managed_group->get_sendbuffer_ptr(message_size);
 		if(buffer){
 			memset(buffer, rand() % 256, message_size);
+//			cout << "Send function call succeeded at the client side" << endl;
 			managed_group->send();
 		}
 	}
@@ -61,12 +62,12 @@ int main (int argc, char *argv[]) {
 
 	start_time = get_time();
 	if(node_rank == num_nodes - 1){
-		cout << "Sleeping for 50 seconds..." << endl;
-		std::this_thread::sleep_for(50s);
+		cout << "Sleeping for 10 seconds..." << endl;
+		std::this_thread::sleep_for(10s);
 		cout << "Connecting to group" << endl;
 		managed_group = make_unique<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
 		cout << "About to start sending" << endl;
-		send_messages(5 * SECOND);
+		send_messages(10 * SECOND);
 		exit(0);
 	}else{
 		managed_group = make_unique<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);

@@ -653,7 +653,6 @@ void ManagedGroup::await_meta_wedged(const View& Vc) {
     }
 }
 
-//TODO: make this actually call DerechoGroup to deliver
 void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
     // Ragged cleanup is finished, deliver in the implied order
     std::vector<long long int> max_received_indices(Vc.num_members);
@@ -741,6 +740,8 @@ void ManagedGroup::report_failure(const node_id_t who) {
 		}
 	}
 
+	cout << "Count is " << cnt << ", my row is " << gmssst::to_string((*curr_view->gmsSST)[curr_view->my_rank]) << endl;
+
 	if (cnt >= curr_view->num_members / 2)
 	{
 		throw derecho_exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
@@ -750,6 +751,8 @@ void ManagedGroup::report_failure(const node_id_t who) {
 
 void ManagedGroup::leave() {
     lock_guard_t lock(view_mutex);
+    curr_view->rdmc_sending_group->wedge();
+    curr_view->gmsSST->delete_all_predicates();
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[curr_view->my_rank] = true;
     curr_view->gmsSST->put();
     thread_shutdown = true;
@@ -770,7 +773,8 @@ void ManagedGroup::send() {
 }
 
 std::vector<node_id_t> ManagedGroup::get_members() {
-    lock_guard_t lock(view_mutex);
+    //Since pointer swapping is atomic, this doesn't need the view_mutex - it
+    //will either get the old view's members list or the new view's
     return curr_view->members;
 }
 

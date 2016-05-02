@@ -42,10 +42,10 @@ int main (int argc, char *argv[]) {
 
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
-    long long unsigned int max_msg_size = 100;
-    long long unsigned int block_size = 10;
+    long long unsigned int max_msg_size = 1000000;
+    long long unsigned int block_size = 100000;
 
-    int num_messages = 1000;
+    int num_messages = 100000;
 
     bool done = false;
     auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_rank, long long int index, char *buf, long long int msg_size) {
@@ -65,7 +65,7 @@ int main (int argc, char *argv[]) {
 
     for (int i = 0; i < num_messages; ++i) {
         // random message size between 1 and 100
-        unsigned int msg_size = (rand()%7 + 2) * 10;
+        unsigned int msg_size = (rand()%7 + 2) * (max_msg_size / 10);
         char *buf = managed_group.get_sendbuffer_ptr(msg_size);
 //        cout << "After getting sendbuffer for message " << i << endl;
 //        managed_group.debug_print_status();
