@@ -151,7 +151,8 @@ class DerechoGroup {
 		void create_rdmc_groups();
 		void initialize_sst_row();
 		void register_predicates();
-		
+        void deliver_message(msg_info& msg);
+
     public:
         // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
         DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
@@ -160,6 +161,7 @@ class DerechoGroup {
         /** Constructor to initialize a new derecho_group from an old one, preserving the same settings but providing a new list of members. */
         DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst, DerechoGroup&& old_group);
         ~DerechoGroup();
+        void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);
         /** get a pointer into the buffer, to write data into it before sending */
         char* get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
         /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*

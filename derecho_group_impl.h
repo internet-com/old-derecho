@@ -115,9 +115,11 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	free_message_buffers.swap(old_group.free_message_buffers);
 	for(unsigned int i = window_size * old_group.num_members; i < window_size * num_members; i++){
 		free_message_buffers.emplace_back(max_msg_size);
+		cout << "Size is " << free_message_buffers.size() << ". Constructor added a buffer to free_message_buffers." << endl;
 	}
 	for(auto& msg : old_group.current_receives){
 		free_message_buffers.push_back(std::move(msg.second.message_buffer));
+		cout << "Size is " << free_message_buffers.size() << ". Constructor moved a buffer from the old group to the new." << endl;
 	}
 	old_group.current_receives.clear();
 
@@ -280,7 +282,36 @@ void DerechoGroup<N>::initialize_sst_row(){
     sst->put();
     sst->sync_with_members();
 }
-	
+
+template<unsigned int N>
+void DerechoGroup<N>::deliver_message(msg_info& msg) {
+    if (msg.size > 0) {
+        char* buf = msg.message_buffer.buffer.get();
+        header* h = (header*) (buf);
+        global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
+        free_message_buffers.push_back(std::move(msg.message_buffer));
+        cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
+    }
+}
+
+template<unsigned int N>
+void DerechoGroup<N>::deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders) {
+    assert(max_indices_for_senders.size() == (size_t) num_members);
+    lock_guard<mutex> lock(msg_state_mtx);
+    auto curr_seq_num = (*sst)[member_index].delivered_num;
+    auto max_seq_num = curr_seq_num;
+    for(int sender = 0; sender < (int) max_indices_for_senders.size(); sender++) {
+        max_seq_num = std::max(max_seq_num, max_indices_for_senders[sender] * num_members + sender);
+    }
+    for(auto seq_num = curr_seq_num; seq_num <= max_seq_num; seq_num++) {
+        auto msg_ptr = locally_stable_messages.find(seq_num);
+        if (msg_ptr != locally_stable_messages.end()) {
+            deliver_message(msg_ptr->second);
+            locally_stable_messages.erase(msg_ptr);
+        }
+    }
+}
+
 template<unsigned int N>
 void DerechoGroup<N>::register_predicates(){
     auto stability_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
@@ -319,13 +350,7 @@ void DerechoGroup<N>::register_predicates(){
             long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
             if (least_undelivered_seq_num <= min_stable_num) {
                 msg_info& msg = locally_stable_messages.begin()->second;
-                if (msg.size > 0) {
-                    char* buf = msg.message_buffer.buffer.get();
-                    header* h = (header*) buf;
-                    global_stability_callback (msg.sender_rank, msg.index, buf + h->header_size, msg.size);
-					free_message_buffers.push_back(std::move(msg.message_buffer));
-					cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
-                }
+                deliver_message(msg);
                 sst[member_index].delivered_num = least_undelivered_seq_num;
 //                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
                 sst.put ();

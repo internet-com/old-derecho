@@ -50,6 +50,7 @@ int main (int argc, char *argv[]) {
     bool done = false;
     auto stability_callback = [&num_messages, &done, &num_nodes] (int sender_rank, long long int index, char *buf, long long int msg_size) {
         cout << "In stability callback; sender rank = " << sender_rank << ", index = " << index << endl;
+        printf("Message: %.*s\n", (int) msg_size, buf);
         if (index == num_messages-1 && sender_rank == (int)num_nodes-1) {
             done = true;
         }
@@ -57,6 +58,8 @@ int main (int argc, char *argv[]) {
 
 
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{10 * node_rank});
 
     derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
 
@@ -72,9 +75,9 @@ int main (int argc, char *argv[]) {
             buf= managed_group.get_sendbuffer_ptr(msg_size);
         }
         for (unsigned int j = 0; j < msg_size; ++j) {
-            buf[j] = 'a'+i;
+            buf[j] = 'a'+ (i % 26);
         }
-//        cout << "Client telling DerechoGroup to send message " << i << " with size " << msg_size << endl;;
+        cout << "Client telling DerechoGroup to send message " << i << " with size " << msg_size << endl;;
         managed_group.send();
     }
     while (!done) {

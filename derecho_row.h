@@ -159,7 +159,8 @@ void init(volatile DerechoRow<N>& newRow) {
     for(size_t i = 0; i < N; ++i) {
         newRow.suspected[i] = false;
         newRow.globalMin[i] = 0;
-        newRow.nReceived[i] = -1;
+        //This will be initialized by DerechoGroup
+//        newRow.nReceived[i] = -1;
         newRow.changes[i] = 0;
     }
     newRow.nChanges = 0;
@@ -186,7 +187,8 @@ void init_from_existing(volatile GMSTableRow<N>& newRow, const volatile GMSTable
     for(size_t i = 0; i < N; ++i) {
         newRow.suspected[i] = false;
         newRow.globalMin[i] = 0;
-        newRow.nReceived[i] = -1;
+        //This will be initialized by DerechoGroup
+//        newRow.nReceived[i] = -1;
     }
     newRow.nChanges = existingRow.nChanges;
     newRow.nCommitted = existingRow.nCommitted;
