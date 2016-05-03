@@ -131,12 +131,12 @@ class ManagedGroup {
         std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
 
         //Ken's helper methods
-        static void deliver_in_order(const View& Vc, int Leader);
+        void deliver_in_order(const View& Vc, int Leader);
         static void await_meta_wedged(const View& Vc);
-        static int await_leader_globalMin_ready(const View& Vc);
-        static void ragged_edge_cleanup(View& Vc);
-        static void leader_ragged_edge_cleanup(View& Vc);
-        static void follower_ragged_edge_cleanup(View& Vc);
+        int await_leader_globalMin_ready(const View& Vc);
+        void ragged_edge_cleanup(View& Vc);
+        void leader_ragged_edge_cleanup(View& Vc);
+        void follower_ragged_edge_cleanup(View& Vc);
 
         static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool> old);
         static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);

@@ -355,6 +355,7 @@ void ManagedGroup::register_predicates() {
                 gmsSST.predicates.remove(leader_committed_handle);
                 gmsSST.predicates.remove(suspected_changed_handle);
 
+				log_event("Starting creation of new SST and RDMC");
                 //This will block until everyone responds to SST/RDMC initial handshakes
                 transition_sst_and_rdmc(*next_view, whoFailed);
                 next_view->gmsSST->put();
@@ -663,7 +664,8 @@ void ManagedGroup::await_meta_wedged(const View& Vc) {
 
 void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
     // Ragged cleanup is finished, deliver in the implied order
-    std::vector<long long int> max_received_indices(Vc.num_members);
+	debug_log.log_event("Delivering ragged-edge messages");
+	std::vector<long long int> max_received_indices(Vc.num_members);
     std::string deliveryOrder = std::string("Delivery Order (View ") + std::to_string(Vc.vid) + std::string(" { ");
     for (int n = 0; n < Vc.num_members; n++) {
         deliveryOrder += std::to_string(Vc.members[Vc.my_rank]) + std::string(":0..")
@@ -675,11 +677,13 @@ void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
 }
 
 void ManagedGroup::ragged_edge_cleanup(View& Vc) {
+	debug_log.log_event("Running RaggedEdgeCleanup");
     if(Vc.IAmLeader()) {
         leader_ragged_edge_cleanup(Vc);
     } else {
         follower_ragged_edge_cleanup(Vc);
     }
+	debug_log.log_event("Done with RaggedEdgeCleanup");
 }
 
 void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
@@ -714,6 +718,7 @@ void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
         }
     }
 
+	debug_log.log_event("Leader finished computing globalMin");
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
     Vc.gmsSST->put();
     std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc.ToString() << std::endl;
@@ -725,6 +730,7 @@ void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
     std::cout << std::string("Running RaggedEdgeCleanup: ") << Vc.ToString() << std::endl;
     int myRank = Vc.my_rank;
     // Learn the leader's data and push it before acting upon it
+	debug_log.log_event("Echoing leader's globalMin");
     int Leader = Vc.rank_of_leader();
     gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin, Vc.num_members);
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
