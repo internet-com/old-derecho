@@ -197,6 +197,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
         // When RDMC receives a message, it should store it in locally_stable_messages and update the received count
         auto rdmc_receive_handler =
                 [this, i](char* data, size_t size) {
+	  trace.push_back(*(new msg_status_log(RECEIVED_AT_LOCAL_NODE, i, (*sst)[member_index].nReceived[i]+1)));
                     assert(this->sst);
 //                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
 //                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
@@ -299,6 +300,8 @@ void DerechoGroup<N>::initialize_sst_row(){
 
 template<unsigned int N>
 void DerechoGroup<N>::deliver_message(msg_info& msg) {
+  trace.push_back(*(new msg_status_log(DELIVERED_AT_LOCAL_NODE, msg.sender_rank, msg.index)));
+  
     if (msg.size > 0) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*) (buf);
@@ -340,6 +343,9 @@ void DerechoGroup<N>::register_predicates(){
             }
         }
         if (min_seq_num > sst[member_index].stable_num) {
+	  // for (int i = sst[member_index].stable_num+1; i <= min_seq_num; ++i) {
+	    // trace.push_back(new msg_status_log(RECEIVED_AT_ALL_NODES, , ));
+	  // }
             sst[member_index].stable_num = min_seq_num;
 //            sst.put (offsetof (DerechoRow<N>, stable_num), sizeof (min_seq_num));
             sst.put ();
@@ -454,8 +460,9 @@ void DerechoGroup<N>::send_loop() {
     while (!thread_shutdown) {
         sender_cv.wait(lock, should_wake);
         if (!thread_shutdown){
+	  trace.push_back(*(new msg_status_log(SEND_CALLED_FROM_LOCAL_NODE, pending_sends.front().sender_rank, pending_sends.front().index)));
             current_send = std::move(pending_sends.front());
-            rdmc::send(member_index + rdmc_group_num_offset, current_send->message_buffer.mr, 0, current_send->size);
+	    rdmc::send(member_index + rdmc_group_num_offset, current_send->message_buffer.mr, 0, current_send->size);
             pending_sends.pop();
         }
     }
@@ -528,6 +535,11 @@ template<unsigned int N>
       cout << (*sst)[member_index].nReceived[i] << " " << endl;
     }
     cout << endl;
+  }
+
+  template<unsigned int N>
+  std::list<msg_status_log> DerechoGroup<N>::get_trace() {
+    return trace;
   }
 
 } //namespace derecho

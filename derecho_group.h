@@ -15,6 +15,7 @@
 #include "derecho_row.h"
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
+#include "experiments/log.h"
 
 namespace derecho {
 
@@ -138,6 +139,8 @@ class DerechoGroup {
 
         std::thread timeout_thread;
 
+  list <msg_status_log> trace;
+  
         /** The SST, shared between this group and its GMS. */
         std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
 
@@ -174,6 +177,7 @@ class DerechoGroup {
         void wedge();
         /** Debugging function; prints the current state of the SST to stdout. */
         void debug_print();
+    std::list <msg_status_log> get_trace();
 };
 } //namespace derecho
 

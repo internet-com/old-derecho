@@ -34,3 +34,7 @@ target_link_libraries(window_size_test derecho)
 # write_to_ssd
 add_executable(write_to_ssd write_to_ssd.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(write_to_ssd derecho)
+
+# message_timeline_test
+add_executable(message_timeline_test message_timeline_test.cpp block_size.cpp log.cpp)
+target_link_libraries(message_timeline_test derecho)

@@ -12,6 +12,7 @@
 
 #include "view.h"
 #include "rdmc/connection.h"
+#include "experiments/log.h"
 
 namespace derecho {
 
@@ -188,10 +189,10 @@ class ManagedGroup {
         void barrier_sync();
         void debug_print_status();
 		void log_event(std::string event_text) {
-			debug_log.log_event(event_text);
+		  // debug_log.log_event(event_text);
 		}
 		void print_log();
-
+  std::list <msg_status_log> get_trace();
 };
 
 } /* namespace derecho */
