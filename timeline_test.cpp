@@ -14,6 +14,7 @@
 
 using namespace std;
 using namespace std::chrono_literals;
+using std::chrono::high_resolution_clock;
 
 
 const int GMS_PORT = 12345;
@@ -62,7 +63,27 @@ int main (int argc, char *argv[]) {
 	query_addresses(node_addresses, node_rank);
 	num_nodes = node_addresses.size();
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
+
+    vector<uint32_t> members;
+    for(uint32_t i = 0; i < num_nodes; i++) members.push_back(i);
+    auto universal_barrier_group = make_unique<rdmc::barrier_group>(members);
+
+    universal_barrier_group->barrier_wait();
+    uint64_t t1 = get_time();
+    universal_barrier_group->barrier_wait();
+    uint64_t t2 = get_time();
+    reset_epoch();
+    universal_barrier_group->barrier_wait();
+    uint64_t t3 = get_time();
+
+    printf(
+        "Synchronized clocks.\nTotal possible variation = %5.3f us\n"
+        "Max possible variation from local = %5.3f us\n",
+        (t3 - t1) * 1e-3f, max(t2 - t1, t3 - t2) * 1e-3f);
+    fflush(stdout);
 	cout << endl << endl;
+
+	derecho::program_start_time = high_resolution_clock::now();
 
 	start_time = get_time();
 	if(node_rank == num_nodes - 1){

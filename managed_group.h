@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 #include <ctime>
+#include <chrono>
 
 #include "view.h"
 #include "rdmc/connection.h"
@@ -45,22 +46,24 @@ struct LockedQueue {
         }
 };
 
+static std::chrono::high_resolution_clock::time_point program_start_time;
+
 class Logger {
 	private:
 		std::mutex log_mutex;
 		
 	public:
+		using chrono_us = std::chrono::microseconds::rep;
 		std::vector<std::string> events;
-		std::vector<long long int> times;
+		std::vector<chrono_us> times;
 		size_t counter;
 
-		Logger() : events(10000000), times(1000000), counter(0) {};
+		Logger() : events(10000000), times(10000000), counter(0) {};
 
 		void log_event(std::string event_text) {
 			std::lock_guard<std::mutex> lock(log_mutex);
-			struct timespec time;
-			clock_gettime(CLOCK_REALTIME, &time);
-			times[counter] = time.tv_sec * 1000000000 + time.tv_nsec;
+			auto currtime = std::chrono::high_resolution_clock::now();
+			times[counter] = std::chrono::duration_cast<std::chrono::microseconds>(currtime-program_start_time).count();
 			events[counter] = event_text;
 			counter++;
 		}

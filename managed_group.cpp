@@ -34,6 +34,7 @@ using std::unique_ptr;
 using std::cout;
 using std::endl;
 using sst::SST;
+using std::chrono::high_resolution_clock;
 
 using lock_guard_t = std::lock_guard<std::mutex>;
 using unique_lock_t = std::unique_lock<std::mutex>;
