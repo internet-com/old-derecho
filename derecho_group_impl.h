@@ -77,7 +77,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 
     timeout_thread = std::thread([this]() {
        while(!thread_shutdown) {
-           std::this_thread::sleep_for(milliseconds(500));
+           std::this_thread::sleep_for(milliseconds(5000));
            if(sst)
                sst->put();
        }
@@ -167,7 +167,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread([this]() {
         while(!thread_shutdown) {
-            std::this_thread::sleep_for(milliseconds(500));
+            std::this_thread::sleep_for(milliseconds(5000));
             if(sst)
                 sst->put();
         }

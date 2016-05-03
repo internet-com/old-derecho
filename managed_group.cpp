@@ -90,6 +90,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     setup_sst_and_rdmc(_max_payload_size, global_stability_callback, _block_size, _window_size, _type);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
+	log_event("Done setting up initial SST and RDMC");
 
     if(my_id != leader_id && curr_view->vid != 0) {
         //If this node is joining an existing group with a non-initial view, copy the leader's nChanges and nAcked
@@ -97,6 +98,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
         gmssst::init_from_existing((*curr_view->gmsSST)[curr_view->my_rank],(*curr_view->gmsSST)[curr_view->rank_of_leader()]);
         curr_view->gmsSST->put();
         cout << "New node initialized its row to: " << gmssst::to_string((*curr_view->gmsSST)[curr_view->my_rank]) << endl;
+		log_event("Joining node initialized its SST row from the leader");
     }
 
     client_listener_thread = std::thread{[this](){
@@ -122,6 +124,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     });
 
     register_predicates();
+	curr_view->gmsSST->start_predicate_evaluation();
     cout << "After registering predicates: " <<  endl;
     debug_print_status();
 
@@ -144,6 +147,7 @@ void ManagedGroup::register_predicates() {
         return suspected_not_equal(sst, last_suspected);
     };
     auto suspected_changed_trig = [this](DerechoSST& gmsSST) {
+		log_event("Suspected[] changed");
         View& Vc = *curr_view;
         int myRank = curr_view->my_rank;
         //These fields had better be synchronized.
@@ -162,6 +166,7 @@ void ManagedGroup::register_predicates() {
         {
             if (gmsSST[myRank].suspected[q] && !Vc.failed[q])
             {
+				log_event(std::string("Marking ") + std::to_string(Vc.members[q]) + std::string(" failed"));
                 if (Vc.nFailed + 1 >= Vc.num_members / 2)
                 {
                     throw derecho_exception("Majority of a Derecho group simultaneously failed ... shutting down");
@@ -190,6 +195,7 @@ void ManagedGroup::register_predicates() {
                     gmssst::set(gmsSST[myRank].changes[gmsSST[myRank].nChanges % View::MAX_MEMBERS], Vc.members[q]); // Reports the failure (note that q NotIn members)
                     gmssst::increment(gmsSST[myRank].nChanges);
                     std::cout << std::string("NEW SUSPICION: adding ") << Vc.members[q] << std::string(" to the CHANGES/FAILED list") << std::endl;
+					log_event(std::string("Leader proposed a change to remove failed node ") + std::to_string(Vc.members[q]));
                     gmsSST.put();
                 }
             }
@@ -204,6 +210,7 @@ void ManagedGroup::register_predicates() {
     };
     auto start_join_trig = [this](DerechoSST& sst) {
         cout << "GMS received a new client connection!" << endl;
+		log_event("Received a new client connection");
         joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
         pending_joins.locked().access.pop_front(); //because C++ list doesn't properly implement queues, this returns void
         receive_join(joining_client_socket);
@@ -218,6 +225,7 @@ void ManagedGroup::register_predicates() {
         gmssst::set(gmsSST[gmsSST.get_local_index()].nCommitted, min_acked(gmsSST, curr_view->failed)); // Leader commits a new request
         cout << "Leader committing view proposal #" << gmsSST[gmsSST.get_local_index()].nCommitted << endl;
         cout << "Leader's row is: " << gmssst::to_string(gmsSST[gmsSST.get_local_index()]) << endl;
+        log_event(std::string("Leader committing view proposal #") + std::to_string(gmsSST[gmsSST.get_local_index()].nCommitted));
         gmsSST.put();
     };
 
@@ -230,6 +238,7 @@ void ManagedGroup::register_predicates() {
         int myRank = gmsSST.get_local_index();
         int leader = curr_view->rank_of_leader();
         cout << "Detected that leader proposed view change #" <<  gmsSST[leader].nChanges << ". Acknowledging." << endl;
+        log_event(std::string("Detected that leader proposed view change #") + std::to_string(gmsSST[leader].nChanges) + std::string(". Acknowledging."));
         wedge_view(*curr_view);
         if (myRank != leader)
         {
@@ -248,6 +257,7 @@ void ManagedGroup::register_predicates() {
     };
     auto start_view_change = [this](DerechoSST& gmsSST)  {
         cout << "Starting view change to view " << curr_view->vid + 1 << endl;
+        log_event(std::string("Starting view change to view ") + std::to_string(curr_view->vid + 1));
         // Disable all the other SST predicates, except suspected_changed and the one I'm about to register
         gmsSST.predicates.remove(start_join_handle);
         gmsSST.predicates.remove(change_commit_ready_handle);
@@ -324,6 +334,7 @@ void ManagedGroup::register_predicates() {
         };
         auto meta_wedged_continuation = [this, failed, whoFailed] (DerechoSST& gmsSST) {
             cout << "MetaWedged is true, continuing view change" << endl;
+            log_event("MetaWedged is true; continuing view change");
             unique_lock_t lock(view_mutex);
             assert(next_view);
 
@@ -347,6 +358,7 @@ void ManagedGroup::register_predicates() {
                 transition_sst_and_rdmc(*next_view, whoFailed);
                 next_view->gmsSST->put();
                 next_view->gmsSST->sync_with_members();
+				log_event("Done setting up SST and RDMC in new view");
                 {
                     lock_guard_t old_views_lock(old_views_mutex);
                     old_views.push(std::move(curr_view));
@@ -361,6 +373,7 @@ void ManagedGroup::register_predicates() {
 
                 //Register predicates in the new view
                 register_predicates();
+				curr_view->gmsSST->start_predicate_evaluation();
 
                 // First task with my new view...
                 if (IAmTheNewLeader(*curr_view)) // I'm the new leader and everyone who hasn't failed agrees
@@ -481,6 +494,7 @@ unique_ptr<View> ManagedGroup::start_group(const node_id_t my_id) {
 
 unique_ptr<View> ManagedGroup::join_existing(const ip_addr& leader_ip, const int leader_port) {
     cout << "Joining group by contacting node at " << leader_ip << endl;
+	log_event("Joining group: waiting for a response from the leader");
     tcp::socket leader_socket{leader_ip, leader_port};
 //    node_id_t myNodeID;
     int viewID;
@@ -522,13 +536,14 @@ unique_ptr<View> ManagedGroup::join_existing(const ip_addr& leader_ip, const int
         if(newView->failed[i]) newView->nFailed++;
     }
 
+	log_event("Received View from leader");
     return newView;
 }
 
 
 void ManagedGroup::receive_join(tcp::socket& client_socket) {
     ip_addr& joiner_ip = client_socket.remote_ip;
-    cout << "Sending View data to client at " << joiner_ip << endl;;
+    cout << "Got a Join from client at " << joiner_ip << endl;;
     using derechoSST = sst::SST<DerechoRow<View::MAX_MEMBERS>>;
     derechoSST& gmsSST = *curr_view->gmsSST;
     if ((gmsSST[curr_view->my_rank].nChanges - gmsSST[curr_view->my_rank].nCommitted) == View::MAX_MEMBERS/2)
@@ -545,6 +560,7 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
         }
     }
 
+	log_event(std::string("Proposing change to add node ") + std::to_string(joining_client_id));
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % View::MAX_MEMBERS;
     gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
     gmssst::set(gmsSST[curr_view->my_rank].joiner_ip, joiner_ip);
@@ -556,6 +572,7 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
 }
 
 void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket) {
+	log_event("Sending client the new view");
     //Temporarily disabled because all node IDs are globally fixed at startup
 //    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
     client_socket.write((char*) &new_view.vid, sizeof(new_view.vid));
@@ -780,6 +797,12 @@ void ManagedGroup::debug_print_status() {
     }
     cout << "}" << endl;
     cout << "curr_view = " << curr_view->ToString() << endl;
+}
+
+void ManagedGroup::print_log() {
+	for(size_t i = 0; i < debug_log.counter; ++i) {
+		cout << debug_log.times[i] << "," << debug_log.events[i] << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]] << endl;
+	}
 }
 
 } /* namespace derecho */

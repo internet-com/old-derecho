@@ -72,6 +72,8 @@ int main (int argc, char *argv[]) {
 		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
 		cout << "About to start sending" << endl;
 		send_messages(10 * SECOND);
+		managed_group->log_event("About to exit");
+		managed_group->print_log();
 		exit(0);
 	}else{
 		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
@@ -81,6 +83,8 @@ int main (int argc, char *argv[]) {
 		}
 		send_messages(30 * SECOND);
 		// managed_group->barrier_sync();
+		managed_group->print_log();
+		std::this_thread::sleep_for(5s);
 		managed_group->leave();
 	}
 }

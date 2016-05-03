@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 #include <map>
+#include <vector>
+#include <ctime>
 
 #include "view.h"
 #include "rdmc/connection.h"
@@ -43,10 +45,34 @@ struct LockedQueue {
         }
 };
 
+class Logger {
+	private:
+		std::mutex log_mutex;
+		
+	public:
+		std::vector<std::string> events;
+		std::vector<long long int> times;
+		size_t counter;
+
+		Logger() : events(10000000), times(1000000), counter(0) {};
+
+		void log_event(std::string event_text) {
+			std::lock_guard<std::mutex> lock(log_mutex);
+			struct timespec time;
+			clock_gettime(CLOCK_REALTIME, &time);
+			times[counter] = time.tv_sec * 1000000000 + time.tv_nsec;
+			events[counter] = event_text;
+			counter++;
+		}
+
+};
+
 class ManagedGroup {
     private:
 
         using pred_handle = View::DerechoSST::Predicates::pred_handle;
+
+		Logger debug_log;
 
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
@@ -99,7 +125,7 @@ class ManagedGroup {
         /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
         std::unique_ptr<View> start_group(const node_id_t my_id);
         /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-        static std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
+        std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
 
         //Ken's helper methods
         static void deliver_in_order(const View& Vc, int Leader);
@@ -161,6 +187,10 @@ class ManagedGroup {
         /** Waits until all members of the group have called this function. */
         void barrier_sync();
         void debug_print_status();
+		void log_event(std::string event_text) {
+			debug_log.log_event(event_text);
+		}
+		void print_log();
 
 };
 
