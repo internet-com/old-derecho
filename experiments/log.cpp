@@ -1,10 +1,15 @@
 #include "log.h"
 
+#include <map>
+
 #include <cassert>
 
-ofstream fout;
+using std::cout;
+using std::endl;
 
-string print(enum MSG_STAGES stage) {
+std::ofstream fout;
+
+std::string print(enum MSG_STAGES stage) {
   switch (stage) {
   case CONCEIVED_AT_CLIENT: return "CONCEIVED_AT_CLIENT";
   case BEING_GENERATED_AT_CLIENT: return "BEING_GENERATED_AT_CLIENT";
@@ -16,15 +21,38 @@ string print(enum MSG_STAGES stage) {
   }
 };
 
-void print(list<msg_status_log> &trace, int my_rank) {
+void print(std::list<msg_status_log> &trace, int my_rank) {
   // for (auto tr : trace) {
   //   tr.print();
   // }
   
-  long long int sum[10], num[10];
+  std::vector<long long int> sum(10, 0), num(10, 0);
+  std::map<std::pair<int, long long int>, long long int> msg_data;
   for (auto tr : trace) {
-    
+    auto p = std::pair <int, long long int> (tr.sender_rank, tr.index);
+    if (tr.stage == CONCEIVED_AT_CLIENT) {
+      msg_data[p] = tr.time;
+    }
+    else if (tr.stage == RECEIVED_AT_LOCAL_NODE && tr.sender_rank != my_rank) {
+      msg_data[p] = tr.time;
+    }
+    else {
+      assert(msg_data.find(p) != msg_data.end());
+      sum[tr.stage] += tr.time-msg_data[p];
+      num[tr.stage]++;
+      msg_data[p] = tr.time;
+
+      if (tr.stage == DELIVERED_AT_LOCAL_NODE) {
+	msg_data.erase(p);
+      }
+    }
   }
+
+  cout << sum[BEING_GENERATED_AT_CLIENT]/num[BEING_GENERATED_AT_CLIENT] << endl;
+  cout << sum[SENT_AT_CLIENT]/num[SENT_AT_CLIENT] << endl;
+  cout << sum[SEND_CALLED_FROM_LOCAL_NODE]/num[SEND_CALLED_FROM_LOCAL_NODE] << endl;
+  cout << sum[RECEIVED_AT_LOCAL_NODE]/num[RECEIVED_AT_LOCAL_NODE] << endl;
+  cout << sum[DELIVERED_AT_LOCAL_NODE]/num[DELIVERED_AT_LOCAL_NODE] << endl;
 }
 
 msg_status_log::msg_status_log (enum MSG_STAGES _stage, int _sender_rank, long long int _index) {

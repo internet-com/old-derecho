@@ -139,7 +139,7 @@ class DerechoGroup {
 
         std::thread timeout_thread;
 
-  list <msg_status_log> trace;
+  std::list <msg_status_log> trace;
   
         /** The SST, shared between this group and its GMS. */
         std::shared_ptr<sst::SST<DerechoRow<N>>> sst;

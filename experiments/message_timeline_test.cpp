@@ -97,7 +97,7 @@ int main (int argc, char *argv[]) {
   set_file("message_status");
 
   print(trace, my_rank);
-    
+  
   managed_group.barrier_sync();
 
   managed_group.leave();

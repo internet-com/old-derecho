@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <iostream>
 #include <fstream>
-
-using namespace std;
+#include <list>
+#include <vector>
 
 enum MSG_STAGES {
   CONCEIVED_AT_CLIENT,
@@ -31,3 +31,5 @@ public:
 bool compare(const msg_status_log &a, const msg_status_log &b);
 
 void set_file (std::string filename);
+
+void print(std::list<msg_status_log> &trace, int my_rank);
