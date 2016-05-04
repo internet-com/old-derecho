@@ -72,18 +72,18 @@ int main (int argc, char *argv[]) {
   for (int i = 0; i < num_messages; ++i) {
     // random message size between 1 and 100
     unsigned int msg_size = (rand()%7 + 2) * (max_msg_size / 10);
-    trace.push_back (*(new msg_status_log (CONCEIVED_AT_CLIENT, my_rank, i)));
+    // trace.push_back (*(new msg_status_log (CONCEIVED_AT_CLIENT, my_rank, i)));
     char *buf = managed_group.get_sendbuffer_ptr(msg_size);
     //        cout << "After getting sendbuffer for message " << i << endl;
     //        managed_group.debug_print_status();
     while (!buf) {
       buf= managed_group.get_sendbuffer_ptr(msg_size);
     }
-    trace.push_back (*(new msg_status_log (BEING_GENERATED_AT_CLIENT, my_rank, i)));
+    // trace.push_back (*(new msg_status_log (BEING_GENERATED_AT_CLIENT, my_rank, i)));
     for (unsigned int j = 0; j < msg_size; ++j) {
       buf[j] = 'a'+i;
     }
-    trace.push_back (*(new msg_status_log (SENT_AT_CLIENT, my_rank, i)));
+    // trace.push_back (*(new msg_status_log (SENT_AT_CLIENT, my_rank, i)));
     managed_group.send();
   }
   while (!done) {

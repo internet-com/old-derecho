@@ -22,15 +22,15 @@ std::string print(enum MSG_STAGES stage) {
 };
 
 void print(std::list<msg_status_log> &trace, int my_rank) {
-  // for (auto tr : trace) {
-  //   tr.print();
-  // }
+  for (auto tr : trace) {
+    tr.print();
+  }
   
   std::vector<long long int> sum(10, 0), num(10, 0);
   std::map<std::pair<int, long long int>, long long int> msg_data;
   for (auto tr : trace) {
     auto p = std::pair <int, long long int> (tr.sender_rank, tr.index);
-    if (tr.stage == CONCEIVED_AT_CLIENT) {
+    if (tr.stage == SEND_CALLED_FROM_LOCAL_NODE) {
       msg_data[p] = tr.time;
     }
     else if (tr.stage == RECEIVED_AT_LOCAL_NODE && tr.sender_rank != my_rank) {
@@ -40,6 +40,9 @@ void print(std::list<msg_status_log> &trace, int my_rank) {
       assert(msg_data.find(p) != msg_data.end());
       sum[tr.stage] += tr.time-msg_data[p];
       num[tr.stage]++;
+      if (tr.stage == DELIVERED_AT_LOCAL_NODE) {
+	fout << tr.time-msg_data[p] << endl;
+      }
       msg_data[p] = tr.time;
 
       if (tr.stage == DELIVERED_AT_LOCAL_NODE) {
@@ -48,9 +51,9 @@ void print(std::list<msg_status_log> &trace, int my_rank) {
     }
   }
 
-  cout << sum[BEING_GENERATED_AT_CLIENT]/num[BEING_GENERATED_AT_CLIENT] << endl;
-  cout << sum[SENT_AT_CLIENT]/num[SENT_AT_CLIENT] << endl;
-  cout << sum[SEND_CALLED_FROM_LOCAL_NODE]/num[SEND_CALLED_FROM_LOCAL_NODE] << endl;
+  // cout << sum[BEING_GENERATED_AT_CLIENT]/num[BEING_GENERATED_AT_CLIENT] << endl;
+  // cout << sum[SENT_AT_CLIENT]/num[SENT_AT_CLIENT] << endl;
+  // cout << sum[SEND_CALLED_FROM_LOCAL_NODE]/num[SEND_CALLED_FROM_LOCAL_NODE] << endl;
   cout << sum[RECEIVED_AT_LOCAL_NODE]/num[RECEIVED_AT_LOCAL_NODE] << endl;
   cout << sum[DELIVERED_AT_LOCAL_NODE]/num[DELIVERED_AT_LOCAL_NODE] << endl;
 }
