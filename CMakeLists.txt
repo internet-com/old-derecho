@@ -6,7 +6,7 @@ add_subdirectory(rdmc EXCLUDE_FROM_ALL)
 add_subdirectory(sst EXCLUDE_FROM_ALL)
 add_subdirectory(experiments EXCLUDE_FROM_ALL)
 
-add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp)
+add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp)
 target_link_libraries(derecho rdmacm ibverbs boost_system rt pthread atomic rdmc sst)
 
 add_executable(main main.cpp)
@@ -21,5 +21,3 @@ target_link_libraries(gms_test derecho)
 add_executable(gms_test2 gms_test2.cpp experiments/block_size.cpp)
 target_link_libraries(gms_test2 derecho)
 
-add_executable(timeline_test timeline_test.cpp)
-target_link_libraries(timeline_test derecho)

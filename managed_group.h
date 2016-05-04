@@ -12,6 +12,7 @@
 #include <chrono>
 
 #include "view.h"
+#include "logger.h"
 #include "rdmc/connection.h"
 
 namespace derecho {
@@ -27,7 +28,7 @@ struct derecho_exception : public std::exception {
 };
 
 template<typename T>
-struct LockedQueue {
+class LockedQueue {
     private:
         using unique_lock_t = std::unique_lock<std::mutex>;
         std::mutex mutex;
@@ -46,36 +47,12 @@ struct LockedQueue {
         }
 };
 
-static std::chrono::high_resolution_clock::time_point program_start_time;
-
-class Logger {
-	private:
-		std::mutex log_mutex;
-		
-	public:
-		using chrono_us = std::chrono::microseconds::rep;
-		std::vector<std::string> events;
-		std::vector<chrono_us> times;
-		size_t counter;
-
-		Logger() : events(10000000), times(10000000), counter(0) {};
-
-		void log_event(std::string event_text) {
-			std::lock_guard<std::mutex> lock(log_mutex);
-			auto currtime = std::chrono::high_resolution_clock::now();
-			times[counter] = std::chrono::duration_cast<std::chrono::microseconds>(currtime-program_start_time).count();
-			events[counter] = event_text;
-			counter++;
-		}
-
-};
-
 class ManagedGroup {
     private:
 
         using pred_handle = View::DerechoSST::Predicates::pred_handle;
 
-		Logger debug_log;
+		util::Logger debug_log;
 
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
@@ -148,7 +125,7 @@ class ManagedGroup {
 
         /** Creates the SST and derecho_group for the current view, using the current view's member list.
          * The parameters are all the possible parameters for constructing derecho_group. */
-        void setup_sst_and_rdmc(long long unsigned int _max_payload_size, message_callback global_stability_callback,
+        void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers, long long unsigned int _max_payload_size, message_callback global_stability_callback,
                 long long unsigned int _block_size, unsigned int _window_size, rdmc::send_algorithm _type);
         /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
          * (and copying over the SST data from the current view). */
@@ -173,7 +150,7 @@ class ManagedGroup {
                 unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
         ~ManagedGroup();
 
-        static void global_setup(const map<node_id_t, ip_addr>& member_ips, node_id_t my_id);
+        static void global_setup(const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id);
         /** Causes this node to cleanly leave the group by setting itself to "failed." */
         void leave();
         /** Creates and returns a vector listing the nodes that are currently members of the group. */
@@ -190,8 +167,11 @@ class ManagedGroup {
         /** Waits until all members of the group have called this function. */
         void barrier_sync();
         void debug_print_status();
-		void log_event(std::string event_text) {
+		void log_event(const std::string& event_text) {
 			debug_log.log_event(event_text);
+		}
+		void log_event(const std::stringstream& event_text) {
+		    debug_log.log_event(event_text);
 		}
 		void print_log();
 

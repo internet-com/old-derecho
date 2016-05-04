@@ -34,7 +34,8 @@ size_t index_of(T container, U elem) {
     }
     return container.size();
 }
-	
+
+
 /**
  *
  * @param _members A list of node IDs of members in this group
@@ -52,8 +53,9 @@ size_t index_of(T container, U elem) {
  */
 template<unsigned int N>
 DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
+        vector<MessageBuffer>& _free_message_buffers,
         long long unsigned int _max_payload_size, message_callback _global_stability_callback, long long unsigned int _block_size,
-        unsigned int _window_size, rdmc::send_algorithm _type) :
+        unsigned int _window_size, unsigned int timeout_ms, rdmc::send_algorithm _type) :
             members(_members),
 			num_members(members.size()),
 			member_index(index_of(members, my_node_id)),
@@ -63,27 +65,27 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 			window_size(_window_size),
 			global_stability_callback(_global_stability_callback),
 			rdmc_group_num_offset(0),
+			sender_timeout(timeout_ms),
             sst(_sst) {
 
     assert(window_size >= 1);
-	for(unsigned int i = 0; i < window_size * num_members; i++){
-		free_message_buffers.emplace_back(max_msg_size);
-	}
+    free_message_buffers.swap(_free_message_buffers);
+    while(free_message_buffers.size() < window_size * num_members) {
+        free_message_buffers.emplace_back(max_msg_size);
+    }
+//	for(unsigned int i = 0; i < window_size * num_members; i++){
+//		free_message_buffers.emplace_back(max_msg_size);
+//	}
+    total_message_buffers = free_message_buffers.size();
 
 	initialize_sst_row();
 	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
 
-    timeout_thread = std::thread([this]() {
-       while(!thread_shutdown) {
-           std::this_thread::sleep_for(milliseconds(1));
-           if(sst)
-               sst->put();
-       }
-    });
+    timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
 
-    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+//    cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
 template<unsigned int N>
@@ -98,6 +100,8 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 			window_size(old_group.window_size),
 			global_stability_callback(old_group.global_stability_callback),
 			rdmc_group_num_offset(old_group.rdmc_group_num_offset + old_group.num_members),
+			total_message_buffers(old_group.total_message_buffers),
+			sender_timeout(old_group.sender_timeout),
             sst(_sst) {
 
 	// Make sure rdmc_group_num_offset didn't overflow.
@@ -123,13 +127,12 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	// additional if the group has grown.
 	lock_guard <mutex> lock (old_group.msg_state_mtx);
 	free_message_buffers.swap(old_group.free_message_buffers);
-	for(unsigned int i = window_size * old_group.num_members; i < window_size * num_members; i++){
+	while(total_message_buffers < window_size * num_members){
 		free_message_buffers.emplace_back(max_msg_size);
-		cout << "Size is " << free_message_buffers.size() << ". Constructor added a buffer to free_message_buffers." << endl;
+		total_message_buffers++;
 	}
 	for(auto& msg : old_group.current_receives){
 		free_message_buffers.push_back(std::move(msg.second.message_buffer));
-		cout << "Size is " << free_message_buffers.size() << ". Constructor moved a buffer from the old group to the new." << endl;
 	}
 	old_group.current_receives.clear();
 
@@ -165,14 +168,8 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
-    timeout_thread = std::thread([this]() {
-        while(!thread_shutdown) {
-            std::this_thread::sleep_for(milliseconds(1));
-            if(sst)
-                sst->put();
-        }
-    });
-    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+    timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
+//    cout << "DerechoGroup: Registered predicates and started thread" << endl;
 }
 
 template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
@@ -463,6 +460,15 @@ void DerechoGroup<N>::send_loop() {
     } catch (const std::exception& e) {
         cout << "DerechoGroup send thread had an exception: " << e.what() << endl;
     }
+}
+
+template<unsigned int N>
+void DerechoGroup<N>::check_failures_loop() {
+    while(!thread_shutdown) {
+           std::this_thread::sleep_for(milliseconds(sender_timeout));
+           if(sst)
+               sst->put();
+       }
 }
 
 template<unsigned int N>

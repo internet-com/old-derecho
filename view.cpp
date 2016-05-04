@@ -57,8 +57,8 @@ int View::rank_of(const node_id_t& who) const {
 }
 
 void View::newView(const View& Vc) {
-    std::string viewString = Vc.ToString();
-    std::cout <<"Process " << Vc.members[Vc.my_rank] << " New view: " << viewString << std::endl;
+    //I don't know what this is supposed to do in real life. In the C# simulation it just prints to stdout.
+//    std::cout <<"Process " << Vc.members[Vc.my_rank] << " New view: " <<  Vc.ToString() << std::endl;
 }
 
 

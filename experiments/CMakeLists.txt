@@ -23,6 +23,10 @@ target_link_libraries(multiple_senders_multiple_messages derecho)
 add_executable(derecho_bw_test derecho_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(derecho_bw_test derecho)
 
+# gms_bw_test
+add_executable(gms_bw_test gms_bw_test.cpp)
+target_link_libraries(gms_bw_test derecho)
+
 # rdmc_bw_test
 add_executable(rdmc_bw_test rdmc_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(rdmc_bw_test derecho)
@@ -34,3 +38,7 @@ target_link_libraries(window_size_test derecho)
 # write_to_ssd
 add_executable(write_to_ssd write_to_ssd.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(write_to_ssd derecho)
+
+# timeline_test
+add_executable(timeline_test timeline_test.cpp)
+target_link_libraries(timeline_test derecho)

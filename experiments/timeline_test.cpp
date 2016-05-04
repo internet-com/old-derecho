@@ -1,8 +1,8 @@
 
-#include "derecho_group.h"
-#include "managed_group.h"
-#include "rdmc/util.h"
-#include "view.h"
+#include "../derecho_group.h"
+#include "../managed_group.h"
+#include "../rdmc/util.h"
+#include "../view.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -27,8 +27,6 @@ map<uint32_t, std::string> node_addresses;
 
 unsigned int message_number = 0;
 vector<uint64_t> message_times;
-uint64_t start_time;
-
 shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
@@ -41,7 +39,8 @@ void stability_callback(int sender_id, long long int index, char *data, long lon
 	unsigned int n = managed_group->get_members().size();
 	if(message_number >= n){
 		unsigned int dt = message_times.back() - message_times[message_number - n];
-		cout << (get_time() - start_time) * 1e-9 << ", " << (message_size * n * 8.0) / dt << endl;
+		double bandwidth = (message_size * n * 8.0) / dt;
+		managed_group->log_event(std::to_string(bandwidth));
 	}
 
 	++message_number;
@@ -64,6 +63,7 @@ int main (int argc, char *argv[]) {
 	num_nodes = node_addresses.size();
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
 
+    //Synchronize clocks
     vector<uint32_t> members;
     for(uint32_t i = 0; i < num_nodes; i++) members.push_back(i);
     auto universal_barrier_group = make_unique<rdmc::barrier_group>(members);
@@ -73,6 +73,7 @@ int main (int argc, char *argv[]) {
     universal_barrier_group->barrier_wait();
     uint64_t t2 = get_time();
     reset_epoch();
+	derecho::program_start_time = high_resolution_clock::now();
     universal_barrier_group->barrier_wait();
     uint64_t t3 = get_time();
 
@@ -83,15 +84,13 @@ int main (int argc, char *argv[]) {
     fflush(stdout);
 	cout << endl << endl;
 
-	derecho::program_start_time = high_resolution_clock::now();
 
-	start_time = get_time();
 	if(node_rank == num_nodes - 1){
 		cout << "Sleeping for 10 seconds..." << endl;
 		std::this_thread::sleep_for(10s);
 		cout << "Connecting to group" << endl;
 		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
-		cout << "About to start sending" << endl;
+		managed_group->log_event("About to start sending");
 		send_messages(10 * SECOND);
 		managed_group->log_event("About to exit");
 		managed_group->print_log();
