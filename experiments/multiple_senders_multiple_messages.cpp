@@ -41,7 +41,8 @@ int main () {
   
   std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
           std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, max_msg_size, stability_callback, block_size);
+  vector<derecho::MessageBuffer> free_message_buffers;
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, stability_callback, block_size);
 
   for (int i = 0; i < num_messages; ++i) {
     // random message size between 1 and 100

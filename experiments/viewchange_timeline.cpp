@@ -26,25 +26,11 @@ const size_t block_size = 1000000;
 uint32_t num_nodes, node_rank;
 map<uint32_t, std::string> node_addresses;
 
-unsigned int message_number = 0;
-vector<uint64_t> message_times;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
-    message_times.push_back(get_time());
 
-    while(!managed_group) {
-
-    }
-
-    unsigned int n = managed_group->get_members().size();
-    if(message_number >= n){
-        unsigned int dt = message_times.back() - message_times[message_number - n];
-        double bandwidth = (message_size * n * 8.0) / dt;
-        managed_group->log_event(std::to_string(bandwidth));
-    }
-
-    ++message_number;
+    managed_group->log_event(std::stringstream() << "Message " << index << " from sender " << sender_id << " delivered");
 }
 
 void send_messages(uint64_t duration){
@@ -91,19 +77,30 @@ int main (int argc, char *argv[]) {
     fflush(stdout);
     cout << endl << endl;
 
-    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
-    cout << "Created group, waiting for others to join." << endl;
-    while(managed_group->get_members().size() < (num_nodes-1)) {
-        std::this_thread::sleep_for(1ms);
+    if(node_rank == num_nodes - 1){
+        cout << "Sleeping for 10 seconds..." << endl;
+        std::this_thread::sleep_for(10s);
+        cout << "Connecting to group" << endl;
+        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+        managed_group->log_event("About to start sending");
+        send_messages(10 * SECOND);
+        managed_group->log_event("About to exit");
+        managed_group->print_log();
+        exit(0);
+    }else{
+        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+        cout << "Created group, waiting for others to join." << endl;
+        while(managed_group->get_members().size() < (num_nodes-1)) {
+            std::this_thread::sleep_for(1ms);
+        }
+        send_messages(30 * SECOND);
+        // managed_group->barrier_sync();
+        managed_group->print_log();
+        std::this_thread::sleep_for(5s);
+        managed_group->leave();
     }
-    send_messages(30 * SECOND);
-    // managed_group->barrier_sync();
-    managed_group->print_log();
-
-    //Give log time to print before exiting
-    std::this_thread::sleep_for(5s);
-    managed_group->leave();
-
 }
+
+
 
 

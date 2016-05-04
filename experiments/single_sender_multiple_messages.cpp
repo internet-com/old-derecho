@@ -26,7 +26,7 @@ int main () {
 
   initialize(node_rank, num_nodes);  
 
-  vector <int> members(num_nodes);
+  vector <uint32_t> members(num_nodes);
   for (int i = 0; i < (int)num_nodes; ++i) {
     members[i] = i;
   }
@@ -40,8 +40,9 @@ int main () {
   };
   
   std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
-          std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, max_msg_size, stability_callback, block_size);
+          std::make_shared<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>>(members, node_rank);
+  vector<derecho::MessageBuffer> free_message_buffers;
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, stability_callback, block_size);
 
   int num_messages = 100;
   if (node_rank == 0) {

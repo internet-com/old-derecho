@@ -33,12 +33,6 @@ int main (int argc, char *argv[]) {
     members[i] = i;
   }
 
-  // -_- -_- -_- -_- -_-
-  vector<int> sst_members (num_nodes);
-  for (int i = 0; i < (int)num_nodes; ++i) {
-    sst_members[i] = i;
-  }
-
   vector<std::unique_ptr<char[]>> buffers;
   vector<std::shared_ptr<rdma::memory_region>> mrs;
 
@@ -81,6 +75,6 @@ int main (int argc, char *argv[]) {
   clock_gettime(CLOCK_REALTIME, &end_time);
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec) * (long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
   double bw = (msg_size * num_messages * num_nodes * 8 + 0.0)/nanoseconds_elapsed;
-  double avg_bw = aggregate_bandwidth(sst_members, node_rank, bw);
+  double avg_bw = aggregate_bandwidth(members, node_rank, bw);
   log_results(msg_size, avg_bw, "data_rdmc_bw");
 }

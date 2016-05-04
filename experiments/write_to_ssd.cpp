@@ -26,8 +26,8 @@ int main (int argc, char *argv[]) {
   
   initialize(node_rank, num_nodes);
   
-  vector <int> members(num_nodes);
-  for (int i = 0; i < (int)num_nodes; ++i) {
+  vector <uint32_t> members(num_nodes);
+  for (uint32_t i = 0; i < num_nodes; ++i) {
     members[i] = i;
   }
   
@@ -48,7 +48,8 @@ int main (int argc, char *argv[]) {
   };
   
   auto derecho_sst = std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, msg_size, stability_callback, block_size);
+  vector<derecho::MessageBuffer> free_message_buffers;
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, msg_size, stability_callback, block_size);
   struct timespec start_time;
   // start timer
   clock_gettime(CLOCK_REALTIME, &start_time);

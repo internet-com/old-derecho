@@ -42,3 +42,6 @@ target_link_libraries(write_to_ssd derecho)
 # timeline_test
 add_executable(timeline_test timeline_test.cpp)
 target_link_libraries(timeline_test derecho)
+
+add_executable(viewchange_timeline viewchange_timeline.cpp)
+target_link_libraries(viewchange_timeline derecho)
