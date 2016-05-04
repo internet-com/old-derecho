@@ -216,7 +216,7 @@ void ManagedGroup::register_predicates() {
         return curr_view->IAmLeader() && has_pending_join() && joining_client_socket.is_empty();
     };
     auto start_join_trig = [this](DerechoSST& sst) {
-		log_event("Received a new client connection");
+		log_event("GMS handling a new client connection");
         joining_client_socket = std::move(pending_joins.locked().access.front()); //list.front() is now invalid because sockets are move-only, but C++ leaves it on the list
         pending_joins.locked().access.pop_front(); //because C++ list doesn't properly implement queues, this returns void
         receive_join(joining_client_socket);
@@ -242,7 +242,7 @@ void ManagedGroup::register_predicates() {
         assert(gmsSST.get_local_index() == curr_view->my_rank);
         int myRank = gmsSST.get_local_index();
         int leader = curr_view->rank_of_leader();
-        log_event(std::stringstream() << "Detected that leader proposed view change #" <<  gmsSST[leader].nChanges << ". Acknowledging.");
+        log_event(std::stringstream() << "Detected that leader proposed view change #" <<  gmsSST[leader].nChanges << ". Wedging current view.");
         wedge_view(*curr_view);
         if (myRank != leader)
         {
@@ -253,6 +253,7 @@ void ManagedGroup::register_predicates() {
         }
 
         gmssst::set(gmsSST[myRank].nAcked, gmsSST[leader].nChanges); // Notice a new request, acknowledge it
+        log_event(std::stringstream() << "Acknowledging view change #" << gmsSST[myRank].nAcked);
         gmsSST.put();
     };
 
@@ -552,14 +553,15 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
         }
     }
 
-	log_event(std::string("Proposing change to add node ") + std::to_string(joining_client_id));
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % View::MAX_MEMBERS;
     gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
     gmssst::set(gmsSST[curr_view->my_rank].joiner_ip, joiner_ip);
 
     gmssst::increment(gmsSST[curr_view->my_rank].nChanges);
 
+    log_event(std::stringstream() << "Wedging view " << curr_view->vid);
     wedge_view(*curr_view);
+	log_event(std::stringstream() << "Proposing change to add node " << joining_client_id);
     gmsSST.put();
 }
 
@@ -731,7 +733,6 @@ void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
 /* ------------------------------------------------------------------------- */
 
 void ManagedGroup::report_failure(const node_id_t who) {
-    lock_guard_t lock(view_mutex);
     int r = curr_view->rank_of(who);
     log_event(std::stringstream() << "Node ID " << who << " failure reported; marking suspected[" << r << "]");
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
@@ -753,7 +754,6 @@ void ManagedGroup::report_failure(const node_id_t who) {
 
 void ManagedGroup::leave() {
     log_event("Cleanly leaving the group.");
-    lock_guard_t lock(view_mutex);
     curr_view->rdmc_sending_group->wedge();
     curr_view->gmsSST->delete_all_predicates();
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[curr_view->my_rank] = true;
@@ -775,7 +775,7 @@ void ManagedGroup::send() {
     }
 }
 
-std::vector<node_id_t> ManagedGroup::get_members() {
+std::vector<node_id_t> ManagedGroup::get_members() const {
     //Since pointer swapping is atomic, this doesn't need the view_mutex - it
     //will either get the old view's members list or the new view's
     return curr_view->members;
@@ -786,7 +786,7 @@ void ManagedGroup::barrier_sync() {
     curr_view->gmsSST->sync_with_members();
 }
 
-void ManagedGroup::debug_print_status() {
+void ManagedGroup::debug_print_status() const {
     cout << "Member IPs by ID: {";
     for(auto& entry : member_ips_by_id) {
         cout << entry.first << " => " << entry.second << ", ";
@@ -795,9 +795,9 @@ void ManagedGroup::debug_print_status() {
     cout << "curr_view = " << curr_view->ToString() << endl;
 }
 
-void ManagedGroup::print_log() {
+void ManagedGroup::print_log(std::ostream& output_dest) const {
 	for(size_t i = 0; i < debug_log.counter; ++i) {
-		cout << debug_log.times[i] << "," << debug_log.events[i] << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]] << endl;
+		output_dest << debug_log.times[i] << "," << debug_log.events[i] << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]] << endl;
 	}
 }
 

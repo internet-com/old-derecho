@@ -154,7 +154,7 @@ class ManagedGroup {
         /** Causes this node to cleanly leave the group by setting itself to "failed." */
         void leave();
         /** Creates and returns a vector listing the nodes that are currently members of the group. */
-        std::vector<node_id_t> get_members();
+        std::vector<node_id_t> get_members() const;
         /** Gets a pointer into the managed DerechoGroup's send buffer, at a position where
          * there are at least payload_size bytes remaining in the buffer. The returned pointer
          * can be used to write a message into the buffer. (Analogous to DerechoGroup::get_position) */
@@ -166,14 +166,14 @@ class ManagedGroup {
         void report_failure(const node_id_t who);
         /** Waits until all members of the group have called this function. */
         void barrier_sync();
-        void debug_print_status();
+        void debug_print_status() const;
 		void log_event(const std::string& event_text) {
 			debug_log.log_event(event_text);
 		}
 		void log_event(const std::stringstream& event_text) {
 		    debug_log.log_event(event_text);
 		}
-		void print_log();
+		void print_log(std::ostream& output_dest) const;
 
 };
 

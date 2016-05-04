@@ -98,7 +98,7 @@ int main (int argc, char *argv[]) {
     }
     send_messages(30 * SECOND);
     // managed_group->barrier_sync();
-    managed_group->print_log();
+    managed_group->print_log(cout);
 
     //Give log time to print before exiting
     std::this_thread::sleep_for(5s);
