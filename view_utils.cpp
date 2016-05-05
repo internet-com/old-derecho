@@ -70,6 +70,7 @@ void merge_changes(View& Vc) {
 void wedge_view(View& Vc) {
     Vc.rdmc_sending_group->wedge(); // RDMC finishes sending, stops new sends or receives in Vc
     gmssst::set((*Vc.gmsSST)[Vc.my_rank].wedged, true);
+    Vc.gmsSST->put();
 }
 
 } //namespace derecho

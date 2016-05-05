@@ -109,13 +109,11 @@ class ManagedGroup {
 
         //Ken's helper methods
         void deliver_in_order(const View& Vc, int Leader);
-        static void await_meta_wedged(const View& Vc);
-        int await_leader_globalMin_ready(const View& Vc);
         void ragged_edge_cleanup(View& Vc);
         void leader_ragged_edge_cleanup(View& Vc);
         void follower_ragged_edge_cleanup(View& Vc);
 
-        static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool> old);
+        static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool>& old);
         static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);
         static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
         static int min_acked(const View::DerechoSST& gmsSST, const std::vector<bool>& failed);

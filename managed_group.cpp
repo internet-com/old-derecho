@@ -202,7 +202,7 @@ void ManagedGroup::register_predicates() {
                     gmssst::set(gmsSST[myRank].changes[gmsSST[myRank].nChanges % View::MAX_MEMBERS], Vc.members[q]); // Reports the failure (note that q NotIn members)
                     gmssst::increment(gmsSST[myRank].nChanges);
 //                    std::cout << std::string("NEW SUSPICION: adding ") << Vc.members[q] << std::string(" to the CHANGES/FAILED list") << std::endl;
-					log_event(std::string("Leader proposed a change to remove failed node ") + std::to_string(Vc.members[q]));
+					log_event(std::stringstream() << "Leader proposed a change to remove failed node " << Vc.members[q]);
                     gmsSST.put();
                 }
             }
@@ -242,8 +242,7 @@ void ManagedGroup::register_predicates() {
         assert(gmsSST.get_local_index() == curr_view->my_rank);
         int myRank = gmsSST.get_local_index();
         int leader = curr_view->rank_of_leader();
-        log_event(std::stringstream() << "Detected that leader proposed view change #" <<  gmsSST[leader].nChanges << ". Wedging current view.");
-        wedge_view(*curr_view);
+        log_event(std::stringstream() << "Detected that leader proposed view change #" <<  gmsSST[leader].nChanges << ". Acknowledging.");
         if (myRank != leader)
         {
             gmssst::set(gmsSST[myRank].changes, gmsSST[leader].changes); // Echo (copy) the vector including the new changes
@@ -253,8 +252,11 @@ void ManagedGroup::register_predicates() {
         }
 
         gmssst::set(gmsSST[myRank].nAcked, gmsSST[leader].nChanges); // Notice a new request, acknowledge it
-        log_event(std::stringstream() << "Acknowledging view change #" << gmsSST[myRank].nAcked);
         gmsSST.put();
+        log_event("Wedging current view.");
+        wedge_view(*curr_view);
+        log_event("Done wedging current view.");
+
     };
 
     auto leader_committed_next_view = [this](const DerechoSST& gmsSST) {
@@ -553,6 +555,7 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
         }
     }
 
+	log_event(std::stringstream() << "Proposing change to add node " << joining_client_id);
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % View::MAX_MEMBERS;
     gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
     gmssst::set(gmsSST[curr_view->my_rank].joiner_ip, joiner_ip);
@@ -561,7 +564,7 @@ void ManagedGroup::receive_join(tcp::socket& client_socket) {
 
     log_event(std::stringstream() << "Wedging view " << curr_view->vid);
     wedge_view(*curr_view);
-	log_event(std::stringstream() << "Proposing change to add node " << joining_client_id);
+	log_event("Leader done wedging view.");
     gmsSST.put();
 }
 
@@ -587,7 +590,7 @@ void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket)
 
 /* ------------------------- Static helper methods ------------------------- */
 
-bool ManagedGroup::suspected_not_equal(const View::DerechoSST& gmsSST, const vector<bool> old) {
+bool ManagedGroup::suspected_not_equal(const View::DerechoSST& gmsSST, const vector<bool>& old) {
     for (int r = 0; r < gmsSST.get_num_rows(); r++) {
         for (int who = 0; who < View::MAX_MEMBERS; who++) {
             if (gmsSST[r].suspected[who] && !old[who]) {
@@ -628,31 +631,6 @@ int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const vector<bool>& 
     return min;
 }
 
-int ManagedGroup::await_leader_globalMin_ready(const View& Vc) {
-    int Leader = Vc.rank_of_leader();
-    while (!(*Vc.gmsSST)[Leader].globalMinReady) {
-        Leader = Vc.rank_of_leader();
-    }
-    return Leader;
-}
-
-void ManagedGroup::await_meta_wedged(const View& Vc) {
-    int cnt = 0;
-    for (int n = 0; n < Vc.num_members; n++)
-    {
-        while (!Vc.failed[n] && !(*Vc.gmsSST)[n].wedged)
-        {
-            /* busy-wait */
-            if (cnt++ % 100 == 0)
-            {
-                std::cout << std::string("Process ") << Vc.members[Vc.my_rank] << std::string("... loop in AwaitMetaWedged / ") << std::endl;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//            Vc.gmsSST->Pull(Vc);
-        }
-    }
-}
 
 void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
     // Ragged cleanup is finished, deliver in the implied order
@@ -720,7 +698,7 @@ void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
 void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
     int myRank = Vc.my_rank;
     // Learn the leader's data and push it before acting upon it
-	debug_log.log_event("Echoing leader's globalMin");
+	debug_log.log_event("Received leader's globalMin; echoing it");
     int Leader = Vc.rank_of_leader();
     gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin, Vc.num_members);
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
