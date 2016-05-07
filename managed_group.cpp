@@ -753,7 +753,8 @@ void ManagedGroup::send() {
     }
 }
 
-std::vector<node_id_t> ManagedGroup::get_members() const {
+  std::vector<node_id_t> ManagedGroup::get_members() {
+  lock_guard_t lock(view_mutex);  
     //Since pointer swapping is atomic, this doesn't need the view_mutex - it
     //will either get the old view's members list or the new view's
     return curr_view->members;

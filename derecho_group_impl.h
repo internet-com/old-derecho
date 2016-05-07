@@ -216,12 +216,14 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						locally_stable_messages.emplace(sequence_number, std::move(second));
 						current_receives.erase(it);
 					}
-					
-					// Add empty messages to locally_stable_messages for each turn that the sender is skipping.
-                    for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
-                        (*sst)[member_index].nReceived[i]++;
-                        locally_stable_messages[(*sst)[member_index].nReceived[i]*num_members + i] = {i, (*sst)[member_index].nReceived[i], 0, 0};
-                    }
+		    // Add empty messages to locally_stable_messages for each turn that the sender is skipping.
+		    for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
+		      index++;
+		      sequence_number+=num_members;
+		      (*sst)[member_index].nReceived[i]++;
+		      locally_stable_messages[sequence_number] = {i, index, 0, 0};
+		    }
+		    
                     auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
                     int min_index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
                     auto new_seq_num = (*min_ptr + 1) * num_members + min_index-1;

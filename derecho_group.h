@@ -32,11 +32,13 @@ struct MessageBuffer {
         std::shared_ptr<rdma::memory_region> mr;
 
         MessageBuffer(){}
-	    MessageBuffer(size_t size) {
-			buffer = std::unique_ptr<char[]>(new char[size]);
-			mr = std::make_shared<rdma::memory_region>(buffer.get(), size);
-		}
-
+  MessageBuffer(size_t size) {
+    if (size != 0) {
+      buffer = std::unique_ptr<char[]>(new char[size]);
+      // std::cout << "Creating a new memory region :-/" << std::endl;
+      mr = std::make_shared<rdma::memory_region>(buffer.get(), size);
+    }
+  }
 	MessageBuffer(const MessageBuffer&) = delete;
 	MessageBuffer(MessageBuffer&&) = default;
 	MessageBuffer& operator=(const MessageBuffer&) = delete;
