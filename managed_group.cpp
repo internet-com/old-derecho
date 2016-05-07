@@ -36,6 +36,7 @@ using std::cout;
 using std::endl;
 using sst::SST;
 using std::chrono::high_resolution_clock;
+using util::debug_log;
 
 using lock_guard_t = std::lock_guard<std::mutex>;
 using unique_lock_t = std::unique_lock<std::mutex>;
@@ -641,19 +642,19 @@ void ManagedGroup::deliver_in_order(const View& Vc, int Leader) {
         + std::to_string((*Vc.gmsSST)[Leader].globalMin[n]) + std::string(" ");
         max_received_indices[n] = (*Vc.gmsSST)[Leader].globalMin[n];
     }
-	debug_log.log_event("Delivering ragged-edge messages in order: " + deliveryOrder);
+	debug_log().log_event("Delivering ragged-edge messages in order: " + deliveryOrder);
 //    std::cout << "Delivery Order (View " << Vc.vid << ") {" << deliveryOrder << std::string("}") << std::endl;
     Vc.rdmc_sending_group->deliver_messages_upto(max_received_indices);
 }
 
 void ManagedGroup::ragged_edge_cleanup(View& Vc) {
-	debug_log.log_event("Running RaggedEdgeCleanup");
+	debug_log().log_event("Running RaggedEdgeCleanup");
     if(Vc.IAmLeader()) {
         leader_ragged_edge_cleanup(Vc);
     } else {
         follower_ragged_edge_cleanup(Vc);
     }
-	debug_log.log_event("Done with RaggedEdgeCleanup");
+	debug_log().log_event("Done with RaggedEdgeCleanup");
 }
 
 void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
@@ -687,7 +688,7 @@ void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
         }
     }
 
-	debug_log.log_event("Leader finished computing globalMin");
+	debug_log().log_event("Leader finished computing globalMin");
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
     Vc.gmsSST->put();
 //    std::cout << std::string("RaggedEdgeCleanup: FINAL = ") << Vc.ToString() << std::endl;
@@ -698,7 +699,7 @@ void ManagedGroup::leader_ragged_edge_cleanup(View& Vc) {
 void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
     int myRank = Vc.my_rank;
     // Learn the leader's data and push it before acting upon it
-	debug_log.log_event("Received leader's globalMin; echoing it");
+	debug_log().log_event("Received leader's globalMin; echoing it");
     int Leader = Vc.rank_of_leader();
     gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin, Vc.num_members);
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
@@ -775,8 +776,8 @@ void ManagedGroup::debug_print_status() const {
 }
 
 void ManagedGroup::print_log(std::ostream& output_dest) const {
-	for(size_t i = 0; i < debug_log.counter; ++i) {
-		output_dest << debug_log.times[i] << "," << debug_log.events[i] << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]] << endl;
+	for(size_t i = 0; i < debug_log().curr_event; ++i) {
+		output_dest << debug_log().times[i] << "," << debug_log().events[i] << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]] << endl;
 	}
 }
 

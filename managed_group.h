@@ -52,8 +52,6 @@ class ManagedGroup {
 
         using pred_handle = View::DerechoSST::Predicates::pred_handle;
 
-		util::Logger debug_log;
-
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
          * Currently, this mapping must be completely known at startup. */
         std::map<node_id_t, ip_addr> member_ips_by_id;
@@ -165,11 +163,11 @@ class ManagedGroup {
         /** Waits until all members of the group have called this function. */
         void barrier_sync();
         void debug_print_status() const;
-		void log_event(const std::string& event_text) {
-			debug_log.log_event(event_text);
+		static void log_event(const std::string& event_text) {
+			util::debug_log().log_event(event_text);
 		}
-		void log_event(const std::stringstream& event_text) {
-		    debug_log.log_event(event_text);
+		static void log_event(const std::stringstream& event_text) {
+		    util::debug_log().log_event(event_text);
 		}
 		void print_log(std::ostream& output_dest) const;
 
