@@ -33,6 +33,8 @@ S&& operator<<(S&& out, const T& t) {
 
 namespace derecho {
 
+/** The start time of the program, to be used for timestamps in Logger entries.
+ * main() should set this after synchronizing clocks. */
 extern std::chrono::high_resolution_clock::time_point program_start_time;
 
 namespace util {
@@ -44,14 +46,17 @@ class Logger {
     public:
         std::vector<std::string> events;
         std::vector<std::chrono::microseconds::rep> times;
-        size_t counter;
+        size_t curr_event;
 
-        Logger() : events(10000000), times(10000000), counter(0) {};
+        Logger() : events(10000000), times(10000000), curr_event(0) {};
 
         void log_event(std::string event_text);
         void log_event(const std::stringstream& event_text);
 
 };
+
+/** Gets a single global Logger instance to use for debugging. */
+Logger& debug_log();
 
 } /* namespace util */
 } /* namespace derecho */
