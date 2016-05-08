@@ -113,7 +113,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     client_listener_thread = std::thread{[this](){
         while (!thread_shutdown) {
             tcp::socket client_socket = server_socket.accept();
-            log_event(std::stringstream() << "Background thread got a client connection from " << client_socket.remote_ip);
+            debug_log().log_event(std::stringstream() << "Background thread got a client connection from " << client_socket.remote_ip);
             pending_joins.locked().access.emplace_back(std::move(client_socket));
         }
         cout << "Connection listener thread shutting down." << endl;
@@ -714,6 +714,7 @@ void ManagedGroup::follower_ragged_edge_cleanup(View& Vc) {
 void ManagedGroup::report_failure(const node_id_t who) {
     int r = curr_view->rank_of(who);
     log_event(std::stringstream() << "Node ID " << who << " failure reported; marking suspected[" << r << "]");
+    cout << "Node ID " << who << " failure reported; marking suspected[" << r << "]" << endl;
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
 	int cnt = 0;
 	for (r = 0; r < View::MAX_MEMBERS; r++) {
@@ -754,8 +755,8 @@ void ManagedGroup::send() {
     }
 }
 
-  std::vector<node_id_t> ManagedGroup::get_members() {
-  lock_guard_t lock(view_mutex);  
+std::vector<node_id_t> ManagedGroup::get_members() {
+    lock_guard_t lock(view_mutex);
     //Since pointer swapping is atomic, this doesn't need the view_mutex - it
     //will either get the old view's members list or the new view's
     return curr_view->members;

@@ -14,8 +14,9 @@ std::chrono::high_resolution_clock::time_point program_start_time;
 
 namespace util {
 
+Logger debug_log_instance;
+
 Logger& debug_log() {
-    static Logger debug_log_instance;
     return debug_log_instance;
 }
 

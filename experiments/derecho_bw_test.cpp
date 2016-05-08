@@ -50,7 +50,7 @@ int main (int argc, char *argv[]) {
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes, num_senders_selector, num_last_received=0u] (int sender_id, long long int index, char *buf, long long int msg_size) mutable {
-    // cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+//    cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
     if (num_senders_selector == 0) {
       if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
 	done = true;
@@ -145,6 +145,9 @@ int main (int argc, char *argv[]) {
   log_results(num_nodes, num_senders_selector, max_msg_size, avg_bw, "data_derecho_bw");
   
   managed_group.barrier_sync();
+  std::string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+  std::ofstream logfile(log_filename);
+  managed_group.print_log(logfile);
   managed_group.leave();
   cout << "Finished destroying managed_group" << endl;
 }
