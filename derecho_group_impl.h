@@ -7,7 +7,7 @@
 #include <thread>
 
 #include "derecho_group.h"
-
+#include "logger.h"
 
 namespace derecho {
 
@@ -196,7 +196,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                 [this, i](char* data, size_t size) {
                     assert(this->sst);
 //                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
-//                    cout << "Received message from sender " << i << ", index = " << (*sst)[member_index].nReceived[i]+1 << endl;
+                    util::debug_log().log_event(std::stringstream() << "Locally received message from sender " << i << ": index = " << ((*sst)[member_index].nReceived[i]+1));
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
                     (*sst)[member_index].nReceived[i]++;
@@ -228,6 +228,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                     int min_index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
                     auto new_seq_num = (*min_ptr + 1) * num_members + min_index-1;
                     if (new_seq_num > (*sst)[member_index].seq_num) {
+                        util::debug_log().log_event(std::stringstream() << "Updating seq_num to " << new_seq_num);
                         (*sst)[member_index].seq_num = new_seq_num;
 //                        sst->put (offsetof (DerechoRow<N>, seq_num), sizeof (new_seq_num));
                         sst->put();
@@ -339,6 +340,7 @@ void DerechoGroup<N>::register_predicates(){
             }
         }
         if (min_seq_num > sst[member_index].stable_num) {
+            util::debug_log().log_event(std::stringstream() << "Updating stable_num to " << min_seq_num);
             sst[member_index].stable_num = min_seq_num;
 //            sst.put (offsetof (DerechoRow<N>, stable_num), sizeof (min_seq_num));
             sst.put ();
@@ -362,6 +364,7 @@ void DerechoGroup<N>::register_predicates(){
         if (!locally_stable_messages.empty()) {
             long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
             if (least_undelivered_seq_num <= min_stable_num) {
+                util::debug_log().log_event(std::stringstream() << "Can deliver a locally stable message: min_stable_num=" << min_stable_num << " and least_undelivered_seq_num=" << least_undelivered_seq_num);
                 msg_info& msg = locally_stable_messages.begin()->second;
                 deliver_message(msg);
                 sst[member_index].delivered_num = least_undelivered_seq_num;
@@ -454,6 +457,7 @@ void DerechoGroup<N>::send_loop() {
         sender_cv.wait(lock, should_wake);
         if (!thread_shutdown){
             current_send = std::move(pending_sends.front());
+            util::debug_log().log_event(std::stringstream() << "Calling send on message " << current_send->index << " from sender " << current_send->sender_rank );
             rdmc::send(member_index + rdmc_group_num_offset, current_send->message_buffer.mr, 0, current_send->size);
             pending_sends.pop();
         }
