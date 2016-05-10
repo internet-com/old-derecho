@@ -24,8 +24,6 @@ using std::endl;
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
-constexpr int MAX_GROUP_SIZE = 8; //size of Fractus
-
 int main (int argc, char *argv[]) {
   srand(time(NULL));
 
@@ -47,10 +45,14 @@ int main (int argc, char *argv[]) {
   long long unsigned int block_size = get_block_size (max_msg_size);
   int num_senders_selector = atoi(argv[2]);
   int num_messages = 1000;
+  if (max_msg_size == 100000000ull) {
+    cout << "Setting number of messages to 100 for this case" << endl;
+    num_messages = 100;
+  }
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes, num_senders_selector, num_last_received=0u] (int sender_id, long long int index, char *buf, long long int msg_size) mutable {
-//    cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
+    // cout << "In stability callback; sender = " << sender_id << ", index = " << index << endl;
     if (num_senders_selector == 0) {
       if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
 	done = true;
@@ -77,6 +79,12 @@ int main (int argc, char *argv[]) {
 
   while(managed_group.get_members().size() < num_nodes) {
   }
+  auto members_order = managed_group.get_members();
+  cout << "The order of members is :" << endl;
+  for (auto id : members_order) {
+    cout << id << " ";
+  }
+  cout << endl;
   // int n;
   // std::cin >> n;
 

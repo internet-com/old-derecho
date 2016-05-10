@@ -46,7 +46,7 @@ int main (int argc, char *argv[]) {
   rdmc::send_algorithm type = rdmc::BINOMIAL_SEND;
 
   vector <uint32_t> rotated_members(num_nodes);
-  for (unsigned int i = 0; i < num_nodes; ++i) {
+  for (unsigned int i = 0; i < num_nodes/2; ++i) {
     for (unsigned int j = 0; j < num_nodes; ++j) {
       rotated_members[j] = (uint32_t) members[(i+j)%num_nodes];
     }
@@ -70,19 +70,27 @@ int main (int argc, char *argv[]) {
 
   struct timespec start_time, end_time;
   clock_gettime(CLOCK_REALTIME, &start_time);
-  for (int i = 0; i < num_messages; ++i) {
-    // send the message
-    rdmc::send(node_rank, mrs[node_rank], 0, msg_size);
-    while (counts[node_rank] <= i) {
+  if (node_rank < num_nodes/2) {
+    for (int i = 0; i < num_messages; ++i) {
+      // send the message
+      rdmc::send(node_rank, mrs[node_rank], 0, msg_size);
+      while (counts[node_rank] <= i) {
+      }
+    }
+    for (unsigned int i = 0; i < num_nodes/2; ++i) {
+      while (counts[i] != counts[node_rank]) {
+      }
     }
   }
-  for (unsigned int i = 0; i < num_nodes; ++i) {
-    while (counts[i] != counts[node_rank]) {
+  else {
+    for (unsigned int i = 0; i < num_nodes/2; ++i) {
+      while (counts[i] <= num_messages-1) {
+      }
     }
   }
   clock_gettime(CLOCK_REALTIME, &end_time);
   long long int nanoseconds_elapsed = (end_time.tv_sec-start_time.tv_sec) * (long long int)1e9 + (end_time.tv_nsec-start_time.tv_nsec);
-  double bw = (msg_size * num_messages * num_nodes + 0.0)/nanoseconds_elapsed;
+  double bw = (msg_size * num_messages * (num_nodes/2) + 0.0)/nanoseconds_elapsed;
   double avg_bw = aggregate_bandwidth(members, node_rank, bw);
-  log_results(num_nodes, 0, msg_size, avg_bw, "data_rdmc_bw");
+  log_results(num_nodes, 1, msg_size, avg_bw, "data_rdmc_bw");
 }

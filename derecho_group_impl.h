@@ -197,6 +197,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                     assert(this->sst);
 //                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
                     util::debug_log().log_event(std::stringstream() << "Locally received message from sender " << i << ": index = " << ((*sst)[member_index].nReceived[i]+1));
+		    // cout << "Locally received message from sender " << i << ": index = " << ((*sst)[member_index].nReceived[i]+1) << endl;
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
                     (*sst)[member_index].nReceived[i]++;
@@ -446,6 +447,8 @@ void DerechoGroup<N>::send_loop() {
                 return false;
             }
         }
+	// cout << "nReceived for the local node: " << (*sst)[member_index].nReceived[member_index] << endl;
+	// cout << "Message index is: " << msg.index << endl;
         return true;
     };
     auto should_wake = [&](){

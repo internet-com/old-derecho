@@ -23,6 +23,10 @@ target_link_libraries(multiple_senders_multiple_messages derecho)
 add_executable(derecho_bw_test derecho_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(derecho_bw_test derecho)
 
+# ssd_bw_test
+add_executable(ssd_bw_test ssd_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
+target_link_libraries(ssd_bw_test derecho)
+
 # gms_bw_test
 add_executable(gms_bw_test gms_bw_test.cpp)
 target_link_libraries(gms_bw_test derecho)
@@ -30,6 +34,14 @@ target_link_libraries(gms_bw_test derecho)
 # rdmc_bw_test
 add_executable(rdmc_bw_test rdmc_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(rdmc_bw_test derecho)
+
+# rdmc_bw_test1
+add_executable(rdmc_bw_test1 rdmc_bw_test1.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
+target_link_libraries(rdmc_bw_test1 derecho)
+
+# rdmc_bw_test2
+add_executable(rdmc_bw_test2 rdmc_bw_test2.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
+target_link_libraries(rdmc_bw_test2 derecho)
 
 # window_size_test
 add_executable(window_size_test window_size_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )

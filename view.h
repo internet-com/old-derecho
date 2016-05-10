@@ -16,6 +16,7 @@
 #include "derecho_group.h"
 #include "sst/sst.h"
 #include "derecho_row.h"
+#include "max_members.h"
 
 namespace derecho {
 
@@ -23,7 +24,7 @@ namespace derecho {
 class View {
     public:
         /** Upper bound on the number of members that will ever be in any one view. */
-        static constexpr int MAX_MEMBERS = 10;
+  static constexpr int MAX_MEMBERS = ::MAX_MEMBERS;
 
         using DerechoSST = sst::SST<DerechoRow<MAX_MEMBERS>>;
 

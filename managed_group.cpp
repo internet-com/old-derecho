@@ -134,7 +134,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     register_predicates();
 	curr_view->gmsSST->start_predicate_evaluation();
 
-//    curr_view->rdmc_sending_group->debug_print();
+	// curr_view->rdmc_sending_group->debug_print();
 }
 
 void ManagedGroup::global_setup(const map<node_id_t, ip_addr>& member_ips, node_id_t my_id) {
