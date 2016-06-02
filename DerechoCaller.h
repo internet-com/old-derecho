@@ -84,50 +84,87 @@ namespace DerechoCaller
 	{
 
 	public:
-		unsigned int hc;
+		const unsigned int hc;
 		CallBack cb;
-		unsigned int* hcv;
-		HandlerInfo(unsigned int ahc, CallBack wcb, unsigned int* hcvec)
-			:hc(ahc),cb(wcb),hcv(hcvec){} 
+		HandlerInfo(unsigned int ahc, CallBack wcb)
+			:hc(ahc),cb(wcb){} 
 	};
 
-	template <typename RT, typename... Args>
-	std::array<unsigned int, (sizeof...(Args))> _Action(RT(*cb)(Args...))
-	{
-		return{ typeid(Args).hash_code()... };
-	}
-
 	template<typename R, typename... Args>
-	CallBack WrappedCallBack(const std::function<R>(Args...) &f){
+	CallBack WrappedCallBack(const std::function<R (Args...)> &f){
 		return [f](DeserializationManager* dsm,
 				   void const * const in,
 				   const std::function<void const * const (int)>& out_alloc){
-
-			auto fold_fun = [dsm](auto const * const type, const auto& accum){
+			
+			auto mut_in = in;
+			auto fold_fun = [dsm,&mut_in](auto const * const type){
 				using Type = std::decay_t<decltype(*type)>;
-				void * in = accum.first;
-				auto ds = mutils::from_bytes<Type>(dsm,in)
+				auto ds = mutils::from_bytes<Type>(dsm,mut_in)
 				const auto size = ds->bytes_size();
-				return std::make_pair(in + size,std::tuple_cat(accum.second,std::make_tuple(std::move(ds))));
+				mut_in += size;
+				return ds;
 			};
 			
-			std::tuple<std::unique_ptr<Args*>...> args{
-				mutils::fold(fold_fun,std::tuple<Args*...>{},
-							 std::pair<void*,std::tuple<> >{in,std::tuple<>{}}).second
-					};
-			const auto result = mutils::callFunc(f,args);
+			const auto result = f(*fold_fun((Args*) nullptr)... );
 			const auto result_size = mutils::bytes_size(result);
 			auto out = out_alloc(result_size);
 			mutils::to_bytes(result,out);
 		};
 	}
 
+	constexpr unsigned int combine(unsigned int hc1, unsigned int hc2)
+	{
+		return hc1 ^ (hc2 << 1) | (hc2 >> (sizeof(hc2) * 8 - 1));
+	}
+
+	constexpr unsigned int combine(){
+		return 0;
+	}
+
+	template<typename T1, typename... T>
+	constexpr unsigned int combine(){
+		return combine(typeid(T1).hash_code(),combine<T...>());
+	}
+
+	template<typename Ret, typename... Args>
+	constexpr unsigned int combine_f(std::function<Ret (Args...)> const * const){
+		return combine<Ret,Args...>();
+	}
+	
 	template <typename F>
 	HandlerInfo Action(const F& pre_cb)
 	{
 		auto cb = mutils::convert(pre_cb);
 		using cb_t = decltype(cb);
 		using RT = typename mutils::function_traits<cb_t>::result_type;
-		
-		return HandlerInfo(typeid(RT).hash_code(), WrappedCallBack(cb),nullptr);
+		constexpr auto hash = combine_f(mutils::mke_p<cb_t>());
+		return HandlerInfo(hash, WrappedCallBack(cb));
 	}
+	
+	class _Handler
+	{
+	public:
+		std::unordered_map<unsigned int, HandlerInfo> mytypes;
+
+		_Handler()
+		{}
+
+		_Handler& _Handler::operator+=(const HandlerInfo& hi)
+		{
+			mytypes[hi.hc] = hi;
+			return *this;
+		}
+
+		void const * const doCallback(unsigned int hc, void const * const args) const 
+		{
+			return mytypes.at(hc).cb(args);
+		}
+	};
+	
+	constexpr Opcode REPLY = (Opcode)511;
+	constexpr Opcode NULLREPLY = (Opcode)510;
+	constexpr Opcode RAW = (Opcode)509;
+
+	
+
+}
