@@ -160,10 +160,70 @@ namespace DerechoCaller
 			return mytypes.at(hc).cb(args);
 		}
 	};
+
+	using Handlers_t = std::unordered_map<std::size_t,_Handler>;
 	
 	constexpr Opcode REPLY = (Opcode)511;
 	constexpr Opcode NULLREPLY = (Opcode)510;
 	constexpr Opcode RAW = (Opcode)509;
+
+	template<int SIZE>
+	class TransmitInfo
+	{
+	public:
+		bool Match = false;
+		const bool isQuery;
+		const unsigned int hash;
+		cptr payload;
+		int len;
+
+		template<typename... Args>
+		TransmitInfo(
+			const Handlers_t &handlers,
+					 bool PaxosMode,
+					 bool isQuery,
+					 bool isReply,
+					 int rid,
+					 Opcode op,
+					 unsigned int ret_hash,
+					 Args &... args)
+			:isQuery(isQuery),
+			 hash(isQuery ?
+				  combine(ret_hash, combine<Args...>()) :
+				  (!isReply ?
+				   combine(typeid(void).hash_code(), combine<Args...>()) :
+				   combine<Args...>()))
+		{
+
+ //TODO: this thing has a few too many arguments for sanity.  Factoring out should be high priority.
+			if (handlers.at(op).mytypes.count(hash) == 0 && op != REPLY && op != NULLREPLY)
+			{
+				cerr << "WARNING: Message not sent: No Handler[" << op << "]( " << hash << 
+					") has matching reply type and argument types" << endl;
+			}
+			else
+			{
+				DerechoHeader dh{0, op, isQuery, isReply, rid, hash};
+				//auto dsi = SendInfo(typeid(DerechoHeader).hash_code(), std::string("DerechoHeader"), false, (vptr *)&dh);
+				len =  mutils::bytes_size(args) + ... + mutils::bytes_size(dh);
+				Match = true;
+				payload = new char[len];
+				cptr pp = payload;
+				pp += mutils::to_bytes(dh);
+				auto marshall_args = [&](const auto &arg){ auto size = mutils::to_bytes(arg); pp += size; return size;};
+				auto total_size = marshall_args(args) + ... + mutils::bytes_size(dh);
+				assert(total_size == len);
+			}
+		}
+
+		~TransmitInfo()
+		{
+			if (Match)
+			{
+				delete[] payload;
+			}
+		}
+	};
 
 	
 
