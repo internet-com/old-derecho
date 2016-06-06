@@ -145,13 +145,15 @@ void runTest()
 		int nr;
 		{
 			QueryReplies<int> qr(ALL);
-			nr = OrderedQuery(Handlers,qr, HELLO);
+			std::shared_ptr qrp(&qr,[](const auto&){});
+			nr = OrderedQuery(Handlers,qrp, HELLO);
 			ReportOutcome<int>(qr);
 		}
 		{
 			cout << "Query(HELLO,9)" << endl;
 			QueryReplies<int> qr(ALL);
-			nr = OrderedQuery(qr, HELLO, 9);
+			std::shared_ptr qrp(&qr,[](const auto&){});
+			nr = OrderedQuery(qrp, HELLO, 9);
 			ReportOutcome<int>(qr);
 		}
 	}

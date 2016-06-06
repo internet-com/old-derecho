@@ -302,7 +302,7 @@ namespace DerechoCaller
 		}
 	};
 
-	std::unordered_map<int, std::unique_ptr<QueryReplies_general> > qrmap;	
+	std::unordered_map<int, std::weak_ptr<QueryReplies_general> > qrmap;	
 
 	void gotReply(DeserializationManager* dsm,
 				  int senderId, int replyId, unsigned int hc, cptr payload)
@@ -310,14 +310,18 @@ namespace DerechoCaller
 		try {
 			if (hc != 0)
 			{
-				qrmap.at(replyId)->gotReply(dsm,senderId, replyId,payload);
+				if (qrmap.at(replyId))
+					qrmap.at(replyId).lock()->gotReply(dsm,senderId, replyId,payload);
 			}
 			else
 			{
-				qrmap.at(replyId)->gotReply(nullptr,senderId, replyId,nullptr);	
+				if (qrmap.at(replyId)) {
+					qrmap.at(replyId).lock()->
+						gotReply(nullptr,senderId, replyId,nullptr);
+				}
 			}
 		}
-		catch (std::out_of_range&) {return;}
+		catch (const std::out_of_range&) {return;}
 	}
 
 	typedef int NodeId;
@@ -338,18 +342,18 @@ namespace DerechoCaller
 	}
 
 	template<typename Q, int SIZE>
-	int TransmitQuery(std::unique_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
+	int TransmitQuery(std::shared_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
 		return _Transmit<Q,SIZE>(qr, who, ti);
 	}
 
 	template<typename Q, int SIZE>
-	int _Transmit(std::unique_ptr<QueryReplies<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
+	int _Transmit(std::shared_ptr<QueryReplies<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
 		auto qr = qr_up.get();
 		int replyID = 0;
 		if (qr != nullptr)
-			qrmap[qr->replyID] = std::move(qr_up);
+			qrmap[qr->replyID] = qr_up;
 		if (ti.Match)
 		{
 			pretendToDeliver(ti.payload, ti.len);
@@ -401,7 +405,7 @@ namespace DerechoCaller
 	}
 
 	template<typename Q>
-	void AwaitReplies(const QueryReplies<Q> &qr)
+	void AwaitReplies(const std::shared_ptr<QueryReplies<Q> >&)
 	{
 		cout << "Await Replies: return instantly" << endl;
 	}
@@ -427,19 +431,19 @@ namespace DerechoCaller
 	}
 
 	template <typename Q, typename... Args>
-	int OrderedQuery(const Handlers_t &handlers, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	int OrderedQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
 		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int PaxosQuery(const Handlers_t &handlers, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	int PaxosQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
 		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, true, false, opcode, 0U, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int P2PQuery(const Handlers_t &handlers, NodeId who, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	int P2PQuery(const Handlers_t &handlers, NodeId who, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
 		return TransmitQuery<Q, sizeof...(Args)>(qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
 	}
