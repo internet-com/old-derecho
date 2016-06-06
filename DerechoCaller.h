@@ -76,7 +76,7 @@ namespace DerechoCaller
 
 	//takes serialized inputs as single char array in first arg,
 	//places serialized output in array allocated via second arg
-	using CallBack = std::function<(DeserializationManager*,
+	using CallBack = std::function<void const * const (DeserializationManager*,
 									char const*const,
 									const std::function<char const*const (int)>&)>;
 
@@ -109,6 +109,7 @@ namespace DerechoCaller
 			const auto result_size = mutils::bytes_size(result);
 			auto out = out_alloc(result_size);
 			mutils::to_bytes(result,out);
+			return out;
 		};
 	}
 
@@ -155,9 +156,12 @@ namespace DerechoCaller
 			return *this;
 		}
 
-		void const * const doCallback(unsigned int hc, void const * const args) const 
+		void const * const doCallback(unsigned int hc,
+									  DeserializationManager* dsm,
+									  void const * const args,
+									  const std::function<void const * const (int)> &alloc) const 
 		{
-			return mytypes.at(hc).cb(args);
+			return mytypes.at(hc).cb(dsm,args,alloc);
 		}
 	};
 
@@ -225,6 +229,147 @@ namespace DerechoCaller
 		}
 	};
 
-	
+	int nextReplyID{0};
 
+	template<class T>
+	class QueryReplies
+	{
+		const int replyID = ++nextReplyID;
+		const int repliesWanted;
+		std::list<int> members;
+	public:
+		std::list<std::unique_ptr<T> > replies;
+		int repliesReceived;
+
+		QueryReplies(int nreplies):repliesWanted(nreplies){
+			members.push_back(0);
+		}
+
+		void gotReply(int who, int rid, std::unique_ptr<T> rep)
+		{
+			
+			if (rid != replyID)
+			{
+				cerr << "Unexpected reply id in QueryReplies" << endl;
+				throw new DerechoCallerException("QueryReplies");
+			}
+
+			for (auto const& mi: members)
+			{
+				if (mi == who)
+				{
+					members.remove(mi);
+					if (rep != nullptr)
+					{
+						++repliesReceived;
+						replies.emplace_back(std::move(rep));
+					}
+					return;
+				}
+			}
+			throw new DerechoCallerException("Member replied twice!");
+		}
+
+		void nodeFailed(int who)
+		{
+			for (mi = members.cbegin; mi != members.cend; mi++)
+			{
+				if (*mi == who)
+				{
+					members.remove(mi);
+					return;
+				}
+			}
+		}
+
+		int AwaitReplies()
+		{
+			return repliesReceived;
+		}
+	};
+
+	typedef int NodeId;
+	enum { NONE = 0, ALL = -1, MAJORITY = -2 } RepliesNeeded;
+	NodeId WHOLEGROUP = -1;
+	QueryReplies<int> *NOREPLY = nullptr;
+
+	
+	typedef int NodeId;
+	enum { NONE = 0, ALL = -1, MAJORITY = -2 } RepliesNeeded;
+	NodeId WHOLEGROUP = -1;
+	QueryReplies<int> *NOREPLY = nullptr;
+
+	template<int SIZE>
+	int TransmitGroup(const TransmitInfo& ti) 
+	{ 
+		return _Transmit<int,SIZE>(NOREPLY, WHOLEGROUP, ti); 
+	}
+
+	template<int SIZE>
+	int TransmitP2P(NodeId who, const TransmitInfo& ti) 
+	{ 
+		return _Transmit<int,SIZE>(NOREPLY, who, ti); 
+	}
+
+	template<typename Q, int SIZE>
+	int TransmitQuery(QueryReplies<Q> *qr, NodeId who, const TransmitInfo& ti)
+	{
+		_Transmit<Q,SIZE>(qr, who, ti);
+	}
+
+	template<typename Q, int SIZE>
+	int _Transmit(QueryReplies<Q> *qr, NodeId who, const TransmitInfo& ti)
+	{
+		if (ba->Match)
+		{
+			/* TODO: Either use DerechoSend or P2P send, depending on whether who == WHOLEGROUP */
+			pretendToDeliver(ti.payload, qr);
+		}
+		if (qr != nullptr)
+		{
+			return qr->AwaitReplies();
+		}
+		return 0;
+	}
+
+	template<typename Q>
+	void pretendToDeliver(const Handlers_t &Handlers,
+						  mutils::DeserializationManager* dsm,
+						  char const * const _payload, QueryReplies<Q> *qr)
+	{
+		auto payload = _payload;
+
+		const DerechoHeader dhp{payload};
+		payload += mutils::bytes_size(dhp);
+		Opcode op = dhp.opcode;
+		unsigned int hash = dhp.typeSig;
+		if (op == REPLY)
+		{
+			assert(qr);
+			qr->gotReply(dhp.SenderID, mutils::from_bytes<Q>(dsm,payload));
+			return;
+		}
+		else if (op == NULLREPLY)
+		{
+			assert(qr);
+			qr->gotReply(dhp->SenderID, nullptr);
+			return;
+		}
+		auto *rptr = Handlers.at(op).doCallback(hash,dsm,payload,alloca);
+		if (qr != nullptr)
+		{
+			const HandlerInfo &hi = Handlers.at(op).mytypes.at(hash);
+			/* FAKE Sending reply */
+			assert(false && "Ken's code seems wrong here, need to ask him about it");
+			char rep[mutils::bytes_size(hi.hc)];
+			LookupBAMaker(hi->hc)(rptr, rep);
+			Transmit(nullptr, dhp->SenderID, TransmitInfo(Handles,false, hi->hc, REPLY, std::array<SendInfo, 1> { SendInfo(hi->hc, "reply", rptr, hi->replymaker, hi->replylen); }));
+		}
+		else
+		{
+			Transmit(nullptr, dhp->SenderID, TransmitInfo(false, hi->hc, nullptr, NULLREPLY, nullptr));
+		}
+	}
+
+	
 }
