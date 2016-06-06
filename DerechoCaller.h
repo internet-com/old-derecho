@@ -190,7 +190,7 @@ namespace DerechoCaller
 					 int rid,
 					 Opcode op,
 					 unsigned int ret_hash,
-					 Args &... args)
+					 const Args &... args)
 			:isQuery(isQuery),
 			 hash(isQuery ?
 				  combine(ret_hash, combine<Args...>()) :
@@ -208,7 +208,6 @@ namespace DerechoCaller
 			else
 			{
 				DerechoHeader dh{0, op, isQuery, isReply, rid, hash};
-				//auto dsi = SendInfo(typeid(DerechoHeader).hash_code(), std::string("DerechoHeader"), false, (vptr *)&dh);
 				len =  mutils::bytes_size(args) + ... + mutils::bytes_size(dh);
 				Match = true;
 				payload = new char[len];
@@ -229,10 +228,16 @@ namespace DerechoCaller
 		}
 	};
 
-	int nextReplyID{0};
+	std::atomic_int nextReplyID{0};
+
+	class QueryReplies_general {
+		virtual void gotReply(DeserializationManager* dsm,
+							  int who, int rid, char const* const serialized_rep) = 0;
+		virtual ~QueryReplies_general(){}
+	};
 
 	template<class T>
-	class QueryReplies
+	class QueryReplies : public QueryReplies_general
 	{
 		const int replyID = ++nextReplyID;
 		const int repliesWanted;
@@ -270,6 +275,15 @@ namespace DerechoCaller
 			throw new DerechoCallerException("Member replied twice!");
 		}
 
+		void gotReply(DeserializationManager* dsm,
+					  int who, int rid, char const* const serialized_rep){
+			gotReply(who,rid,
+					 serialized_rep ?
+					 mutils::from_bytes<T>(dsm,serialized_rep) :
+					 nullptr
+				);
+		}
+
 		void nodeFailed(int who)
 		{
 			for (mi = members.cbegin; mi != members.cend; mi++)
@@ -288,88 +302,146 @@ namespace DerechoCaller
 		}
 	};
 
-	typedef int NodeId;
-	enum { NONE = 0, ALL = -1, MAJORITY = -2 } RepliesNeeded;
-	NodeId WHOLEGROUP = -1;
-	QueryReplies<int> *NOREPLY = nullptr;
+	std::unordered_map<int, std::unique_ptr<QueryReplies_general> > qrmap;	
 
-	
+	void gotReply(DeserializationManager* dsm,
+				  int senderId, int replyId, unsigned int hc, cptr payload)
+	{
+		try {
+			if (hc != 0)
+			{
+				qrmap.at(replyId)->gotReply(dsm,senderId, replyId,payload);
+			}
+			else
+			{
+				qrmap.at(replyId)->gotReply(nullptr,senderId, replyId,nullptr);	
+			}
+		}
+		catch (std::out_of_range&) {return;}
+	}
+
 	typedef int NodeId;
 	enum { NONE = 0, ALL = -1, MAJORITY = -2 } RepliesNeeded;
 	NodeId WHOLEGROUP = -1;
 	QueryReplies<int> *NOREPLY = nullptr;
 
 	template<int SIZE>
-	int TransmitGroup(const TransmitInfo& ti) 
+	int TransmitGroup(const TransmitInfo<SIZE>& ti) 
 	{ 
 		return _Transmit<int,SIZE>(NOREPLY, WHOLEGROUP, ti); 
 	}
 
 	template<int SIZE>
-	int TransmitP2P(NodeId who, const TransmitInfo& ti) 
+	int TransmitP2P(const NodeId who, const TransmitInfo<SIZE>& ti) 
 	{ 
 		return _Transmit<int,SIZE>(NOREPLY, who, ti); 
 	}
 
 	template<typename Q, int SIZE>
-	int TransmitQuery(QueryReplies<Q> *qr, NodeId who, const TransmitInfo& ti)
+	int TransmitQuery(std::unique_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
-		_Transmit<Q,SIZE>(qr, who, ti);
+		return _Transmit<Q,SIZE>(qr, who, ti);
 	}
 
 	template<typename Q, int SIZE>
-	int _Transmit(QueryReplies<Q> *qr, NodeId who, const TransmitInfo& ti)
+	int _Transmit(std::unique_ptr<QueryReplies<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
-		if (ba->Match)
+		auto qr = qr_up.get();
+		int replyID = 0;
+		if (qr != nullptr)
+			qrmap[qr->replyID] = std::move(qr_up);
+		if (ti.Match)
 		{
-			/* TODO: Either use DerechoSend or P2P send, depending on whether who == WHOLEGROUP */
-			pretendToDeliver(ti.payload, qr);
+			pretendToDeliver(ti.payload, ti.len);
 		}
 		if (qr != nullptr)
 		{
 			return qr->AwaitReplies();
+			qrmap[qr->replyID] = nullptr;
 		}
 		return 0;
 	}
 
-	template<typename Q>
-	void pretendToDeliver(const Handlers_t &Handlers,
-						  mutils::DeserializationManager* dsm,
-						  char const * const _payload, QueryReplies<Q> *qr)
+	void pretendToDeliver(DeserializationManager* dsm,
+						  const Handlers_t &Handlers,
+						  cptr payload, int len)
 	{
-		auto payload = _payload;
-
-		const DerechoHeader dhp{payload};
+		/* Demarshall payload, mimic delivery, etc */
+		DerechoHeader dhp(payload);
 		payload += mutils::bytes_size(dhp);
 		Opcode op = dhp.opcode;
 		unsigned int hash = dhp.typeSig;
-		if (op == REPLY)
+		if (op == REPLY || op == NULLREPLY)
 		{
-			assert(qr);
-			qr->gotReply(dhp.SenderID, mutils::from_bytes<Q>(dsm,payload));
+			gotReply(dsm,dhp.SenderID, dhp.replyID, dhp.typeSig, payload);
 			return;
 		}
-		else if (op == NULLREPLY)
-		{
-			assert(qr);
-			qr->gotReply(dhp->SenderID, nullptr);
-			return;
-		}
-		auto *rptr = Handlers.at(op).doCallback(hash,dsm,payload,alloca);
-		if (qr != nullptr)
+		if (handlers.at(op).mytypes.count(hash) > 0)
 		{
 			const HandlerInfo &hi = Handlers.at(op).mytypes.at(hash);
-			/* FAKE Sending reply */
-			assert(false && "Ken's code seems wrong here, need to ask him about it");
-			char rep[mutils::bytes_size(hi.hc)];
-			LookupBAMaker(hi->hc)(rptr, rep);
-			Transmit(nullptr, dhp->SenderID, TransmitInfo(Handles,false, hi->hc, REPLY, std::array<SendInfo, 1> { SendInfo(hi->hc, "reply", rptr, hi->replymaker, hi->replylen); }));
+			auto * result = hi.cb(dsm,payload,std::alloca);
+			if (dhp.replyID != 0)
+			{
+				if (hi->risPOD || result != nullptr)
+				{
+					/* FAKE Sending reply */
+					TransmitP2P<1>(dhp.SenderID, TransmitInfo<1>(Handlers,false, false, true, dhp.replyID, REPLY, 0, mutils::marshalled(result)));
+				}
+				else
+				{
+					TransmitP2P<1>(dhp.SenderID, TransmitInfo<1>(Handlers,false, false, true, dhp.replyID, NULLREPLY, 0));
+				}
+			}
 		}
 		else
 		{
-			Transmit(nullptr, dhp->SenderID, TransmitInfo(false, hi->hc, nullptr, NULLREPLY, nullptr));
+			unsigned int code = ((unsigned int)op) & 0xFFU;
+			cerr << "WARNING: There was no handler[" << code << "] with hashcode=" << hash << endl;
 		}
 	}
 
-	
+	template<typename Q>
+	void AwaitReplies(const QueryReplies<Q> &qr)
+	{
+		cout << "Await Replies: return instantly" << endl;
+	}
+
+	template <typename... Args>
+	void OrderedSend(const Handlers_t &handlers, Opcode opcode, Args... arg)
+	{
+		TransmitGroup<sizeof...(Args)>(
+			TransmitInfo<sizeof...(Args)>(
+				handlers,false, false, false, opcode, 0U, arg...));
+	}
+
+	template <typename... Args>
+	void PaxosSend(const Handlers_t &handlers, Opcode opcode, Args... arg)
+	{
+		TransmitGroup<sizeof...(Args)>(TransmitInfo<sizeof...(Args)>(handlers,true, false, false, opcode, 0U, arg...));
+	}
+
+	template <typename... Args>
+	void P2PSend(const Handlers_t &handlers, NodeId who, Opcode opcode, Args... arg)
+	{
+		TransmitP2P<sizeof...(Args)>(who, TransmitInfo<sizeof...(Args)>(handlers,true, false, false, opcode, 0U, arg...));
+	}
+
+	template <typename Q, typename... Args>
+	int OrderedQuery(const Handlers_t &handlers, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	{
+		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
+	}
+
+	template <typename Q, typename... Args>
+	int PaxosQuery(const Handlers_t &handlers, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	{
+		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, true, false, opcode, 0U, arg...));
+	}
+
+	template <typename Q, typename... Args>
+	int P2PQuery(const Handlers_t &handlers, NodeId who, QueryReplies<Q> *qr, Opcode opcode, Args... arg)
+	{
+		return TransmitQuery<Q, sizeof...(Args)>(qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
+	}
+
 }
