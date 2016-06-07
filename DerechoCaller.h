@@ -79,7 +79,7 @@ namespace DerechoCaller
 	using cbR = std::pair<std::size_t,char const * const>;
 	using CallBack = std::function<cbR(mutils::DeserializationManager*,
 									   char const*const,
-									   const std::function<char const*const(int)>&)>;
+									   const std::function<char* (int)>&)>;
 
 	class HandlerInfo
 	{
@@ -94,7 +94,7 @@ namespace DerechoCaller
 #define common_prefix_dch93_mpm											\
 	return [f](mutils::DeserializationManager* dsm,						\
 			   char const * const in,									\
-			   const std::function<char const * const (int)>& out_alloc){ \
+			   const std::function<char* (int)>& out_alloc){ \
 																		\
 		auto mut_in = in;												\
 		auto map_fun = [dsm,&mut_in](auto const * const type){			\
@@ -173,7 +173,7 @@ namespace DerechoCaller
 		cbR doCallback(unsigned int hc,
 									  mutils::DeserializationManager* dsm,
 									  char const * const args,
-									  const std::function<char const * const (int)> &alloc) const 
+									  const std::function<char* (int)> &alloc) const 
 		{
 			return mytypes.at(hc).cb(dsm,args,alloc);
 		}
@@ -192,54 +192,55 @@ namespace DerechoCaller
 		bool Match = false;
 		const bool isQuery;
 		const unsigned int hash;
+		const unsigned int replyhc;
 		char const * payload;
 		int len;
 
 		template<typename... Args>
 		TransmitInfo(
 			const Handlers_t &handlers,
-					 bool PaxosMode,
-					 bool isQuery,
-					 bool isReply,
-					 int rid,
-					 Opcode op,
-					 unsigned int ret_hash,
-					 const Args &... args)
+			bool PaxosMode,
+			unsigned int ret_hash,
+			bool isQuery,
+			bool isReply,
+			int rid,
+			Opcode op,
+			const Args &... args)
 			:isQuery(isQuery),
 			 hash(isQuery ?
 				  combine(ret_hash, combine<Args...>()) :
 				  (!isReply ?
 				   combine(typeid(void).hash_code(), combine<Args...>()) :
 				   combine<Args...>()))
-		{
-
- //TODO: this thing has a few too many arguments for sanity.  Factoring out should be high priority.
-			if (handlers.at(op).mytypes.count(hash) == 0 && op != REPLY && op != NULLREPLY)
-			{
-				std::cerr << "WARNING: Message not sent: No Handler[" << op << "]( " << hash << 
-					") has matching reply type and argument types" << std::endl;
+			,replyhc(ret_hash) {
+				
+				//TODO: this thing has a few too many arguments for sanity.  Factoring out should be high priority.
+				if (handlers.at(op).mytypes.count(hash) == 0 && op != REPLY && op != NULLREPLY)
+				{
+					std::cerr << "WARNING: Message not sent: No Handler[" << op << "]( " << hash << 
+						") has matching reply type and argument types" << std::endl;
+				}
+				else
+				{
+					DerechoHeader dh{0, op, isQuery, isReply, rid, hash};
+					len = (mutils::bytes_size(args) + ... + mutils::bytes_size(dh));
+					Match = true;
+					auto pp = new char[len];
+					payload = pp;
+					pp += mutils::to_bytes(dh,pp);
+					auto marshall_args = [&](const auto &arg){ auto size = mutils::to_bytes(arg,pp); pp += size; return size;};
+					auto total_size = (marshall_args(args) + ... + mutils::bytes_size(dh));
+					assert(total_size == len);
+				}
 			}
-			else
-			{
-				DerechoHeader dh{0, op, isQuery, isReply, rid, hash};
-				len = (mutils::bytes_size(args) + ... + mutils::bytes_size(dh));
-				Match = true;
-				auto pp = new char[len];
-				payload = pp;
-				pp += mutils::to_bytes(dh,pp);
-				auto marshall_args = [&](const auto &arg){ auto size = mutils::to_bytes(arg,pp); pp += size; return size;};
-				auto total_size = (marshall_args(args) + ... + mutils::bytes_size(dh));
-				assert(total_size == len);
-			}
-		}
 
 		~TransmitInfo()
-		{
-			if (Match)
 			{
-				delete[] payload;
+				if (Match)
+				{
+					delete[] payload;
+				}
 			}
-		}
 	};
 
 	std::atomic_int nextReplyID{0};
@@ -428,7 +429,7 @@ namespace DerechoCaller
 			constexpr auto max_size = 1024*1024*1024;
 			char m[max_size];
 			auto result_pair = hi.cb(dsm,payload,
-								  [&m](int i) -> char const * const {
+								  [&m](int i) -> char* {
 									  assert (i < max_size);
 									  return m;
 								  });
@@ -439,11 +440,11 @@ namespace DerechoCaller
 				if (result != nullptr)
 				{
 					/* FAKE Sending reply */
-					TransmitP2P<1>(dsm,Handlers,dhp.SenderID, TransmitInfo<1>(Handlers,false, false, true, dhp.replyID, REPLY, 0, mutils::marshalled{result_size,result}));
+					TransmitP2P<1>(dsm,Handlers,dhp.SenderID, TransmitInfo<1>(Handlers,false, hi.hc, false, true, dhp.replyID, REPLY, mutils::marshalled{result_size,result}));
 				}
 				else
 				{
-					TransmitP2P<1>(dsm,Handlers,dhp.SenderID, TransmitInfo<1>(Handlers,false, false, true, dhp.replyID, NULLREPLY, 0));
+					TransmitP2P<1>(dsm,Handlers,dhp.SenderID, TransmitInfo<1>(Handlers,false, hi.hc, false, true, dhp.replyID, NULLREPLY));
 				}
 			}
 		}
@@ -465,37 +466,37 @@ namespace DerechoCaller
 	{
 		TransmitGroup<sizeof...(Args)>(
 			TransmitInfo<sizeof...(Args)>(
-				handlers,false, false, false, opcode, 0U, arg...));
+				handlers,false, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
 	void PaxosSend(const Handlers_t &handlers, Opcode opcode, Args... arg)
 	{
-		TransmitGroup<sizeof...(Args)>(TransmitInfo<sizeof...(Args)>(handlers,true, false, false, opcode, 0U, arg...));
+		TransmitGroup<sizeof...(Args)>(TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
 	void P2PSend(const Handlers_t &handlers, NodeId who, Opcode opcode, Args... arg)
 	{
-		TransmitP2P<sizeof...(Args)>(who, TransmitInfo<sizeof...(Args)>(handlers,true, false, false, opcode, 0U, arg...));
+		TransmitP2P<sizeof...(Args)>(who, TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
 	int OrderedQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
 	int PaxosQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, true, false, opcode, 0U, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
 	int P2PQuery(const Handlers_t &handlers, NodeId who, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, true, false, opcode, 0U, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 }

@@ -120,6 +120,7 @@ void runTest()
 	Handlers[HELLO] += Action(callWithIntFoo);		// <void, int, Foo*>
 	Handlers[HELLO] += Action(callWithFooInt);		// <void, Foo*, int>
 	//Handlers[GOODBYE] += Action([](int n) -> void { cout << "[GOODBYE] was queried, n=" << n << endl;  }); <void, int>
+	DeserializationManager* dsm{nullptr};
 	for (int n = 0; n < 10; n++)
 	{
 		cout << "OrderedSend(HELLO)" << endl;
