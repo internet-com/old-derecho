@@ -97,7 +97,7 @@ void ReportOutcome(const QueryReplies<T> &qr)
 {
 	cout << "ReportingOutcome: nr=" << qr.repliesReceived << ", replies[ ";
 	for (const auto &ri : qr.replies)
-		cout << ri << " ";
+		cout << *ri << " ";
 	cout << "]" << endl;
 }
 
@@ -124,38 +124,38 @@ void runTest()
 	for (int n = 0; n < 10; n++)
 	{
 		cout << "OrderedSend(HELLO)" << endl;
-		OrderedSend(Handlers,HELLO);
+		OrderedSend(dsm,Handlers,HELLO);
 		cout << "OrderedSend(HELLO, 1)" << endl;
-		OrderedSend(Handlers,HELLO, 1);
+		OrderedSend(dsm,Handlers,HELLO, 1);
 		cout << "OrderedSend(HELLO, 1, 2)" << endl;
-		OrderedSend(Handlers,HELLO, 1, 2);
+		OrderedSend(dsm,Handlers,HELLO, 1, 2);
 		cout << "OrderedSend(HELLO, 1, 2, 3)" << endl;
-		OrderedSend(Handlers,HELLO, 1, 2, 3);
+		OrderedSend(dsm,Handlers,HELLO, 1, 2, 3);
 		cout << "OrderedSend(HELLO, float 5.4321)" << endl;
-		OrderedSend(Handlers,HELLO, (float)5.4321);
+		OrderedSend(dsm,Handlers,HELLO, (float)5.4321);
 		cout << "OrderedSend(HELLO, double 1.234)" << endl;
-		OrderedSend(Handlers,HELLO, 1.234);
+		OrderedSend(dsm,Handlers,HELLO, 1.234);
 		Foo f(9876 + n);
 		cout << "OrderedSend(HELLO, Foo*)" << endl;
-		OrderedSend(Handlers,HELLO, f);
+		OrderedSend(dsm,Handlers,HELLO, f);
 		cout << "OrderedSend(HELLO, 1, (float)22.4, Foo*)" << endl;
-		OrderedSend(Handlers,HELLO, 1, 22.4, f);
+		OrderedSend(dsm,Handlers,HELLO, 1, 22.4, f);
 		cout << "OrderedSend(HELLO, 1, 22.4, ``string'')" << endl;
-		OrderedSend(Handlers,HELLO, 1, 22.4, "string of some sort");
-		OrderedSend(Handlers,HELLO, 22.4, 21, "string of some sort", f, 77);
+		OrderedSend(dsm,Handlers,HELLO, 1, 22.4, "string of some sort");
+		OrderedSend(dsm,Handlers,HELLO, 22.4, 21, "string of some sort", f, 77);
 		cout << "Query(HELLO)" << endl;
 		int nr;
 		{
 			QueryReplies<int> qr(ALL);
 			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
-			nr = OrderedQuery(Handlers,qrp, HELLO);
+			nr = OrderedQuery(dsm,Handlers,qrp, HELLO);
 			ReportOutcome<int>(qr);
 		}
 		{
 			cout << "Query(HELLO,9)" << endl;
 			QueryReplies<int> qr(ALL);
 			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
-			nr = OrderedQuery(Handlers,qrp, HELLO, 9);
+			nr = OrderedQuery(dsm,Handlers,qrp, HELLO, 9);
 			ReportOutcome<int>(qr);
 		}
 	}

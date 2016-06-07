@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <string>
 #include <typeinfo>
 #include <typeindex>
@@ -306,7 +307,7 @@ namespace DerechoCaller
 			{
 				if (*mi == who)
 				{
-					members.remove(mi);
+					members.remove(*mi);
 					return;
 				}
 			}
@@ -373,9 +374,9 @@ namespace DerechoCaller
 	}
 
 	template<typename Q, int SIZE>
-	int TransmitQuery(std::shared_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
+	int TransmitQuery(mutils::DeserializationManager* dsm, const Handlers_t &Handlers, std::shared_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
-		return _Transmit<Q,SIZE>(qr, who, ti);
+		return _Transmit<Q,SIZE>(dsm,Handlers,qr, who, ti);
 	}
 
 	void pretendToDeliver(mutils::DeserializationManager* dsm,
@@ -462,41 +463,41 @@ namespace DerechoCaller
 	}
 
 	template <typename... Args>
-	void OrderedSend(const Handlers_t &handlers, Opcode opcode, Args... arg)
+	void OrderedSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, Args... arg)
 	{
-		TransmitGroup<sizeof...(Args)>(
+		TransmitGroup<sizeof...(Args)>(dsm,handlers,
 			TransmitInfo<sizeof...(Args)>(
 				handlers,false, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
-	void PaxosSend(const Handlers_t &handlers, Opcode opcode, Args... arg)
+	void PaxosSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, Args... arg)
 	{
-		TransmitGroup<sizeof...(Args)>(TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
+		TransmitGroup<sizeof...(Args)>(dsm,handlers,TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
-	void P2PSend(const Handlers_t &handlers, NodeId who, Opcode opcode, Args... arg)
+	void P2PSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, Opcode opcode, Args... arg)
 	{
-		TransmitP2P<sizeof...(Args)>(who, TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
+		TransmitP2P<sizeof...(Args)>(dsm,handlers,who, TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int OrderedQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
+	int OrderedQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int PaxosQuery(const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
+	int PaxosQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int P2PQuery(const Handlers_t &handlers, NodeId who, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
+	int P2PQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
 	}
 
 }
