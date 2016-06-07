@@ -5,6 +5,7 @@
 
 using namespace DerechoCaller;
 using namespace mutils;
+using namespace std;
 
 enum
 {
@@ -145,21 +146,21 @@ void runTest()
 		int nr;
 		{
 			QueryReplies<int> qr(ALL);
-			std::shared_ptr qrp(&qr,[](const auto&){});
+			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
 			nr = OrderedQuery(Handlers,qrp, HELLO);
 			ReportOutcome<int>(qr);
 		}
 		{
 			cout << "Query(HELLO,9)" << endl;
 			QueryReplies<int> qr(ALL);
-			std::shared_ptr qrp(&qr,[](const auto&){});
-			nr = OrderedQuery(qrp, HELLO, 9);
+			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
+			nr = OrderedQuery(Handlers,qrp, HELLO, 9);
 			ReportOutcome<int>(qr);
 		}
 	}
 }
 
-int _tmain(int argc, _TCHAR* argv[])
+int main()
 {
 	runTest();
 	cout << "Hello world... enter any character to terminate" << endl;
