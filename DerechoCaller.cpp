@@ -2,6 +2,7 @@
 //
 
 #include "DerechoCaller.h"
+#include <sys/resource.h>
 
 using namespace DerechoCaller;
 using namespace mutils;
@@ -95,15 +96,15 @@ void callWithNothing()
 template<typename T>
 void ReportOutcome(const QueryReplies<T> &qr)
 {
-	cout << "ReportingOutcome: nr=" << qr.repliesReceived << ", replies[ ";
-	for (const auto &ri : qr.replies)
-		cout << *ri << " ";
+    cout << "ReportingOutcome: nr=" << (qr.reply ? 1 : 0) << ", replies[ ";
+    if (qr.reply) cout << *qr.reply;
 	cout << "]" << endl;
 }
 
 void runTest()
 {
-	Handlers_t Handlers;
+    std::unique_ptr<Handlers_t> _Handlers{new Handlers_t{}};
+    auto &Handlers = *_Handlers;
 	Handlers[HELLO] += Action(callWithNothing);		// <void>
 	Handlers[HELLO] += Action(icallWithInt);        // <int,int>
 	Handlers[HELLO] += Action(vcallWithInt);		// <void, int>
@@ -116,9 +117,9 @@ void runTest()
 	Handlers[HELLO] += Action(vcallWithFloat);		// <void, double>
 	Handlers[HELLO] += Action(dcallWithDouble);		// <double, double>
 	Handlers[HELLO] += Action(vcallWithDouble);		// <void, double>
-	Handlers[HELLO] += Action(callWithFoo);			// <void, Foo*>
-	Handlers[HELLO] += Action(callWithIntFoo);		// <void, int, Foo*>
-	Handlers[HELLO] += Action(callWithFooInt);		// <void, Foo*, int>
+    Handlers[HELLO] += Action(callWithFoo);			// <void, Foo>
+    Handlers[HELLO] += Action(callWithIntFoo);		// <void, int, Foo>
+    Handlers[HELLO] += Action(callWithFooInt);		// <void, Foo, int>
 	//Handlers[GOODBYE] += Action([](int n) -> void { cout << "[GOODBYE] was queried, n=" << n << endl;  }); <void, int>
 	DeserializationManager* dsm{nullptr};
 	for (int n = 0; n < 10; n++)
@@ -136,26 +137,21 @@ void runTest()
 		cout << "OrderedSend(HELLO, double 1.234)" << endl;
 		OrderedSend(dsm,Handlers,HELLO, 1.234);
 		Foo f(9876 + n);
-		cout << "OrderedSend(HELLO, Foo*)" << endl;
+        cout << "OrderedSend(HELLO, Foo)" << endl;
 		OrderedSend(dsm,Handlers,HELLO, f);
-		cout << "OrderedSend(HELLO, 1, (float)22.4, Foo*)" << endl;
+        cout << "OrderedSend(HELLO, 1, (float)22.4, Foo)" << endl;
 		OrderedSend(dsm,Handlers,HELLO, 1, 22.4, f);
 		cout << "OrderedSend(HELLO, 1, 22.4, ``string'')" << endl;
 		OrderedSend(dsm,Handlers,HELLO, 1, 22.4, "string of some sort");
 		OrderedSend(dsm,Handlers,HELLO, 22.4, 21, "string of some sort", f, 77);
-		cout << "Query(HELLO)" << endl;
-		int nr;
 		{
-			QueryReplies<int> qr(ALL);
-			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
-			nr = OrderedQuery(dsm,Handlers,qrp, HELLO);
+            cout << "Query(HELLO)" << endl;
+            const QueryReplies<int> &qr = OrderedQuery<int>(dsm,Handlers, HELLO);
 			ReportOutcome<int>(qr);
 		}
 		{
 			cout << "Query(HELLO,9)" << endl;
-			QueryReplies<int> qr(ALL);
-			std::shared_ptr<QueryReplies<int> > qrp(&qr,[](const auto&){});
-			nr = OrderedQuery(dsm,Handlers,qrp, HELLO, 9);
+            const QueryReplies<int> &qr = OrderedQuery<int>(dsm,Handlers, HELLO, 9);
 			ReportOutcome<int>(qr);
 		}
 	}
@@ -163,6 +159,12 @@ void runTest()
 
 int main()
 {
+    const rlim_t kStackSize = 8192L * 1024L * 1024L; //8192mb
+    struct rlimit rl;
+    int result;
+    result = getrlimit(RLIMIT_STACK,&rl);
+    assert(result == 0);
+
 	runTest();
 	cout << "Hello world... enter any character to terminate" << endl;
 	string myString;

@@ -15,6 +15,7 @@
 #include <FunctionalMap.hpp>
 #include <alloca.h>
 
+
 namespace DerechoCaller
 {
 	class DerechoCallerException : public std::exception
@@ -71,7 +72,29 @@ namespace DerechoCaller
 			}
 		}
 
-		DEFAULT_SERIALIZATION_SUPPORT(DerechoHeader,SenderID,replyID,opcode,typeSig);
+		static std::unique_ptr<DerechoHeader> from_bytes(mutils::DeserializationManager* p, char const * v){
+			auto a2 = mutils::from_bytes<std::decay_t<decltype(SenderID)> >(p,v);
+			auto size_a2 = mutils::bytes_size(*a2);
+			auto b2 = mutils::from_bytes<std::decay_t<decltype(replyID)> >(p,v + size_a2);
+			auto size_b2 = mutils::bytes_size(*b2);
+			auto c2 = mutils::from_bytes<std::decay_t<decltype(opcode)> >(p,v + size_a2 + size_b2);
+			DerechoHeader r{*a2,*b2,*c2,*(mutils::from_bytes<std::decay_t<decltype(typeSig)> >(p,v + size_a2 + size_b2 + mutils::bytes_size(*c2)))};
+			return mutils::heap_copy(r);
+		}
+
+
+		int to_bytes(char* ret) const {
+			int sa = mutils::to_bytes(SenderID,ret);
+			int sb = mutils::to_bytes(replyID,ret + sa);
+			int sc = mutils::to_bytes(opcode,ret + sa + sb);
+			return sa + sb + sc + mutils::to_bytes(typeSig,ret + sa + sb + sc);
+		}
+		int bytes_size() const {
+			return mutils::bytes_size(SenderID) + mutils::bytes_size(replyID) + mutils::bytes_size(opcode) + mutils::bytes_size(typeSig);
+		}
+
+		void ensure_registered(mutils::DeserializationManager&){}
+		//DEFAULT_SERIALIZATION_SUPPORT(DerechoHeader,SenderID,replyID,opcode,typeSig);
 
 	};
 
@@ -111,7 +134,7 @@ namespace DerechoCaller
 	std::enable_if_t<!std::is_same<R,void>::value,CallBack>
 	WrappedCallBack(const std::function<R (Args...)> &f){
 		common_prefix_dch93_mpm;
-		const auto result = f(*map_fun((Args*) nullptr)... );
+        const auto result = f(*map_fun((std::decay_t<Args>*) nullptr)... );
 		const auto result_size = mutils::bytes_size(result);
 		auto out = out_alloc(result_size);
 		mutils::to_bytes(result,out);
@@ -122,6 +145,7 @@ namespace DerechoCaller
 	template<typename... Args>
 	CallBack WrappedCallBack(const std::function<void (Args...)> &f){
 		common_prefix_dch93_mpm;
+        f(*map_fun((std::decay_t<Args>*) nullptr)... );
 		return cbR{0,nullptr};
 		common_suffix_dch93_mpm;
 	}
@@ -138,7 +162,7 @@ namespace DerechoCaller
 
 	template<typename T1, typename... T>
 	unsigned int combine(){
-		return combine(typeid(T1).hash_code(),combine<T...>());
+        return combine(typeid(std::decay_t<T1>).hash_code(),combine<T...>());
 	}
 
 	template<typename Ret, typename... Args>
@@ -194,8 +218,7 @@ namespace DerechoCaller
 		const bool isQuery;
 		const unsigned int hash;
 		const unsigned int replyhc;
-		char const * payload;
-		int len;
+        std::vector<char> payload;
 
 		template<typename... Args>
 		TransmitInfo(
@@ -216,7 +239,7 @@ namespace DerechoCaller
 			,replyhc(ret_hash) {
 				
 				//TODO: this thing has a few too many arguments for sanity.  Factoring out should be high priority.
-				if (handlers.at(op).mytypes.count(hash) == 0 && op != REPLY && op != NULLREPLY)
+                if (op != REPLY && op != NULLREPLY && handlers.at(op).mytypes.count(hash) == 0)
 				{
 					std::cerr << "WARNING: Message not sent: No Handler[" << op << "]( " << hash << 
 						") has matching reply type and argument types" << std::endl;
@@ -224,24 +247,17 @@ namespace DerechoCaller
 				else
 				{
 					DerechoHeader dh{0, op, isQuery, isReply, rid, hash};
-					len = (mutils::bytes_size(args) + ... + mutils::bytes_size(dh));
+                    auto len = (mutils::bytes_size(args) + ... + mutils::bytes_size(dh));
 					Match = true;
-					auto pp = new char[len];
-					payload = pp;
-					pp += mutils::to_bytes(dh,pp);
+                    payload.resize(len);
+                    auto dh_size = mutils::to_bytes(dh,payload.data());
+                    auto *pp = payload.data() + dh_size;
 					auto marshall_args = [&](const auto &arg){ auto size = mutils::to_bytes(arg,pp); pp += size; return size;};
 					auto total_size = (marshall_args(args) + ... + mutils::bytes_size(dh));
 					assert(total_size == len);
 				}
 			}
 
-		~TransmitInfo()
-			{
-				if (Match)
-				{
-					delete[] payload;
-				}
-			}
 	};
 
 	std::atomic_int nextReplyID{0};
@@ -256,40 +272,26 @@ namespace DerechoCaller
 	template<class T>
 	class QueryReplies : public QueryReplies_general
 	{
-		std::list<int> members;
 	public:
 		const int replyID = ++nextReplyID;
-		const int repliesWanted;
-		std::list<std::unique_ptr<T> > replies;
-		int repliesReceived;
+        std::unique_ptr<T> reply;
 
-		QueryReplies(int nreplies):repliesWanted(nreplies){
-			members.push_back(0);
-		}
+        QueryReplies() = default;
+        QueryReplies(const QueryReplies&) = delete;
 
 		void gotReply(int who, int rid, std::unique_ptr<T> rep)
 		{
+            if (who != 0) throw DerechoCallerException("Member replied twice!");
 			
 			if (rid != replyID)
 			{
 				std::cerr << "Unexpected reply id in QueryReplies" << std::endl;
-				throw new DerechoCallerException("QueryReplies");
+                throw DerechoCallerException("QueryReplies");
 			}
-
-			for (auto const& mi: members)
-			{
-				if (mi == who)
-				{
-					members.remove(mi);
-					if (rep != nullptr)
-					{
-						++repliesReceived;
-						replies.emplace_back(std::move(rep));
-					}
-					return;
-				}
-			}
-			throw new DerechoCallerException("Member replied twice!");
+            if (rep != nullptr){
+                reply = std::move(rep);
+                std::cout << *reply << std::endl;
+            }
 		}
 
 		void gotReply(mutils::DeserializationManager* dsm,
@@ -303,118 +305,125 @@ namespace DerechoCaller
 
 		void nodeFailed(int who)
 		{
+            /*
 			for (auto mi = members.cbegin(); mi != members.cend(); mi++)
 			{
 				if (*mi == who)
 				{
-					members.remove(*mi);
+                    members.erase(mi);
 					return;
 				}
-			}
+            }*/
 		}
 
 		int AwaitReplies()
 		{
-			return repliesReceived;
+            return reply ? 1 : 0;//replies.size();
 		}
 	};
 
 	//grr, global things!
 	using replies_map = typename mutils::functional_map<
-		int, std::weak_ptr<QueryReplies_general> >;
+        int, std::shared_ptr<QueryReplies_general> >;
 	using replies_mapnode = typename replies_map::mapnode;
 
 	std::mutex qr_writelock;
-	std::shared_ptr<replies_mapnode> qrmap{new replies_mapnode{}};
+    //std::shared_ptr<replies_mapnode> qrmap{new replies_mapnode{}};
+    std::map<int,std::unique_ptr<QueryReplies_general> > qrmap;
 	using qrlock = std::unique_lock<std::mutex>;
 
 	void gotReply(mutils::DeserializationManager* dsm,
 				  int senderId, int replyId, unsigned int hc,
 				  char const * const payload)
-	{
-		try {
-			if (hc != 0)
-			{
-				auto sp = replies_map::find(replyId,*qrmap).lock();
-				if (sp)
-					sp->gotReply(dsm,senderId, replyId,payload);
-			}
-			else
-			{
-				auto sp = replies_map::find(replyId,*qrmap).lock();
-				if (sp) {
-					sp->gotReply(nullptr,senderId, replyId,nullptr);
-				}
-			}
-		}
-		catch (const std::out_of_range&) {return;}
-	}
+    {
+        if (hc != 0)
+        {
+            const auto &sp = qrmap.at(replyId);//replies_map::find(replyId,*qrmap);
+            assert(sp.get());
+            if (sp)
+                sp->gotReply(dsm,senderId, replyId,payload);
+        }
+        else
+        {
+            const auto &sp = qrmap.at(replyId);//replies_map::find(replyId,*qrmap);
+            assert(sp.get());
+            if (sp.get()) {
+                sp->gotReply(nullptr,senderId, replyId,nullptr);
+            }
+        }
+
+    }
 
 	typedef int NodeId;
 	enum { NONE = 0, ALL = -1, MAJORITY = -2 } RepliesNeeded;
 	NodeId WHOLEGROUP = -1;
-	const std::shared_ptr<QueryReplies<int> > NOREPLY{nullptr};
+    using NOREPLY = std::unique_ptr<QueryReplies<int> >;
 
 	template<typename Q, int SIZE>
 	int _Transmit(mutils::DeserializationManager* dsm,
-				  const Handlers_t &Handlers, std::shared_ptr<QueryReplies<Q> > qr_sp, const NodeId who, const TransmitInfo<SIZE>& ti);
+                  const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr_sp, const NodeId who, const TransmitInfo<SIZE>& ti);
 
 	template<int SIZE>
 	int TransmitGroup(mutils::DeserializationManager* dsm,
 					  const Handlers_t &Handlers, const TransmitInfo<SIZE>& ti) 
 	{ 
-		return _Transmit<int,SIZE>(dsm,Handlers,NOREPLY, WHOLEGROUP, ti); 
+        return _Transmit<int,SIZE>(dsm,Handlers,NOREPLY{}, WHOLEGROUP, ti);
 	}
 
 	template<int SIZE>
 	int TransmitP2P(mutils::DeserializationManager* dsm,
 					const Handlers_t &Handlers, const NodeId who, const TransmitInfo<SIZE>& ti) 
 	{ 
-		return _Transmit<int,SIZE>(dsm,Handlers,NOREPLY, who, ti); 
+        return _Transmit<int,SIZE>(dsm,Handlers,NOREPLY{}, who, ti);
 	}
 
 	template<typename Q, int SIZE>
-	int TransmitQuery(mutils::DeserializationManager* dsm, const Handlers_t &Handlers, std::shared_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
+    int TransmitQuery(mutils::DeserializationManager* dsm, const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
-		return _Transmit<Q,SIZE>(dsm,Handlers,qr, who, ti);
+        return _Transmit<Q,SIZE>(dsm,Handlers,std::move(qr), who, ti);
 	}
 
-	void pretendToDeliver(mutils::DeserializationManager* dsm,
-						  const Handlers_t &Handlers,
-						  char const *  payload, int len);
+    void pretendToDeliver(mutils::DeserializationManager* dsm,
+                          const Handlers_t &Handlers,
+                          const std::vector<char>&  payload);
+
 
 	template<typename Q, int SIZE>
 	int _Transmit(mutils::DeserializationManager* dsm,
-				  const Handlers_t &Handlers, std::shared_ptr<QueryReplies<Q> > qr_sp, const NodeId who, const TransmitInfo<SIZE>& ti)
+                  const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
-		auto qr = qr_sp.get();
-		int replyID = 0;
-		if (qr != nullptr){
-			if (replies_map::is_empty(*qrmap)){
+        auto *qr = qr_up.get();
+        if (qr != nullptr){
+            if (qrmap.count(qr->replyID) == 0/*!replies_map::mem(qr->replyID,*qrmap)*/){
 				qrlock l{qr_writelock};
-				qrmap = std::make_shared<replies_mapnode>(replies_map::add(qr->replyID,qr_sp,*qrmap));
+                //qrmap = std::make_shared<replies_mapnode>(replies_map::add(qr->replyID,qr_sp,*qrmap));
+                qrmap[qr->replyID] = std::move(qr_up);
 			}
 			else {
-				replies_map::find(qr->replyID,*qrmap).lock() = qr_sp;
+                //replies_map::find(qr->replyID,*qrmap) = qr_sp;
+                qrmap.at(qr->replyID) = std::move(qr_up);
 			}
+            //assert(replies_map::find(qr->replyID,*qrmap) != nullptr);
 		}
 		if (ti.Match)
 		{
-			pretendToDeliver(dsm,Handlers,ti.payload, ti.len);
+            pretendToDeliver(dsm,Handlers,ti.payload);
 		}
 		if (qr != nullptr)
 		{
 			return qr->AwaitReplies();
-			replies_map::find(qr->replyID,*qrmap).lock() = nullptr;
+            //replies_map::find(qr->replyID,*qrmap) = nullptr;
 		}
 		return 0;
 	}
 
 	void pretendToDeliver(mutils::DeserializationManager* dsm,
 						  const Handlers_t &Handlers,
-						  char const *  payload, int len)
+                          const std::vector<char> &_payload)
 	{
 		/* Demarshall payload, mimic delivery, etc */
+        auto *payload = _payload.data();
+        static_assert(sizeof(DerechoHeader) < (sizeof(void*)*10),"bad assumption");
 		DerechoHeader dhp(payload);
 		payload += mutils::bytes_size(dhp);
 		Opcode op = dhp.opcode;
@@ -427,7 +436,7 @@ namespace DerechoCaller
 		if (Handlers.at(op).mytypes.count(hash) > 0)
 		{
 			const HandlerInfo &hi = Handlers.at(op).mytypes.at(hash);
-			constexpr auto max_size = 1024*1024*1024;
+            constexpr auto max_size = 1024;
 			char m[max_size];
 			auto result_pair = hi.cb(dsm,payload,
 								  [&m](int i) -> char* {
@@ -457,47 +466,54 @@ namespace DerechoCaller
 	}
 
 	template<typename Q>
-	void AwaitReplies(const std::shared_ptr<QueryReplies<Q> >&)
+    void AwaitReplies(const std::unique_ptr<QueryReplies<Q> >&)
 	{
 		std::cout << "Await Replies: return instantly" << std::endl;
 	}
 
 	template <typename... Args>
-	void OrderedSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, Args... arg)
+    void OrderedSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, const Args &... arg)
 	{
+        static_assert(sizeof(TransmitInfo<sizeof...(Args)>) < sizeof(void*)*10,"that's waay too big");
 		TransmitGroup<sizeof...(Args)>(dsm,handlers,
 			TransmitInfo<sizeof...(Args)>(
 				handlers,false, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
-	void PaxosSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, Args... arg)
+    void PaxosSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, const Args &... arg)
 	{
 		TransmitGroup<sizeof...(Args)>(dsm,handlers,TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename... Args>
-	void P2PSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, Opcode opcode, Args... arg)
+    void P2PSend(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, Opcode opcode, const Args &... arg)
 	{
 		TransmitP2P<sizeof...(Args)>(dsm,handlers,who, TransmitInfo<sizeof...(Args)>(handlers,true, 0u, false, false, 0U, opcode, arg...));
 	}
 
 	template <typename Q, typename... Args>
-	int OrderedQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
+    const QueryReplies<Q>& OrderedQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, const Args &... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        auto *qr = new QueryReplies<Q>();
+        TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,std::unique_ptr<QueryReplies<Q> >{qr}, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        return *qr;
 	}
 
 	template <typename Q, typename... Args>
-	int PaxosQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
-	{
-		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+    const QueryReplies<Q>& PaxosQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, const Args &... arg)
+    {\
+        auto *qr = new QueryReplies<Q>();
+        return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,std::unique_ptr<QueryReplies<Q> >{qr}, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,true, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        return *qr;
 	}
 
 	template <typename Q, typename... Args>
-	int P2PQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, std::shared_ptr<QueryReplies<Q> > qr, Opcode opcode, Args... arg)
+    const QueryReplies<Q>& P2PQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, NodeId who, Opcode opcode, const Args &... arg)
 	{
-		return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,qr, who, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        auto *qr = new QueryReplies<Q>();
+        return TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,std::unique_ptr<QueryReplies<Q> >{qr}, who, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        return *qr;
 	}
 
 }
