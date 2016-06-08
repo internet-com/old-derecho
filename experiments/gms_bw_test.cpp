@@ -37,18 +37,18 @@ void stability_callback(int sender_id, long long int index, char *data, long lon
 
     derecho::util::debug_log().log_event(stringstream() << "Global stability for message " << index << " from sender " << sender_id);
 
-//    while(!managed_group) {
-//
-//    }
-//
-//    unsigned int n = managed_group->get_members().size();
-//    if(message_number >= n){
-//        unsigned int dt = message_times.back() - message_times[message_number - n];
-//        double bandwidth = (message_size * n * 8.0) / dt;
-//        managed_group->log_event(std::to_string(bandwidth));
-//    }
-//
-//    ++message_number;
+    while(!managed_group) {
+
+    }
+
+    unsigned int n = managed_group->get_members().size();
+    if(message_number >= n){
+        unsigned int dt = message_times.back() - message_times[message_number - n];
+        double bandwidth = (message_size * n * 8.0) / dt;
+        managed_group->log_event(std::to_string(bandwidth));
+    }
+
+    ++message_number;
 }
 
 void send_messages(uint64_t duration){
@@ -97,7 +97,7 @@ int main (int argc, char *argv[]) {
 
     string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
 
-    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
     cout << "Created group, waiting for others to join." << endl;
     while(managed_group->get_members().size() < (num_nodes-1)) {
         std::this_thread::sleep_for(1ms);

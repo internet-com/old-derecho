@@ -4,17 +4,19 @@
 #include <cstring>
 #include <thread>
 
-using namespace std;
+using std::mutex;
+using std::unique_lock;
+using std::ofstream;
 
 const uint8_t MAGIC_NUMBER[8] = {'D', 'E', 'R', 'E', 'C', 'H', 'O', 29};
 
-filewriter::filewriter(std::function<void(message)> _message_written_upcall,
-                       string filename)
+FileWriter::FileWriter(std::function<void(message)> _message_written_upcall,
+                       std::string filename)
     : message_written_upcall(_message_written_upcall),
-      writer_thread(&filewriter::perform_writes, this, filename),
-      callback_thread(&filewriter::issue_callbacks, this) {}
+      writer_thread(&FileWriter::perform_writes, this, filename),
+      callback_thread(&FileWriter::issue_callbacks, this) {}
 
-filewriter::~filewriter() {
+FileWriter::~FileWriter() {
   exit = true;
   pending_callbacks_cv.notify_all();
   pending_writes_cv.notify_all();
@@ -24,7 +26,7 @@ filewriter::~filewriter() {
 	  callback_thread.join();
 }
 
-void filewriter::perform_writes(string filename) {
+void FileWriter::perform_writes(std::string filename) {
   ofstream data_file(filename);
   ofstream metadata_file(filename + ".metadata");
 
@@ -46,7 +48,7 @@ void filewriter::perform_writes(string filename) {
 
       message_metadata metadata;
       metadata.sender = m.sender;
-      metadata.message_number = m.message_number;
+      metadata.index = m.index;
       metadata.offset = current_offset;
       metadata.length = m.length;
 
@@ -67,7 +69,7 @@ void filewriter::perform_writes(string filename) {
   }
 }
 
-void filewriter::issue_callbacks() {
+void FileWriter::issue_callbacks() {
   unique_lock<mutex> lock(pending_callbacks_mutex);
 
   while (!exit) {
@@ -81,7 +83,7 @@ void filewriter::issue_callbacks() {
   }
 }
 
-void filewriter::write_message(message m) {
+void FileWriter::write_message(message m) {
   {
     unique_lock<mutex> lock(pending_writes_mutex);
     pending_writes.push(m);

@@ -8,7 +8,7 @@
 #include <string>
 #include <thread>
 
-class filewriter {
+class FileWriter {
 public:
   const uint32_t MSG_LOCALLY_STABLE = 0x1;
   const uint32_t MSG_GLOBAL_ORDERED = 0x2;
@@ -20,7 +20,7 @@ public:
     uint64_t length;
 
     uint32_t sender;
-    uint64_t message_number;
+    uint64_t index;
   };
 
 private:
@@ -32,7 +32,7 @@ private:
     uint32_t sender;
     uint32_t padding;
 
-    uint64_t message_number;
+    uint64_t index;
 
     uint64_t offset;
     uint64_t length;
@@ -57,15 +57,15 @@ private:
   void issue_callbacks();
 
 public:
-  filewriter(std::function<void(message)> _message_written_upcall,
+  FileWriter(std::function<void(message)> _message_written_upcall,
              std::string filename);
-  ~filewriter();
+  ~FileWriter();
 
-  filewriter(filewriter &) = delete;
-  filewriter(filewriter &&) = default;
+  FileWriter(FileWriter &) = delete;
+  FileWriter(FileWriter &&) = default;
 
-  filewriter &operator=(filewriter &) = delete;
-  filewriter &operator=(filewriter &&) = default;
+  FileWriter &operator=(FileWriter &) = delete;
+  FileWriter &operator=(FileWriter &&) = default;
 
   void write_message(message m);
 };

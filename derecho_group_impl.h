@@ -39,23 +39,32 @@ size_t index_of(T container, U elem) {
 /**
  *
  * @param _members A list of node IDs of members in this group
- * @param node_rank The rank (ID) of this node in the group
+ * @param my_node_id The rank (ID) of this node in the group
  * @param _sst The SST this group will use; created by the GMS (membership
  * service) for this group.
- * @param _buffer_size The size of the message buffer to be created for RDMC
- * sending/receiving (there will be one for each sender in the group)
+ * @param _free_message_buffers Message buffers to use for RDMC sending/receiving
+ * (there must be one for each sender in the group)
+ * @param _max_payload_size The size of the largest possible message that will
+ * be sent in this group, in bytes
+ * @param _callbacks A set of functions to call when messages have reached
+ * various levels of stability
  * @param _block_size The block size to use for RDMC
- * @param _global_stability_callback The function to call locally when a message
- * is globally stable
- * @param _type The type of RDMC algorithm to use
- * @param _window_size The message window size (number of outstanding messages
- * that can be in progress at once before blocking sends).
+ * @param _window_size The window size (number of outstanding messages that can
+ * be in progress at once before blocking sends) to use when sending a stream
+ * of messages to the group; default is 3
+ * @param timeout_ms The time that this node will wait for a sender in the group
+ * to send its message before concluding that the sender has failed; default is 1ms
+ * @param _type The type of RDMC algorithm to use; default is BINOMIAL_SEND
+ * @param filename If provided, the name of the file in which to save persistent
+ * copies of all messages received. If an empty filename is given (the default),
+ * the node runs in non-persistent mode and no persistence callbacks will be
+ * issued.
  */
 template<unsigned int N>
 DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         vector<MessageBuffer>& _free_message_buffers,
-        long long unsigned int _max_payload_size, message_callback _global_stability_callback, long long unsigned int _block_size,
-        unsigned int _window_size, unsigned int timeout_ms, rdmc::send_algorithm _type) :
+        long long unsigned int _max_payload_size, CallbackSet _callbacks, long long unsigned int _block_size,
+        std::string filename, unsigned int _window_size, unsigned int timeout_ms, rdmc::send_algorithm _type) :
             members(_members),
 			num_members(members.size()),
 			member_index(index_of(members, my_node_id)),
@@ -63,12 +72,33 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 			max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
             type(_type),
 			window_size(_window_size),
-			global_stability_callback(_global_stability_callback),
+			callbacks(_callbacks),
 			rdmc_group_num_offset(0),
 			sender_timeout(timeout_ms),
-            sst(_sst) {
+            sst(_sst)
+{
 
     assert(window_size >= 1);
+
+    if (!filename.empty()) {
+		auto file_written_callback = [this](FileWriter::message m) {
+			
+			callbacks.local_persistence_callback(m.sender, m.index, m.data, m.length);
+
+			//m.data points to the char[] buffer in a MessageBuffer, so we need to find the msg_info
+			//corresponding to m and put its MessageBuffer on free_message_buffers
+            auto sequence_number = m.index * num_members + m.sender;
+            auto find_result = non_persistent_messages.find(sequence_number);
+            assert(find_result != non_persistent_messages.end());
+            msg_info& m_msg_info = find_result->second;
+            free_message_buffers.push_back(std::move(m_msg_info.message_buffer));
+            non_persistent_messages.erase(find_result);
+
+		};
+
+		file_writer = std::make_unique<FileWriter>(file_written_callback, filename);
+    }
+
     free_message_buffers.swap(_free_message_buffers);
     while(free_message_buffers.size() < window_size * num_members) {
         free_message_buffers.emplace_back(max_msg_size);
@@ -98,7 +128,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 			max_msg_size(old_group.max_msg_size),
             type(old_group.type),
 			window_size(old_group.window_size),
-			global_stability_callback(old_group.global_stability_callback),
+			callbacks(old_group.callbacks),
 			rdmc_group_num_offset(old_group.rdmc_group_num_offset + old_group.num_members),
 			total_message_buffers(old_group.total_message_buffers),
 			sender_timeout(old_group.sender_timeout),
@@ -116,8 +146,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 		msg.sender_rank = member_index;
 		msg.index = future_message_index++;
 
-		char* buf = msg.message_buffer.buffer.get();
-		header* h = (header*)buf;
+		header* h = (header*) msg.message_buffer.buffer.get();
 		future_message_index += h->pause_sending_turns;
 		
 		return std::move(msg);
@@ -177,8 +206,8 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
     vector<uint32_t> rotated_members(num_members);
 
     // create num_members groups one at a time
-    for (int i = 0; i < num_members; ++i) {
-        /* members[i] is the sender for the i^th group
+    for (int groupnum = 0; groupnum < num_members; ++groupnum) {
+        /* members[groupnum] is the sender for group `groupnum`
          * for now, we simply rotate the members vector to supply to create_group
          * even though any arrangement of receivers in the members vector is possible
          */
@@ -186,27 +215,25 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
         //std::unique_ptr<char[]> buffer(new char[max_msg_size*window_size]);
         //buffers.push_back(std::move(buffer));
         // create a memory region encapsulating the buffer
-        // std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[i].get(),max_msg_size*window_size);
+        // std::shared_ptr<rdma::memory_region> mr = std::make_shared<rdma::memory_region>(buffers[groupnum].get(),max_msg_size*window_size);
         // mrs.push_back(mr);
         for (int j = 0; j < num_members; ++j) {
-            rotated_members[j] = members[(i + j) % num_members];
+            rotated_members[j] = members[(groupnum + j) % num_members];
         }
         // When RDMC receives a message, it should store it in locally_stable_messages and update the received count
         auto rdmc_receive_handler =
-                [this, i](char* data, size_t size) {
+                [this, groupnum](char* data, size_t size) {
                     assert(this->sst);
-//                    cout << "In receive handler, SST has " << sst->get_num_rows() << " rows; member_index is " << member_index << endl;
-                    util::debug_log().log_event(std::stringstream() << "Locally received message from sender " << i << ": index = " << ((*sst)[member_index].nReceived[i]+1));
-		    // cout << "Locally received message from sender " << i << ": index = " << ((*sst)[member_index].nReceived[i]+1) << endl;
+                    util::debug_log().log_event(std::stringstream() << "Locally received message from sender " << groupnum << ": index = " << ((*sst)[member_index].nReceived[groupnum]+1));
                     lock_guard <mutex> lock (msg_state_mtx);
                     header* h = (header*) data;
-                    (*sst)[member_index].nReceived[i]++;
+                    (*sst)[member_index].nReceived[groupnum]++;
 
-					long long int index = (*sst)[member_index].nReceived[i];
-					long long int sequence_number = index* num_members + i;
+					long long int index = (*sst)[member_index].nReceived[groupnum];
+					long long int sequence_number = index* num_members + groupnum;
 
 					// Move message from current_receives to locally_stable_messages.
-					if(i == member_index){
+					if(groupnum == member_index){
 						assert(current_send);
 						locally_stable_messages[sequence_number] = std::move(*current_send);
 						current_send = std::experimental::nullopt;
@@ -217,13 +244,13 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						locally_stable_messages.emplace(sequence_number, std::move(second));
 						current_receives.erase(it);
 					}
-		    // Add empty messages to locally_stable_messages for each turn that the sender is skipping.
-		    for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
-		      index++;
-		      sequence_number+=num_members;
-		      (*sst)[member_index].nReceived[i]++;
-		      locally_stable_messages[sequence_number] = {i, index, 0, 0};
-		    }
+                    // Add empty messages to locally_stable_messages for each turn that the sender is skipping.
+                    for (unsigned int j = 0; j < h->pause_sending_turns; ++j) {
+                        index++;
+                        sequence_number+=num_members;
+                        (*sst)[member_index].nReceived[groupnum]++;
+                        locally_stable_messages[sequence_number] = {groupnum, index, 0, 0};
+                    }
 		    
                     auto* min_ptr = std::min_element(std::begin((*sst)[member_index].nReceived), &(*sst)[member_index].nReceived[num_members]);
                     int min_index = std::distance(std::begin((*sst)[member_index].nReceived), min_ptr);
@@ -246,33 +273,33 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                     //signal background writer thread
                     sender_cv.notify_all();
                 };
-        // i is the group number
+        // groupnum is the group number
         // receive destination checks if the message will exceed the buffer length at current position in which case it returns the beginning position
-        if (i == member_index) { 
+        if (groupnum == member_index) {
             //In the group in which this node is the sender, we need to signal the writer thread 
             //to continue when we see that one of our messages was delivered.
-            rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
-                    [this, i](size_t length) -> rdmc::receive_destination {
+            rdmc::create_group(groupnum + rdmc_group_num_offset, rotated_members, block_size, type,
+                    [this, groupnum](size_t length) -> rdmc::receive_destination {
 						assert(false);
 						return {nullptr, 0};
                     },
                     receive_handler_plus_notify,
                     [](boost::optional<uint32_t>) {});
         } else {
-            rdmc::create_group(i + rdmc_group_num_offset, rotated_members, block_size, type,
-                    [this, i](size_t length) -> rdmc::receive_destination {
+            rdmc::create_group(groupnum + rdmc_group_num_offset, rotated_members, block_size, type,
+                    [this, groupnum](size_t length) -> rdmc::receive_destination {
 						lock_guard <mutex> lock (msg_state_mtx);
 						assert(!free_message_buffers.empty());
 
 						msg_info msg;
-						msg.sender_rank = i;
-						msg.index = (*sst)[member_index].nReceived[i] + 1;
+						msg.sender_rank = groupnum;
+						msg.index = (*sst)[member_index].nReceived[groupnum] + 1;
 						msg.size = length;
 						msg.message_buffer = std::move(free_message_buffers.back());
 						free_message_buffers.pop_back();
 
 						rdmc::receive_destination ret{msg.message_buffer.mr, 0};
-						auto sequence_number = msg.index * num_members + i;
+						auto sequence_number = msg.index * num_members + groupnum;
 						current_receives[sequence_number] = std::move(msg);
 
 						assert(ret.mr->buffer != nullptr);
@@ -303,8 +330,16 @@ void DerechoGroup<N>::deliver_message(msg_info& msg) {
     if (msg.size > 0) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*) (buf);
-        global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
-        free_message_buffers.push_back(std::move(msg.message_buffer));
+        callbacks.global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
+        if(file_writer) {
+            //Is the ID of the sender msg.sender_rank, or members[msg.sender_rank]? What is msg.sender_rank?
+            FileWriter::message msg_for_filewriter{buf + h->header_size, msg.size, members[msg.sender_rank], msg.index};
+            file_writer->write_message(msg_for_filewriter);
+            auto sequence_number = msg.index * num_members + msg.sender_rank;
+            non_persistent_messages[sequence_number] = std::move(msg);
+        } else {
+            free_message_buffers.push_back(std::move(msg.message_buffer));
+        }
 //        cout << "Size is " << free_message_buffers.size() << ". Delivered a message, added its buffer to free_message_buffers." << endl;
     }
 }

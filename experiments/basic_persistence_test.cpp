@@ -1,18 +1,24 @@
+/*
+ * basic_persistence_test.cpp
+ *
+ *  Created on: Jun 7, 2016
+ *      Author: edward
+ */
 #include "../derecho_group.h"
 #include "../managed_group.h"
 #include "../rdmc/util.h"
 #include "../view.h"
+#include "../logger.h"
 
 #include <chrono>
 #include <ratio>
 #include <cstdlib>
 #include <iostream>
-#include <fstream>
-#include <sstream>
 #include <map>
 #include <string>
 #include <thread>
 #include <vector>
+#include <fstream>
 
 using namespace std;
 using namespace std::chrono_literals;
@@ -28,11 +34,19 @@ const size_t block_size = 1000000;
 uint32_t num_nodes, node_rank;
 map<uint32_t, std::string> node_addresses;
 
+unsigned int message_number = 0;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
 
-    managed_group->log_event(std::stringstream() << "Message " << index << " from sender " << sender_id << " delivered");
+    derecho::util::debug_log().log_event(stringstream() << "Global stability for message " << index << " from sender " << sender_id);
+
+}
+
+void persistence_callback(int sender_id, long long int index, char *data, long long int size) {
+
+    derecho::util::debug_log().log_event(stringstream() << "Persistence complete for message " << index << " from sender " << sender_id);
+
 }
 
 void send_messages(uint64_t duration){
@@ -47,6 +61,10 @@ void send_messages(uint64_t duration){
     }
 }
 
+/*
+ * This test runs a group of nodes for 30 seconds of continuous sending with no
+ * failures. It tests the bandwidth of a ManagedGroup in the "steady state."
+ */
 int main (int argc, char *argv[]) {
     srand(time(nullptr));
     query_addresses(node_addresses, node_rank);
@@ -76,32 +94,22 @@ int main (int argc, char *argv[]) {
     cout << endl << endl;
 
     string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
-    if(node_rank == num_nodes - 1){
-        cout << "Sleeping for 10 seconds..." << endl;
-        std::this_thread::sleep_for(10s);
-        cout << "Connecting to group" << endl;
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
-        managed_group->log_event("About to start sending");
-        send_messages(10 * SECOND);
-        managed_group->log_event("About to exit");
-        ofstream logfile(log_filename);
-        managed_group->print_log(logfile);
-        logfile.close();
-        exit(0);
-    }else{
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
-        cout << "Created group, waiting for others to join." << endl;
-        while(managed_group->get_members().size() < (num_nodes-1)) {
-            std::this_thread::sleep_for(1ms);
-        }
-        send_messages(30 * SECOND);
-        // managed_group->barrier_sync();
-        ofstream logfile{log_filename};
-        managed_group->print_log(logfile);
-        std::this_thread::sleep_for(5s);
-        managed_group->leave();
+    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, persistence_callback}, block_size, message_filename);
+    cout << "Created group, waiting for others to join." << endl;
+    while(managed_group->get_members().size() < (num_nodes-1)) {
+        std::this_thread::sleep_for(1ms);
     }
+    send_messages(30 * SECOND);
+    // managed_group->barrier_sync();
+    ofstream logfile(log_filename);
+    managed_group->print_log(logfile);
+
+    //Give log time to print before exiting
+    std::this_thread::sleep_for(5s);
+    managed_group->leave();
+
 }
 
 
