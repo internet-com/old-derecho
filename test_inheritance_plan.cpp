@@ -258,6 +258,18 @@ namespace rpc{
 		}
 		
 	};
+
+	struct Handlers_erased{
+		std::shared_ptr<void> erased_handlers;
+
+		template<typename... T>
+		Handlers_erased(std::unique_ptr<Handlers<T...> > h):erased_handlers(h.release()){}
+
+		template<id_t tag, typename Ret, typename... Args>
+		auto Send (Args && ... args){
+			return static_cast<RemoteInvocable<tag, Ret (Args...) >* >(erased_handlers.get())->Send(std::forward<Args>(args)...);
+		}
+	};
 }
 
 using namespace rpc;
@@ -282,14 +294,14 @@ using namespace rpc;
 #define HANDLERS_ONLY_FUNS_IMPL(count, ...) HANDLERS_ONLY_FUNS_IMPL2(count, __VA_ARGS__)
 #define HANDLERS_ONLY_FUNS(...) HANDLERS_ONLY_FUNS_IMPL(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
 
-#define handlers(n, m,a...) Handlers<HANDLERS_TYPE_ARGS(a)> n{m,HANDLERS_ONLY_FUNS(a)}
+#define handlers(m,a...) std::make_unique<Handlers<HANDLERS_TYPE_ARGS(a)> >(m,HANDLERS_ONLY_FUNS(a))
 
 int test1(int i){return i;}
 
 int main() {
 	auto msg_pair = LocalMessager::build_pair();
-	handlers(hndlers1, std::move(msg_pair.first),0,test1);
-	handlers(hndlers2, std::move(msg_pair.second),0,test1);
-	assert(hndlers1.Send<0>(1).get() == 1);
+	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1);
+	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1);
+	assert(hndlers1->Send<0>(1).get() == 1);
 	std::cout << "done" << std::endl;
 }
