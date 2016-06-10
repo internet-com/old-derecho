@@ -262,15 +262,8 @@ namespace DerechoCaller
 
 	std::atomic_int nextReplyID{0};
 
-	class QueryReplies_general {
-	public:
-		virtual void gotReply(mutils::DeserializationManager* dsm,
-							  int who, int rid, char const* const serialized_rep) = 0;
-		virtual ~QueryReplies_general(){}
-	};
-
 	template<class T>
-	class QueryReplies : public QueryReplies_general
+	class QueryReplies
 	{
 	public:
 		const int replyID = ++nextReplyID;
@@ -328,8 +321,34 @@ namespace DerechoCaller
 	using replies_mapnode = typename replies_map::mapnode;
 
 	std::mutex qr_writelock;
+
+	template<typename T>
+	using replies_ptr = std::unique_ptr<QueryReplies<T> >;
+
+	template<typename T>
+	using replies_promise = std::promise<replies_ptr<T> >;
+	template<typename T>
+	using replies_future = std::promise<replies_ptr<T> >;
+
+	struct replies_abstract{
+		virtual void gotReply(int who, int rid, std::unique_ptr<T> rep) = 0;
+	};
+	
+	template<typename T>
+	struct replies_bundle : public replies_abstract{
+		replies_ptr<T> reply {new QueryReplies<T>{}};
+		replies_promise<T> promise;
+		replies_bundle(replies_bundle&&) = default;
+		
+
+		void gotReply(int who, int rid, std::unique_ptr<T> rep){
+			reply.gotReply(who,rid,rep);
+			promise.set_value(std::move(reply));
+		}
+	};
+	
     //std::shared_ptr<replies_mapnode> qrmap{new replies_mapnode{}};
-    std::map<int,std::unique_ptr<QueryReplies_general> > qrmap;
+    std::map<int,std::unique_ptr<replies_abstract> > qrmap;
 	using qrlock = std::unique_lock<std::mutex>;
 
 	void gotReply(mutils::DeserializationManager* dsm,
@@ -361,7 +380,7 @@ namespace DerechoCaller
 
 	template<typename Q, int SIZE>
 	int _Transmit(mutils::DeserializationManager* dsm,
-                  const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr_sp, const NodeId who, const TransmitInfo<SIZE>& ti);
+                  const Handlers_t &Handlers, std::unique_ptr<replies_bundle<Q> > qr_sp, const NodeId who, const TransmitInfo<SIZE>& ti);
 
 	template<int SIZE>
 	int TransmitGroup(mutils::DeserializationManager* dsm,
@@ -378,7 +397,7 @@ namespace DerechoCaller
 	}
 
 	template<typename Q, int SIZE>
-    int TransmitQuery(mutils::DeserializationManager* dsm, const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
+    int TransmitQuery(mutils::DeserializationManager* dsm, const Handlers_t &Handlers, std::unique_ptr<replies_bundle<Q> > qr, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
         return _Transmit<Q,SIZE>(dsm,Handlers,std::move(qr), who, ti);
 	}
@@ -390,7 +409,7 @@ namespace DerechoCaller
 
 	template<typename Q, int SIZE>
 	int _Transmit(mutils::DeserializationManager* dsm,
-                  const Handlers_t &Handlers, std::unique_ptr<QueryReplies<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
+                  const Handlers_t &Handlers, std::unique_ptr<replies_bundle<Q> > qr_up, const NodeId who, const TransmitInfo<SIZE>& ti)
 	{
         auto *qr = qr_up.get();
         if (qr != nullptr){
@@ -495,8 +514,9 @@ namespace DerechoCaller
 	template <typename Q, typename... Args>
     const QueryReplies<Q>& OrderedQuery(mutils::DeserializationManager* dsm, const Handlers_t &handlers, Opcode opcode, const Args &... arg)
 	{
+
         auto *qr = new QueryReplies<Q>();
-        TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,std::unique_ptr<QueryReplies<Q> >{qr}, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
+        TransmitQuery<Q, sizeof...(Args)>(dsm,handlers,replies_ptr<Q>{qr}, WHOLEGROUP, TransmitInfo<sizeof...(Args)>(handlers,false, typeid(Q).hash_code(), true, false, 0U, opcode, arg...));
         return *qr;
 	}
 
