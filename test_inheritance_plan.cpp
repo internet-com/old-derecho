@@ -1,9 +1,19 @@
 #include <SerializationSupport.hpp>
 #include <queue>
 #include <future>
-#include <iostream>
 
 namespace rpc{
+
+	/*
+	template<typename T>
+	auto& print_all(T& t){
+		return t;
+	}
+	
+	template<typename T, typename A, typename... B>
+	auto& print_all(T& t, const A &a, const B&... b){
+		return print_all(t << a,b...);
+	}//*/
 
 	using id_t = unsigned long long;
 
@@ -52,6 +62,7 @@ namespace rpc{
 		void send(std::size_t s, char const * const v){
 			l e{*m_send};
 			cv_send->notify_all();
+			assert(s);
 			_send->emplace(s,v);
 		}
 		
@@ -66,12 +77,12 @@ namespace rpc{
 		}
 	};
 	
+	using recv_ret = std::tuple<id_t,std::size_t, char *>;
 	
 	using receive_fun_t =
-		std::function<std::pair<std::size_t, char *>
-					  (mutils::DeserializationManager* dsm,
-					   const char * recv_buf,
-					   const std::function<char* (int)>& out_alloc)>;
+		std::function<recv_ret (mutils::DeserializationManager* dsm,
+								const char * recv_buf,
+								const std::function<char* (int)>& out_alloc)>;
 	
 	
 //many versions of this class will be extended by a single Hanlders context.
@@ -102,28 +113,34 @@ namespace rpc{
 
 		using barray = char*;
 		template<typename A>
-		int to_bytes(barray& v, A && a){
-			v += mutils::to_bytes(std::forward<A>(a), v);
-			return 0;
+		std::size_t to_bytes(barray& v, A && a){
+			auto size = mutils::to_bytes(std::forward<A>(a), v);
+			v += size;
+			return size;
 		}
 		
 		std::tuple<int, char *, std::future<Ret> > Send(const std::function<char *(int)> &out_alloc,
 														  Args && ...a){
 			const auto size = (mutils::bytes_size(a) + ... + 0);
-			auto *serialized_args = out_alloc(size);
-			(void) (to_bytes(serialized_args,std::forward<Args>(a)) + ... + 0);
+			const auto serialized_args = out_alloc(size);
+			{
+				auto v = serialized_args;
+				auto check_size = (to_bytes(v,std::forward<Args>(a)) + ... + 0);
+				assert(check_size == size);
+			}
+			
 			lock_t l{ret_lock};
 			ret.emplace();
 			return std::make_tuple(size,serialized_args,ret.back().get_future());
 		}
 		
-		using recv_ret = std::pair<std::size_t, char *>;
+
 		
 		inline recv_ret receive_response(mutils::DeserializationManager* dsm, const char* response, const std::function<char*(int)>&){
 			lock_t l{ret_lock};
 			ret.front().set_value(*mutils::from_bytes<Ret>(dsm,response));
 			ret.pop();
-			return recv_ret{0,nullptr};
+			return recv_ret{0,0,nullptr};
 		}
 
 		
@@ -144,14 +161,14 @@ namespace rpc{
 			const auto result_size = mutils::bytes_size(result);
 			auto out = out_alloc(result_size);
 			mutils::to_bytes(result,out);
-			return recv_ret{mutils::bytes_size(result),out};
+			return recv_ret{reply_id,mutils::bytes_size(result),out};
 		}
 		
 		inline recv_ret receive_call(std::true_type const * const, mutils::DeserializationManager* dsm,
 							  const char * recv_buf,
 							  const std::function<char* (int)>&){
 			f(*deserialize<Args>(dsm,recv_buf)... );
-			return recv_ret{0,nullptr};
+			return recv_ret{reply_id,0,nullptr};
 		}
 
 		inline recv_ret receive_call(mutils::DeserializationManager* dsm,
@@ -212,13 +229,16 @@ namespace rpc{
 				auto size = recv_pair.first;
 				assert(size);
 				assert(size >= sizeof(id_t));
-				assert(((id_t*)buf)[0]);
-				auto reply_pair = receivers->at(((id_t*)buf)[0])(&dsm,buf + sizeof(id_t), extra_alloc);
-				auto * reply_buf = reply_pair.second;
+				auto indx = ((id_t*)buf)[0];
+				assert(indx);
+				auto reply_tuple = receivers->at(indx)(&dsm,buf + sizeof(id_t), extra_alloc);
+				auto * reply_buf = std::get<2>(reply_tuple);
 				if (reply_buf){
 					reply_buf -= sizeof(id_t);
-					((id_t*)reply_buf)[0] = reply_pair.first;
-					lm.send(reply_pair.first,reply_buf);
+					const auto id = std::get<0>(reply_tuple);
+					const auto size = std::get<1>(reply_tuple);
+					((id_t*)reply_buf)[0] = id;
+					lm.send(size + sizeof(id_t),reply_buf);
 				}
 			}
 		}
