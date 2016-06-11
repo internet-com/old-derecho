@@ -15,9 +15,9 @@ namespace rpc{
 		return print_all(t << a,b...);
 	}//*/
 
-	using id_t = unsigned long long;
+	using Opcode = unsigned long long;
 
-	template<id_t, typename>
+	template<Opcode, typename>
 	struct RemoteInvocable;
 	
 	class LocalMessager{
@@ -77,7 +77,7 @@ namespace rpc{
 		}
 	};
 	
-	using recv_ret = std::tuple<id_t,std::size_t, char *>;
+	using recv_ret = std::tuple<Opcode,std::size_t, char *>;
 	
 	using receive_fun_t =
 		std::function<recv_ret (mutils::DeserializationManager* dsm,
@@ -88,15 +88,15 @@ namespace rpc{
 //many versions of this class will be extended by a single Hanlders context.
 //each specific instance of this class provies a mechanism for communicating with
 //remote sites.
-	template<id_t tag, typename Ret, typename... Args>
+	template<Opcode tag, typename Ret, typename... Args>
 	struct RemoteInvocable<tag, Ret (Args...)> {
 		
 		using f_t = Ret (*) (Args...);
 		const f_t f;
-		static const id_t invoke_id;
-		static const id_t reply_id;
+		static const Opcode invoke_id;
+		static const Opcode reply_id;
 		
-		RemoteInvocable(std::map<id_t,receive_fun_t> &receivers, Ret (*f) (Args...)):f(f){
+		RemoteInvocable(std::map<Opcode,receive_fun_t> &receivers, Ret (*f) (Args...)):f(f){
 			receivers[invoke_id] = [this](auto... a){return receive_call(a...);};
 			receivers[reply_id] = [this](auto... a){return receive_response(a...);};
 		}
@@ -107,7 +107,7 @@ namespace rpc{
 
 		//use this from within a derived class to receive precisely this RemoteInvocable
 		//(this way, all RemoteInvocable methods do not need to worry about type collisions)
-		inline RemoteInvocable& handler(std::integral_constant<id_t, tag> const * const, const Args & ...) {
+		inline RemoteInvocable& handler(std::integral_constant<Opcode, tag> const * const, const Args & ...) {
 			return *this;
 		}
 
@@ -179,29 +179,39 @@ namespace rpc{
 		}
 	};
 	
-	template<id_t tag, typename Ret, typename... Args>
-	const id_t RemoteInvocable<tag, Ret (Args...)>::invoke_id{mutils::gensym()};
+	template<Opcode tag, typename Ret, typename... Args>
+	const Opcode RemoteInvocable<tag, Ret (Args...)>::invoke_id{mutils::gensym()};
 
-	template<id_t tag, typename Ret, typename... Args>
-	const id_t RemoteInvocable<tag, Ret (Args...)>::reply_id{mutils::gensym()};
+	template<Opcode tag, typename Ret, typename... Args>
+	const Opcode RemoteInvocable<tag, Ret (Args...)>::reply_id{mutils::gensym()};
 	
 	template<typename...>
 	struct RemoteInvocablePairs;
 	
-	template<>
-	struct RemoteInvocablePairs<> {
+	template<Opcode id, typename Q>
+	struct RemoteInvocablePairs<std::integral_constant<Opcode, id>,Q>
+		: public RemoteInvocable<id,Q> {
+		RemoteInvocablePairs(std::map<Opcode,receive_fun_t> &receivers, Q q)
+			:RemoteInvocable<id,Q>(receivers, q){}
 		
+		using RemoteInvocable<id,Q>::handler;
 	};
 	
-//id better be an integral constant of id_t
-	template<id_t id, typename Q,typename... rest>
-	struct RemoteInvocablePairs<std::integral_constant<id_t, id>, Q, rest...> :
+//id better be an integral constant of Opcode
+	template<Opcode id, typename Q,typename... rest>
+	struct RemoteInvocablePairs<std::integral_constant<Opcode, id>, Q, rest...> :
 		public RemoteInvocable<id,Q>,
 		public RemoteInvocablePairs<rest...> {
+
+	public:
+		
 		template<typename... T>
-		RemoteInvocablePairs(std::map<id_t,receive_fun_t> &receivers, Q q, T && ... t)
+		RemoteInvocablePairs(std::map<Opcode,receive_fun_t> &receivers, Q q, T && ... t)
 			:RemoteInvocable<id,Q>(receivers, q),
-			RemoteInvocablePairs<rest...>(std::forward<T>(t)...){}
+			RemoteInvocablePairs<rest...>(receivers,std::forward<T>(t)...){}
+
+		using RemoteInvocable<id,Q>::handler;
+		using RemoteInvocablePairs<rest...>::handler;
 	};
 	
 	template<typename... Fs>
@@ -211,13 +221,13 @@ namespace rpc{
 		LocalMessager lm;
 		bool alive{true};
 		//constructed *before* initialization
-		std::unique_ptr<std::map<id_t, receive_fun_t> > receivers;
+		std::unique_ptr<std::map<Opcode, receive_fun_t> > receivers;
 		//constructed *after* initialization
 		std::unique_ptr<std::thread> receiver;
 		mutils::DeserializationManager dsm{{}};
 		
 		static char* extra_alloc (int i){
-			return (char*) calloc(i + sizeof(id_t),sizeof(char)) + sizeof(id_t);
+			return (char*) calloc(i + sizeof(Opcode),sizeof(char)) + sizeof(Opcode);
 		}
 		
 	public:
@@ -228,17 +238,17 @@ namespace rpc{
 				auto *buf = recv_pair.second;
 				auto size = recv_pair.first;
 				assert(size);
-				assert(size >= sizeof(id_t));
-				auto indx = ((id_t*)buf)[0];
+				assert(size >= sizeof(Opcode));
+				auto indx = ((Opcode*)buf)[0];
 				assert(indx);
-				auto reply_tuple = receivers->at(indx)(&dsm,buf + sizeof(id_t), extra_alloc);
+				auto reply_tuple = receivers->at(indx)(&dsm,buf + sizeof(Opcode), extra_alloc);
 				auto * reply_buf = std::get<2>(reply_tuple);
 				if (reply_buf){
-					reply_buf -= sizeof(id_t);
+					reply_buf -= sizeof(Opcode);
 					const auto id = std::get<0>(reply_tuple);
 					const auto size = std::get<1>(reply_tuple);
-					((id_t*)reply_buf)[0] = id;
-					lm.send(size + sizeof(id_t),reply_buf);
+					((Opcode*)reply_buf)[0] = id;
+					lm.send(size + sizeof(Opcode),reply_buf);
 				}
 			}
 		}
@@ -264,18 +274,38 @@ namespace rpc{
 			receiver->join();
 		}
 		
-		template<id_t tag, typename... Args>
+		template<Opcode tag, typename... Args>
 			auto Send(Args && ... args){
-			constexpr std::integral_constant<id_t, tag>* choice{nullptr};
+			constexpr std::integral_constant<Opcode, tag>* choice{nullptr};
 			auto &hndl = this->handler(choice,args...);
 			auto sent_tuple = hndl.Send(extra_alloc,
 										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
-			char * buf = std::get<1>(sent_tuple) - sizeof(id_t);
-			((id_t*)buf)[0] = hndl.invoke_id;
-			lm.send(used + sizeof(id_t),buf);
+			char * buf = std::get<1>(sent_tuple) - sizeof(Opcode);
+			((Opcode*)buf)[0] = hndl.invoke_id;
+			lm.send(used + sizeof(Opcode),buf);
 			return std::move(std::get<2>(sent_tuple));
 		}
+
+		/*
+		template <typename... Args>
+		void OrderedSend(Opcode opcode, const Args &... arg);
+
+	template <typename... Args>
+    void PaxosSend(Opcode opcode, const Args &... arg);
+
+	template <typename... Args>
+    void P2PSend(NodeId who, Opcode opcode, const Args &... arg);
+
+	template <typename Q, typename... Args>
+    const QueryReplies<Q>& OrderedQuery(Opcode opcode, const Args &... arg);
+
+	template <typename Q, typename... Args>
+    const QueryReplies<Q>& PaxosQuery(Opcode opcode, const Args &... arg);
+
+	template <typename Q, typename... Args>
+    const QueryReplies<Q>& P2PQuery(NodeId who, Opcode opcode, const Args &... arg);
+		*/
 		
 	};
 
@@ -285,7 +315,7 @@ namespace rpc{
 		template<typename... T>
 		Handlers_erased(std::unique_ptr<Handlers<T...> > h):erased_handlers(h.release()){}
 
-		template<id_t tag, typename Ret, typename... Args>
+		template<Opcode tag, typename Ret, typename... Args>
 		auto Send (Args && ... args){
 			return static_cast<RemoteInvocable<tag, Ret (Args...) >* >(erased_handlers.get())->Send(std::forward<Args>(args)...);
 		}
@@ -295,11 +325,11 @@ namespace rpc{
 using namespace rpc;
 
 //handles up to 5 args
-#define HANDLERS_TYPE_ARGS2(a, b) std::integral_constant<rpc::id_t, a>, decltype(b)
-#define HANDLERS_TYPE_ARGS4(a, b,c...) std::integral_constant<rpc::id_t, a>, decltype(b), HANDLERS_TYPE_ARGS2(c)
-#define HANDLERS_TYPE_ARGS6(a, b,c...) std::integral_constant<rpc::id_t, a>, decltype(b), HANDLERS_TYPE_ARGS4(c)
-#define HANDLERS_TYPE_ARGS8(a, b,c...) std::integral_constant<rpc::id_t, a>, decltype(b), HANDLERS_TYPE_ARGS6(c)
-#define HANDLERS_TYPE_ARGS10(a, b,c...) std::integral_constant<rpc::id_t, a>, decltype(b), HANDLERS_TYPE_ARGS8(c)
+#define HANDLERS_TYPE_ARGS2(a, b) std::integral_constant<rpc::Opcode, a>, decltype(b)
+#define HANDLERS_TYPE_ARGS4(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS2(c)
+#define HANDLERS_TYPE_ARGS6(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS4(c)
+#define HANDLERS_TYPE_ARGS8(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS6(c)
+#define HANDLERS_TYPE_ARGS10(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS8(c)
 #define HANDLERS_TYPE_ARGS_IMPL2(count, ...) HANDLERS_TYPE_ARGS ## count (__VA_ARGS__)
 #define HANDLERS_TYPE_ARGS_IMPL(count, ...) HANDLERS_TYPE_ARGS_IMPL2(count, __VA_ARGS__)
 #define HANDLERS_TYPE_ARGS(...) HANDLERS_TYPE_ARGS_IMPL(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
@@ -318,10 +348,13 @@ using namespace rpc;
 
 int test1(int i){return i;}
 
+auto test2(int i, double d, char c){return i + d + c;}
+
 int main() {
 	auto msg_pair = LocalMessager::build_pair();
-	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1);
-	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1);
+	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2);
+	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2);
 	assert(hndlers1->Send<0>(1).get() == 1);
+	assert(hndlers1->Send<0>(1,2,3).get() == 6);
 	std::cout << "done" << std::endl;
 }
