@@ -4,6 +4,16 @@
 
 namespace rpc{
 
+	template<typename t>
+	auto& operator<<(std::ostream& out, const std::vector<t>& v){
+		out << "{";
+		for (const auto &e : v){
+			out << e << ", ";
+		}
+		out << "}";
+		return out;
+	}
+
 	/*
 	template<typename T>
 	auto& print_all(T& t){
@@ -112,8 +122,10 @@ namespace rpc{
 		}
 
 		using barray = char*;
+		using cbarray = const char*;
 		template<typename A>
 		std::size_t to_bytes(barray& v, A && a){
+			std::cout << "serializing::" << (void*) v << "::" << a << std::endl;
 			auto size = mutils::to_bytes(std::forward<A>(a), v);
 			v += size;
 			return size;
@@ -145,11 +157,12 @@ namespace rpc{
 
 		
 		template<typename _Type>
-		inline auto deserialize(mutils::DeserializationManager *dsm, const char * mut_in){
+		inline auto deserialize(mutils::DeserializationManager *dsm, cbarray& mut_in){
 			using Type = std::decay_t<_Type>;
 			auto ds = mutils::from_bytes<Type>(dsm,mut_in);
 			const auto size = mutils::bytes_size(*ds);
 			mut_in += size;
+			std::cout << "deserializing::" << (void*)mut_in << "::" << *ds << std::endl;
 			return ds;
 		}
 		
@@ -348,13 +361,21 @@ using namespace rpc;
 
 int test1(int i){return i;}
 
-auto test2(int i, double d, char c){return i + d + c;}
+auto test2(int i, double d, Opcode c){
+	std::cout << "called with " << i << "::" << d << "::" << (int)c  << std::endl;
+	return i + d + c;
+}
+
+auto test3(const std::vector<Opcode> & oc){
+	return oc.front();
+}
 
 int main() {
 	auto msg_pair = LocalMessager::build_pair();
-	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2);
-	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2);
+	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2,0,test3);
+	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2,0,test3);
 	assert(hndlers1->Send<0>(1).get() == 1);
 	assert(hndlers1->Send<0>(1,2,3).get() == 6);
+	assert(hndlers1->Send<0>({1,2,3}).get() == 1);
 	std::cout << "done" << std::endl;
 }
