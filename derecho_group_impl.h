@@ -81,36 +81,8 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     assert(window_size >= 1);
 
     if (!filename.empty()) {
-		auto file_written_callback = [this](FileWriter::message m) {
-			
-			//m.sender is an ID, not a rank
-		    int sender_rank;
-		    for(sender_rank = 0; sender_rank < num_members; ++sender_rank) {
-		        if(members[sender_rank] == m.sender)
-		            break;
-		    }
-			callbacks.local_persistence_callback(sender_rank, m.index, m.data, m.length);
-
-			//m.data points to the char[] buffer in a MessageBuffer, so we need to find the msg_info
-			//corresponding to m and put its MessageBuffer on free_message_buffers
-            auto sequence_number = m.index * num_members + sender_rank;
-            auto find_result = non_persistent_messages.find(sequence_number);
-            cout << "In file_written_callback, m.sender=" << m.sender << ", m.index=" << m.index << ", m.length=" << m.length << ", sequence_number=" << sequence_number << ", non_persistent_messages = {";
-            for(const auto& entry : non_persistent_messages) {
-                cout << "\"" << entry.first << "\" -> \"";
-                cout << "{sender_rank=" << entry.second.sender_rank << ", index=" << entry.second.index << ", size=" << entry.second.size << ", buffer=" << (void*) entry.second.message_buffer.buffer.get() << "}";
-                cout << "\", ";
-            }
-            cout << "}" << endl;
-            assert(find_result != non_persistent_messages.end());
-            Message& m_msg_info = find_result->second;
-            assert(m_msg_info.message_buffer.mr != nullptr);
-            free_message_buffers.push_back(std::move(m_msg_info.message_buffer));
-            non_persistent_messages.erase(find_result);
-
-		};
 		cout << "Constructing file_writer; this = " << this << endl;
-		file_writer = std::make_unique<FileWriter>(file_written_callback, filename);
+		file_writer = std::make_unique<FileWriter>(make_file_written_callback(), filename);
     }
 
     free_message_buffers.swap(_free_message_buffers);
@@ -208,12 +180,56 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 		next_send = convert_msg_info(*old_group.next_send);
 	}
 
+	//If the old group was using persistence, we should transfer its state to the new group
+	file_writer = std::move(old_group.file_writer);
+	if(file_writer) {
+	    file_writer->set_message_written_upcall(make_file_written_callback());
+	}
+	for(auto& entry : old_group.non_persistent_messages) {
+	    non_persistent_messages.emplace(entry.first, convert_msg_info(entry.second));
+	}
+	old_group.non_persistent_messages.clear();
 	initialize_sst_row();
 	create_rdmc_groups();
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
 //    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+}
+
+
+template<unsigned int N>
+std::function<void(FileWriter::message)> DerechoGroup<N>::make_file_written_callback() {
+    return [this](FileWriter::message m) {
+        //m.sender is an ID, not a rank
+        int sender_rank;
+        for(sender_rank = 0; sender_rank < num_members; ++sender_rank) {
+            if(members[sender_rank] == m.sender)
+            break;
+        }
+        callbacks.local_persistence_callback(sender_rank, m.index, m.data, m.length);
+
+        //m.data points to the char[] buffer in a MessageBuffer, so we need to find the msg_info
+        //corresponding to m and put its MessageBuffer on free_message_buffers
+        auto sequence_number = m.index * num_members + sender_rank;
+        {
+            lock_guard<mutex> lock(msg_state_mtx);
+            auto find_result = non_persistent_messages.find(sequence_number);
+//            cout << "In file_written_callback, m.sender=" << m.sender << ", m.index=" << m.index << ", m.length=" << m.length << ", sequence_number=" << sequence_number << ", non_persistent_messages = {";
+//            for(const auto& entry : non_persistent_messages) {
+//                cout << "\"" << entry.first << "\" -> \"";
+//                cout << "{sender_rank=" << entry.second.sender_rank << ", index=" << entry.second.index << ", size=" << entry.second.size << ", buffer=" << (void*) entry.second.message_buffer.buffer.get() << "}";
+//                cout << "\", ";
+//            }
+//            cout << "}" << endl;
+            assert(find_result != non_persistent_messages.end());
+            Message& m_msg_info = find_result->second;
+//            cout << "Putting MessageBuffer onto free_message_buffers: buffer=" << (void*) m_msg_info.message_buffer.buffer.get() << ", mr=" << m_msg_info.message_buffer.mr.get() << endl;
+            free_message_buffers.push_back(std::move(m_msg_info.message_buffer));
+            non_persistent_messages.erase(find_result);
+        }
+
+    };
 }
 
 template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {

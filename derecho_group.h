@@ -155,6 +155,7 @@ class DerechoGroup {
         std::map<long long int, Message> locally_stable_messages;
 		/** Messages that are currently being written to persistent storage */
 		std::map<long long int, Message> non_persistent_messages;
+
         long long int next_message_to_deliver = 0;
         std::mutex msg_state_mtx;
         std::condition_variable sender_cv;
@@ -185,6 +186,7 @@ class DerechoGroup {
         /** Checks for failures when a sender reaches its timeout. This function implements the timeout thread. */
         void check_failures_loop();
 
+        std::function<void(FileWriter::message)> make_file_written_callback();
 		void create_rdmc_groups();
 		void initialize_sst_row();
 		void register_predicates();

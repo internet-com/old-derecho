@@ -36,6 +36,10 @@ FileWriter::~FileWriter() {
         callback_thread.join();
 }
 
+void FileWriter::set_message_written_upcall(std::function<void(message)> _message_written_upcall) {
+    message_written_upcall = _message_written_upcall;
+}
+
 void FileWriter::perform_writes(std::string filename) {
 //    std::cout << "perform_writes thread forked" << std::endl;
   ofstream data_file(filename);
@@ -80,6 +84,7 @@ void FileWriter::perform_writes(std::string filename) {
       pending_callbacks_cv.notify_all();
     }
   }
+//  std::cout << "perform_writes thread shutting down" << std::endl;
 }
 
 void FileWriter::issue_callbacks() {
@@ -94,9 +99,12 @@ void FileWriter::issue_callbacks() {
 //        std::cout << "FileWriter woke up and is about to issue a callback" << std::endl;
       auto callback = pending_callbacks.front();
       pending_callbacks.pop();
+      lock.unlock();
       callback();
+      lock.lock();
     }
   }
+//  std::cout << "issue_callbacks thread shutting down" << std::endl;
 }
 
 void FileWriter::write_message(message m) {

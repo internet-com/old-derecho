@@ -41,7 +41,7 @@ private:
     uint64_t length;
   };
 
-  const std::function<void(message)> message_written_upcall;
+  std::function<void(message)> message_written_upcall;
 
 
   std::mutex pending_writes_mutex;
@@ -71,6 +71,7 @@ public:
   FileWriter &operator=(FileWriter &) = delete;
   FileWriter &operator=(FileWriter &&) = default;
 
+  void set_message_written_upcall(std::function<void(message)> _message_written_upcall);
   void write_message(message m);
 };
 
