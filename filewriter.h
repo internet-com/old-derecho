@@ -1,3 +1,4 @@
+#pragma once
 
 #include <atomic>
 #include <condition_variable>
@@ -7,6 +8,8 @@
 #include <queue>
 #include <string>
 #include <thread>
+
+namespace derecho {
 
 class FileWriter {
 public:
@@ -40,18 +43,19 @@ private:
 
   const std::function<void(message)> message_written_upcall;
 
-  std::thread writer_thread;
-  std::thread callback_thread;
 
-  std::queue<message> pending_writes;
   std::mutex pending_writes_mutex;
   std::condition_variable pending_writes_cv;
+  std::queue<message> pending_writes;
 
-  std::queue<std::function<void()>> pending_callbacks;
   std::mutex pending_callbacks_mutex;
   std::condition_variable pending_callbacks_cv;
+  std::queue<std::function<void()>> pending_callbacks;
 
-  std::atomic<bool> exit;
+  bool exit;
+
+  std::thread writer_thread;
+  std::thread callback_thread;
 
   void perform_writes(std::string filename);
   void issue_callbacks();
@@ -69,3 +73,5 @@ public:
 
   void write_message(message m);
 };
+
+}

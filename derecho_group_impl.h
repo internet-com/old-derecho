@@ -83,19 +83,33 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     if (!filename.empty()) {
 		auto file_written_callback = [this](FileWriter::message m) {
 			
-			callbacks.local_persistence_callback(m.sender, m.index, m.data, m.length);
+			//m.sender is an ID, not a rank
+		    int sender_rank;
+		    for(sender_rank = 0; sender_rank < num_members; ++sender_rank) {
+		        if(members[sender_rank] == m.sender)
+		            break;
+		    }
+			callbacks.local_persistence_callback(sender_rank, m.index, m.data, m.length);
 
 			//m.data points to the char[] buffer in a MessageBuffer, so we need to find the msg_info
 			//corresponding to m and put its MessageBuffer on free_message_buffers
-            auto sequence_number = m.index * num_members + m.sender;
+            auto sequence_number = m.index * num_members + sender_rank;
             auto find_result = non_persistent_messages.find(sequence_number);
+            cout << "In file_written_callback, m.sender=" << m.sender << ", m.index=" << m.index << ", m.length=" << m.length << ", sequence_number=" << sequence_number << ", non_persistent_messages = {";
+            for(const auto& entry : non_persistent_messages) {
+                cout << "\"" << entry.first << "\" -> \"";
+                cout << "{sender_rank=" << entry.second.sender_rank << ", index=" << entry.second.index << ", size=" << entry.second.size << ", buffer=" << (void*) entry.second.message_buffer.buffer.get() << "}";
+                cout << "\", ";
+            }
+            cout << "}" << endl;
             assert(find_result != non_persistent_messages.end());
-            msg_info& m_msg_info = find_result->second;
+            Message& m_msg_info = find_result->second;
+            assert(m_msg_info.message_buffer.mr != nullptr);
             free_message_buffers.push_back(std::move(m_msg_info.message_buffer));
             non_persistent_messages.erase(find_result);
 
 		};
-
+		cout << "Constructing file_writer; this = " << this << endl;
 		file_writer = std::make_unique<FileWriter>(file_written_callback, filename);
     }
 
@@ -110,12 +124,13 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 
 	initialize_sst_row();
 	create_rdmc_groups();
+	cout << "About to register predicates, this = " << this << endl;
 	register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
 
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
 
-//    cout << "DerechoGroup: Registered predicates and started thread" << endl;
+    cout << "DerechoGroup: Registered predicates and started thread. this = " << this << endl;
 }
 
 template<unsigned int N>
@@ -142,7 +157,7 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 
 	// Convience function that takes a msg_info from the old group and
 	// produces one suitable for this group.
-	auto convert_msg_info = [this](msg_info& msg){
+	auto convert_msg_info = [this](Message& msg){
 		msg.sender_rank = member_index;
 		msg.index = future_message_index++;
 
@@ -230,7 +245,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
                     (*sst)[member_index].nReceived[groupnum]++;
 
 					long long int index = (*sst)[member_index].nReceived[groupnum];
-					long long int sequence_number = index* num_members + groupnum;
+					long long int sequence_number = index * num_members + groupnum;
 
 					// Move message from current_receives to locally_stable_messages.
 					if(groupnum == member_index){
@@ -240,8 +255,8 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 					}else{
 						auto it = current_receives.find(sequence_number);
 						assert(it != current_receives.end());
-						auto& second = it->second;
-						locally_stable_messages.emplace(sequence_number, std::move(second));
+						auto& msginfo = it->second;
+						locally_stable_messages.emplace(sequence_number, std::move(msginfo));
 						current_receives.erase(it);
 					}
                     // Add empty messages to locally_stable_messages for each turn that the sender is skipping.
@@ -291,7 +306,7 @@ template <unsigned int N> void DerechoGroup<N>::create_rdmc_groups() {
 						lock_guard <mutex> lock (msg_state_mtx);
 						assert(!free_message_buffers.empty());
 
-						msg_info msg;
+						Message msg;
 						msg.sender_rank = groupnum;
 						msg.index = (*sst)[member_index].nReceived[groupnum] + 1;
 						msg.size = length;
@@ -326,17 +341,17 @@ void DerechoGroup<N>::initialize_sst_row(){
 }
 
 template<unsigned int N>
-void DerechoGroup<N>::deliver_message(msg_info& msg) {
+void DerechoGroup<N>::deliver_message(Message& msg) {
     if (msg.size > 0) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*) (buf);
         callbacks.global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
         if(file_writer) {
-            //Is the ID of the sender msg.sender_rank, or members[msg.sender_rank]? What is msg.sender_rank?
-            FileWriter::message msg_for_filewriter{buf + h->header_size, msg.size, members[msg.sender_rank], msg.index};
-            file_writer->write_message(msg_for_filewriter);
+            //msg.sender_rank is the 0-indexed rank within this group, but FileWriter::message needs the sender's globally unique ID
+            FileWriter::message msg_for_filewriter{buf + h->header_size, msg.size, members[msg.sender_rank], (uint64_t) msg.index};
             auto sequence_number = msg.index * num_members + msg.sender_rank;
-            non_persistent_messages[sequence_number] = std::move(msg);
+            non_persistent_messages.emplace(sequence_number, std::move(msg));
+            file_writer->write_message(msg_for_filewriter);
         } else {
             free_message_buffers.push_back(std::move(msg.message_buffer));
         }
@@ -401,7 +416,7 @@ void DerechoGroup<N>::register_predicates(){
             long long int least_undelivered_seq_num = locally_stable_messages.begin()->first;
             if (least_undelivered_seq_num <= min_stable_num) {
                 util::debug_log().log_event(std::stringstream() << "Can deliver a locally stable message: min_stable_num=" << min_stable_num << " and least_undelivered_seq_num=" << least_undelivered_seq_num);
-                msg_info& msg = locally_stable_messages.begin()->second;
+                Message& msg = locally_stable_messages.begin()->second;
                 deliver_message(msg);
                 sst[member_index].delivered_num = least_undelivered_seq_num;
 //                sst.put (offsetof (DerechoRow<N>, delivered_num), sizeof (least_undelivered_seq_num));
@@ -468,11 +483,12 @@ void DerechoGroup<N>::wedge() {
 
 template<unsigned int N>
 void DerechoGroup<N>::send_loop() {
+    cout << "send_loop thread forked" << endl;
     auto should_send = [&]() {
         if (pending_sends.empty()) {
             return false;
         }
-        msg_info& msg = pending_sends.front ();
+        Message& msg = pending_sends.front ();
         if ((*sst)[member_index].nReceived[member_index] < msg.index-1) {
             return false;
         }
@@ -508,6 +524,7 @@ void DerechoGroup<N>::send_loop() {
 
 template<unsigned int N>
 void DerechoGroup<N>::check_failures_loop() {
+    cout << "Check failures thread forked" << endl;
     while(!thread_shutdown) {
            std::this_thread::sleep_for(milliseconds(sender_timeout));
            if(sst)
@@ -533,7 +550,7 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
 	if(free_message_buffers.empty()) return nullptr;
 
 	// Create new msg_info
-	msg_info msg;
+	Message msg;
 	msg.sender_rank = member_index;
 	msg.index = future_message_index;
 	msg.size = msg_size;

@@ -97,11 +97,12 @@ int main (int argc, char *argv[]) {
 
     string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
 
-    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
+    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, derecho::message_callback{}}, block_size);
     cout << "Created group, waiting for others to join." << endl;
     while(managed_group->get_members().size() < (num_nodes-1)) {
         std::this_thread::sleep_for(1ms);
     }
+    cout << "Starting to send messages." << endl;
     send_messages(30 * SECOND);
     // managed_group->barrier_sync();
     ofstream logfile(log_filename);

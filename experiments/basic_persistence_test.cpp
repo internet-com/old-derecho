@@ -101,6 +101,7 @@ int main (int argc, char *argv[]) {
     while(managed_group->get_members().size() < (num_nodes-1)) {
         std::this_thread::sleep_for(1ms);
     }
+    cout << "Starting to send messages." << endl;
     send_messages(30 * SECOND);
     // managed_group->barrier_sync();
     ofstream logfile(log_filename);
