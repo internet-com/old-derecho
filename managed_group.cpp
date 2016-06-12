@@ -132,6 +132,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     });
 
     register_predicates();
+    log_event("Starting predicate evaluation");
 	curr_view->gmsSST->start_predicate_evaluation();
 
 	// curr_view->rdmc_sending_group->debug_print();
@@ -430,7 +431,7 @@ void ManagedGroup::setup_sst_and_rdmc(vector<MessageBuffer>& message_buffers, lo
         unsigned int window_size, rdmc::send_algorithm type) {
 
     curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(curr_view->members, curr_view->members[curr_view->my_rank],
-            [this](const uint32_t node_id){report_failure(node_id);});
+            [this](const uint32_t node_id){report_failure(node_id);}, false);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
@@ -455,7 +456,7 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //    std::map<node_id_t, ip_addr> new_member_map {{newView.members[newView.my_rank], newView.member_ips[newView.my_rank]}, {newView.members.back(), newView.member_ips.back()}};
 //    sst::tcp::tcp_initialize(newView.members[newView.my_rank], new_member_map);
     newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank],
-            [this](const uint32_t node_id){report_failure(node_id);});
+            [this](const uint32_t node_id){report_failure(node_id);}, false);
     newView.rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(newView.members, newView.members[newView.my_rank],
             newView.gmsSST, std::move(*curr_view->rdmc_sending_group));
 	curr_view->rdmc_sending_group.reset();
@@ -734,6 +735,7 @@ void ManagedGroup::report_failure(const node_id_t who) {
 }
 
 void ManagedGroup::leave() {
+    lock_guard_t lock(view_mutex);
     log_event("Cleanly leaving the group.");
     curr_view->rdmc_sending_group->wedge();
     curr_view->gmsSST->delete_all_predicates();
