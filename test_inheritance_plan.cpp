@@ -1,6 +1,7 @@
 #include <SerializationSupport.hpp>
 #include <queue>
 #include <future>
+#include <FunctionalMap.hpp>
 
 namespace rpc{
 
@@ -96,7 +97,49 @@ namespace rpc{
 								const Node_id &,
 								const char * recv_buf,
 								const std::function<char* (int)>& out_alloc)>;
-	
+
+	template<typename T>
+	using reply_map = std::map<Node_id,std::future<T> >;
+
+	template<typename T>
+	struct PendingResults{
+		std::promise<std::unique_ptr<reply_map<T> > > pending_map;
+		std::map<Node_id,std::promise<T> > populated_promises;
+		
+		void fulfill_map(const who_t &who){
+			std::unique_ptr<reply_map<T> > to_add{new reply_map<T>{}};
+			for (const auto &e : who){
+				to_add->emplace(e, populated_promises[e].get_future());
+			}
+			pending_map.set_value(std::move(to_add));
+		}
+
+		std::promise<T>& receive_message(const Node_id& nid){
+			return populated_promises.at(nid);
+		}
+	};
+
+	template<typename T>
+	struct QueryResults{
+		using map_fut = std::future<std::unique_ptr<reply_map<T> > >;
+		using map = reply_map<T>;
+
+		map_fut pending_rmap;
+		map rmap;
+
+		bool valid(const Node_id &nid){
+			return (rmap.size() > 0) && rmap.at(nid).valid();
+		}
+
+		auto get(const Node_id &nid){
+			if (rmap.size() == 0){
+				assert(pending_rmap.valid());
+				rmap = std::move(pending_rmap.get());
+			}
+			assert(rmap.at(nid).valid());
+			return rmap.at(nid).get();
+		}
+	};
 	
 //many versions of this class will be extended by a single Hanlders context.
 //each specific instance of this class provies a mechanism for communicating with
@@ -325,8 +368,8 @@ namespace rpc{
 			using namespace std::placeholders;
 			constexpr std::integral_constant<Opcode, tag>* choice{nullptr};
 			auto &hndl = this->handler(choice,args...);
-			auto sent_tuple = std::move(hndl.Send(who,std::bind(extra_alloc,send_replies,_1),
-												  std::forward<Args>(args)...));
+			auto sent_tuple = hndl.Send(who,std::bind(extra_alloc,send_replies,_1),
+										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
 			char * buf = std::get<1>(sent_tuple) - header_space(send_replies);
 			((Opcode*)buf)[0] = hndl.invoke_id;
@@ -408,10 +451,35 @@ auto test3(const std::vector<Opcode> & oc){
 
 int main() {
 	auto msg_pair = LocalMessager::build_pair();
+	HANDLERS[SET_1] += something_here;
 	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2,0,test3);
+	/*
+	handlers1 = {0,test1} + {0,test2} + {0,test3};
+	HANDLERS[0] += test1;
+	HANDLERS[0] += test2;
+	HANDLERS[0] += test3;*/
 	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2,0,test3);
 	who_t other;
 	other.emplace_back(0);
+
+	/*
+	OrderedQuery<Opcode>(ALL,arguments...) --> future<map<Node_id,std::future<Return> > >; //make a type alias that wraps this
+
+	P2PQuery<Opcode>(who,arguments...) --> std::future<Return>; //simple case
+
+	P2PSend<Opcode>(who,arguments...) --> void; //simple case
+
+	OrderedSend<Opcode>(ALL,arguments...) --> void;
+	OrderedSend<Opcode>(arguments...) --> void; //assume "ALL"
+
+	auto &returned_map = hndlers1->Send<0>(other,1);
+
+	for (auto &pair : returned_map){
+		if (pair.second.valid())
+			break; //found it!
+	}
+	*/	
+
 	assert(hndlers1->Send<0>(other,1).at(0).get() == 1);
 	assert(hndlers1->Send<0>(other,1,2,3).at(0).get() == 6);
 	assert((hndlers1->Send<0,const std::vector<Opcode> &>(other,{1,2,3}).at(0).get() == 1));
