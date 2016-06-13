@@ -49,7 +49,7 @@ int main () {
   std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
           std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
   vector<derecho::MessageBuffer> free_message_buffers;
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, stability_callback, block_size);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
 
   cout << "Derecho group created" << endl;
 
