@@ -26,6 +26,8 @@ namespace rpc{
 	}//*/
 
 	using Opcode = unsigned long long;
+	using who_t = std::vector<Opcode>;
+	using Node_id = typename who_t::value_type;
 
 	template<Opcode, typename>
 	struct RemoteInvocable;
@@ -91,6 +93,7 @@ namespace rpc{
 	
 	using receive_fun_t =
 		std::function<recv_ret (mutils::DeserializationManager* dsm,
+								const Node_id &,
 								const char * recv_buf,
 								const std::function<char* (int)>& out_alloc)>;
 	
@@ -111,7 +114,7 @@ namespace rpc{
 			receivers[reply_id] = [this](auto... a){return receive_response(a...);};
 		}
 		
-		std::queue<std::promise<Ret> > ret;
+		std::queue<std::map<Node_id, std::promise<Ret> > > ret;
 		std::mutex ret_lock;
 		using lock_t = std::unique_lock<std::mutex>;
 
@@ -124,34 +127,42 @@ namespace rpc{
 		using barray = char*;
 		using cbarray = const char*;
 		template<typename A>
-		std::size_t to_bytes(barray& v, A && a){
+		std::size_t to_bytes(barray& v, const A & a){
 			std::cout << "serializing::" << (void*) v << "::" << a << std::endl;
-			auto size = mutils::to_bytes(std::forward<A>(a), v);
+			auto size = mutils::to_bytes(a, v);
 			v += size;
 			return size;
 		}
 		
-		std::tuple<int, char *, std::future<Ret> > Send(const std::function<char *(int)> &out_alloc,
-														  Args && ...a){
+		std::tuple<int, char *, std::map<Node_id, std::future<Ret> > > Send(const who_t& destinations,const std::function<char *(int)> &out_alloc,
+														const std::decay_t<Args> & ...a){
 			const auto size = (mutils::bytes_size(a) + ... + 0);
 			const auto serialized_args = out_alloc(size);
 			{
 				auto v = serialized_args;
-				auto check_size = (to_bytes(v,std::forward<Args>(a)) + ... + 0);
+				auto check_size = (to_bytes(v,a) + ... + 0);
 				assert(check_size == size);
 			}
 			
 			lock_t l{ret_lock};
+			//default-initialize the maps
 			ret.emplace();
-			return std::make_tuple(size,serialized_args,ret.back().get_future());
+			auto tuple_ret = std::make_tuple(size,serialized_args,std::map<Node_id, std::future<Ret> >{});
+			auto &promise_map = ret.back();
+			auto &future_map = std::get<2>(tuple_ret);
+			for (auto &d : destinations){
+				future_map.emplace(d, promise_map[d].get_future());
+			}
+			return tuple_ret;
 		}
 		
 
 		
-		inline recv_ret receive_response(mutils::DeserializationManager* dsm, const char* response, const std::function<char*(int)>&){
+		inline recv_ret receive_response(mutils::DeserializationManager* dsm, const Node_id &who, const char* response, const std::function<char*(int)>&){
 			lock_t l{ret_lock};
-			ret.front().set_value(*mutils::from_bytes<Ret>(dsm,response));
-			ret.pop();
+			//got an unexpected reply, probably because we're done receiving for this function
+			if (!ret.front().count(who)) ret.pop();
+			ret.front().at(who).set_value(*mutils::from_bytes<Ret>(dsm,response));
 			return recv_ret{0,0,nullptr};
 		}
 
@@ -168,6 +179,7 @@ namespace rpc{
 		
 
 		inline recv_ret receive_call(std::false_type const * const, mutils::DeserializationManager* dsm,
+									 const Node_id &, 
 							  const char * recv_buf,
 							  const std::function<char* (int)>& out_alloc){
 			const auto result = f(*deserialize<Args>(dsm,recv_buf)... );
@@ -178,6 +190,7 @@ namespace rpc{
 		}
 		
 		inline recv_ret receive_call(std::true_type const * const, mutils::DeserializationManager* dsm,
+									 const Node_id &, 
 							  const char * recv_buf,
 							  const std::function<char* (int)>&){
 			f(*deserialize<Args>(dsm,recv_buf)... );
@@ -185,10 +198,11 @@ namespace rpc{
 		}
 
 		inline recv_ret receive_call(mutils::DeserializationManager* dsm,
+									 const Node_id &who, 
 							  const char * recv_buf,
 							  const std::function<char* (int)>& out_alloc){
 			constexpr std::is_same<Ret,void> *choice{nullptr};
-			return receive_call(choice, dsm, recv_buf, out_alloc);
+			return receive_call(choice, dsm, who,recv_buf, out_alloc);
 		}
 	};
 	
@@ -238,30 +252,44 @@ namespace rpc{
 		//constructed *after* initialization
 		std::unique_ptr<std::thread> receiver;
 		mutils::DeserializationManager dsm{{}};
+
+		inline static auto header_space(const who_t &who) {
+			return sizeof(Opcode) + mutils::bytes_size(who);
+		}
 		
-		static char* extra_alloc (int i){
-			return (char*) calloc(i + sizeof(Opcode),sizeof(char)) + sizeof(Opcode);
+		inline static char* extra_alloc (const who_t &who, int i){
+			const auto hs = header_space(who);
+			return (char*) calloc(i + hs,sizeof(char)) + hs;
 		}
 		
 	public:
+		const who_t empty;
 		
 		void receive_call_loop(){
+			using namespace std::placeholders;
 			while (alive){
 				auto recv_pair = lm.receive();
+				Node_id received_from{0};
 				auto *buf = recv_pair.second;
 				auto size = recv_pair.first;
 				assert(size);
-				assert(size >= sizeof(Opcode));
 				auto indx = ((Opcode*)buf)[0];
 				assert(indx);
-				auto reply_tuple = receivers->at(indx)(&dsm,buf + sizeof(Opcode), extra_alloc);
+				auto who = mutils::from_bytes<who_t>(&dsm,buf + sizeof(Opcode));
+				buf += header_space(*who);
+				auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,empty,_1));
 				auto * reply_buf = std::get<2>(reply_tuple);
 				if (reply_buf){
-					reply_buf -= sizeof(Opcode);
+					//we don't need to tell the destination
+					//any information about where they should
+					//send replies, because the destination
+					//isn't sending any replies.
+					reply_buf -= header_space(empty);
 					const auto id = std::get<0>(reply_tuple);
 					const auto size = std::get<1>(reply_tuple);
 					((Opcode*)reply_buf)[0] = id;
-					lm.send(size + sizeof(Opcode),reply_buf);
+					lm.send(size + header_space(empty),reply_buf);
+					free(reply_buf);
 				}
 			}
 		}
@@ -288,15 +316,23 @@ namespace rpc{
 		}
 		
 		template<Opcode tag, typename... Args>
-			auto Send(Args && ... args){
+		auto Send(const who_t &who, Args && ... args){
+			//this "who" is the destination of this send.
+			//the "who" we include in this payload should
+			//be all targets which expect a reply.
+			who_t send_replies;
+			send_replies.emplace_back(0);
+			using namespace std::placeholders;
 			constexpr std::integral_constant<Opcode, tag>* choice{nullptr};
 			auto &hndl = this->handler(choice,args...);
-			auto sent_tuple = hndl.Send(extra_alloc,
-										std::forward<Args>(args)...);
+			auto sent_tuple = std::move(hndl.Send(who,std::bind(extra_alloc,send_replies,_1),
+												  std::forward<Args>(args)...));
 			std::size_t used = std::get<0>(sent_tuple);
-			char * buf = std::get<1>(sent_tuple) - sizeof(Opcode);
+			char * buf = std::get<1>(sent_tuple) - header_space(send_replies);
 			((Opcode*)buf)[0] = hndl.invoke_id;
+			mutils::to_bytes(send_replies,buf + sizeof(Opcode));
 			lm.send(used + sizeof(Opcode),buf);
+			free(buf);
 			return std::move(std::get<2>(sent_tuple));
 		}
 
@@ -374,8 +410,10 @@ int main() {
 	auto msg_pair = LocalMessager::build_pair();
 	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2,0,test3);
 	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2,0,test3);
-	assert(hndlers1->Send<0>(1).get() == 1);
-	assert(hndlers1->Send<0>(1,2,3).get() == 6);
-	assert(hndlers1->Send<0>({1,2,3}).get() == 1);
+	who_t other;
+	other.emplace_back(0);
+	assert(hndlers1->Send<0>(other,1).at(0).get() == 1);
+	assert(hndlers1->Send<0>(other,1,2,3).at(0).get() == 6);
+	assert((hndlers1->Send<0,const std::vector<Opcode> &>(other,{1,2,3}).at(0).get() == 1));
 	std::cout << "done" << std::endl;
 }
