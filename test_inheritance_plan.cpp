@@ -96,6 +96,7 @@ namespace rpc{
 		static LocalMessager get_send_to(const Node_id &source);
 		
 		void send(std::size_t s, char const * const v){
+			assert(((Opcode*)v)[0].id > 0);
 			l e{*m_send};
 			cv_send->notify_all();
 			assert(s);
@@ -106,9 +107,10 @@ namespace rpc{
 			l e{*m_receive};
 			while (_receive->empty()){
 				cv_receive->wait(e);
-				}
+			}
 			auto ret = _receive->front();
 			_receive->pop();
+			assert(((const Opcode*)ret.second)[0].id > 0);
 			return ret;
 		}
 	};
@@ -359,6 +361,7 @@ namespace rpc{
 			//          operation           from                         to
 		}
 		inline static auto populate_header(char* reply_buf, const Opcode &op, const Node_id& from, const who_t &to){
+			std::cout << "Opcode:" << op << "::" << "Node" << from << "::" << "Who:" << to << std::endl;
 			((Opcode*)reply_buf)[0] = op; //what
 			((Node_id*)(sizeof(Opcode) + reply_buf))[0] = from; //from
 			mutils::to_bytes(to,reply_buf + sizeof(Opcode) + sizeof(Node_id)); //to
@@ -389,17 +392,20 @@ namespace rpc{
 				Node_id received_from;
 				std::unique_ptr<who_t> who_to;
 				retrieve_header(&dsm,buf,indx,received_from,who_to);
-				assert(received_from.id > 8 && received_from.id < 12);
-				std::cout << received_from << "DDD" << std::endl;
+				assert(received_from.id > 8 && received_from.id < 20);
 				buf += header_space(*who_to);
 				if (std::find(who_to->begin(), who_to->end(), nid) != who_to->end()){
 					who_t reply_addr{received_from};
-					std::cerr << indx << std::endl;
+					std::cerr << indx << "::" << received_from << "::" << *who_to << std::endl;
+					for (const auto &e : *receivers){
+						std::cerr << e.first << "::" << std::endl;
+					}
 					auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,reply_addr,_1));
 					auto * reply_buf = std::get<2>(reply_tuple);
 					if (reply_buf){
 						reply_buf -= header_space(reply_addr);
 						const auto id = std::get<0>(reply_tuple);
+						std::cout << "id from registered function: " << id << std::endl;
 						const auto size = std::get<1>(reply_tuple);
 						populate_header(reply_buf,id,nid,reply_addr);
 						//TODO: DERECHO SEND HERE
@@ -443,10 +449,22 @@ namespace rpc{
 										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
 			char * buf = std::get<1>(sent_tuple) - header_space(who);
+			std::cout << "invoke id: " << hndl.invoke_id << std::endl;
 			populate_header(buf,hndl.invoke_id,nid,who);
 			//TODO: Derecho integration site
 			for (const auto &dest : who){
+				assert(dest.id > 8 && dest.id < 20);
 				LocalMessager::get_send_to(dest).send(used + header_space(who),buf);
+				{
+					//DEBUG
+					Opcode op;
+					Node_id from;
+					std::unique_ptr<who_t> to;
+					retrieve_header(&dsm,buf,op,from,to);
+					assert(op == hndl.invoke_id);
+					assert(from == nid);
+					assert(*to == who);
+				}
 			}
 			free(buf);
 			return std::move(std::get<2>(sent_tuple));
@@ -530,7 +548,7 @@ int main() {
 	HANDLERS[0] += test2;
 	HANDLERS[0] += test3;*/
 	auto hndlers2 = handlers(14,0,test1,0,test2,0,test3);
-	who_t all{{Node_id{0},Node_id{1}}};
+	who_t all{{Node_id{13},Node_id{14}}};
 
 	/*
 	OrderedQuery<Opcode>(ALL,arguments...) --> future<map<Node_id,std::future<Return> > >; //make a type alias that wraps this
