@@ -62,21 +62,9 @@ namespace rpc{
 		LocalMessager(const LocalMessager&) = default;
 		static std::map<Node_id, LocalMessager> send_to;
 
-		static LocalMessager init_pipe(const Node_id &source){
-			std::shared_ptr<queue_t> q1{new queue_t{}};
-			std::shared_ptr<queue_t> q2{new queue_t{}};
-			std::shared_ptr<std::mutex> m1{new std::mutex{}};
-			std::shared_ptr<std::condition_variable> cv1{new std::condition_variable{}};
-			std::shared_ptr<std::mutex> m2{new std::mutex{}};
-			std::shared_ptr<std::condition_variable> cv2{new std::condition_variable{}};
-			send_to.emplace(source,LocalMessager{q1,q2,m1,cv1,m2,cv2});
-			return LocalMessager{q2,q1,m2,cv2,m1,cv1};
-		}
+		static LocalMessager init_pipe(const Node_id &source);
 		
-		static LocalMessager get_send_to(const Node_id &source){
-			assert(send_to.count(source));
-			return send_to.at(source);
-		}
+		static LocalMessager get_send_to(const Node_id &source);
 		
 		void send(std::size_t s, char const * const v){
 			l e{*m_send};
@@ -95,6 +83,22 @@ namespace rpc{
 			return ret;
 		}
 	};
+
+	LocalMessager LocalMessager::get_send_to(const Node_id &source){
+		assert(send_to.count(source));
+		return send_to.at(source);
+	}
+	LocalMessager LocalMessager::init_pipe(const Node_id &source){
+		std::shared_ptr<queue_t> q1{new queue_t{}};
+		std::shared_ptr<queue_t> q2{new queue_t{}};
+		std::shared_ptr<std::mutex> m1{new std::mutex{}};
+		std::shared_ptr<std::condition_variable> cv1{new std::condition_variable{}};
+		std::shared_ptr<std::mutex> m2{new std::mutex{}};
+		std::shared_ptr<std::condition_variable> cv2{new std::condition_variable{}};
+		send_to.emplace(source,LocalMessager{q1,q2,m1,cv1,m2,cv2});
+		return LocalMessager{q2,q1,m2,cv2,m1,cv1};
+	}
+	std::map<Node_id, LocalMessager> LocalMessager::send_to;
 	
 	using recv_ret = std::tuple<Opcode,std::size_t, char *>;
 	
@@ -114,7 +118,7 @@ namespace rpc{
 
 		map_fut pending_rmap;
 		map rmap;
-		QueryResults(map_fut):map_fut(std::move(map_fut)){}
+		QueryResults(map_fut pm):pending_rmap(std::move(pm)){}
 
 		bool valid(const Node_id &nid){
 			return (rmap.size() > 0) && rmap.at(nid).valid();
@@ -123,7 +127,7 @@ namespace rpc{
 		auto get(const Node_id &nid){
 			if (rmap.size() == 0){
 				assert(pending_rmap.valid());
-				rmap = std::move(pending_rmap.get());
+				rmap = std::move(*pending_rmap.get());
 			}
 			assert(rmap.at(nid).valid());
 			return rmap.at(nid).get();
@@ -147,8 +151,8 @@ namespace rpc{
 			return populated_promises.at(nid);
 		}
 
-		QueryResults get_future(){
-			return QueryResults{pending_map.get_future()};
+		QueryResults<T> get_future(){
+			return QueryResults<T>{pending_map.get_future()};
 		}
 	};
 	
@@ -169,7 +173,7 @@ namespace rpc{
 			receivers[reply_id] = [this](auto... a){return receive_response(a...);};
 		}
 		
-		std::map<std::size_t, PendingResults> ret;
+		std::map<std::size_t, PendingResults<Ret> > ret;
 		std::mutex ret_lock;
 		using lock_t = std::unique_lock<std::mutex>;
 
@@ -189,10 +193,10 @@ namespace rpc{
 			return size;
 		}
 		
-		std::tuple<int, char *, std::map<Node_id, std::future<Ret> > > Send(const who_t& destinations,
-																			const std::function<char *(int)> &out_alloc,
-																			const std::decay_t<Args> & ...a){
-			auto invocation_id = long_rand();
+		std::tuple<int, char *, QueryResults<Ret> > Send(const who_t& destinations,
+														 const std::function<char *(int)> &out_alloc,
+														 const std::decay_t<Args> & ...a){
+			auto invocation_id = mutils::long_rand();
 			const auto size = (mutils::bytes_size(a) + ... + mutils::bytes_size(invocation_id));
 			const auto serialized_args = out_alloc(size);
 			{
@@ -341,7 +345,7 @@ namespace rpc{
 				assert(indx);
 				auto who_to = mutils::from_bytes<who_t>(&dsm,buf + sizeof(Opcode) + sizeof(Node_id));
 				buf += header_space(*who_to);
-				if (std::find(who_to.begin(), who_to.end(), nid) != who_to.end()){
+				if (std::find(who_to->begin(), who_to->end(), nid) != who_to->end()){
 					who_t reply_addr{received_from};
 					auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,reply_addr,_1));
 					auto * reply_buf = std::get<2>(reply_tuple);
@@ -365,7 +369,7 @@ namespace rpc{
 		Handlers(decltype(receivers) rvrs, Node_id nid, _Fs... fs)
 			:RemoteInvocablePairs<Fs...>(*rvrs,fs...),
 			nid(nid),
-			lm(LocalMessager::init_pipe(nid)),
+			my_lm(LocalMessager::init_pipe(nid)),
 			receivers(std::move(rvrs))
 			{
 				receiver.reset(new std::thread{[&](){receive_call_loop();}});
@@ -375,7 +379,7 @@ namespace rpc{
 		//delegation so receivers exists during superclass construction
 		template<typename... _Fs>
 		Handlers(Node_id nid, _Fs... fs)
-			:Handlers(std::make_unique<typename decltype(receivers)::element_type>(), std::move(_lm),fs...){}
+			:Handlers(std::make_unique<typename decltype(receivers)::element_type>(), nid,fs...){}
 		
 		~Handlers(){
 			alive = false;
