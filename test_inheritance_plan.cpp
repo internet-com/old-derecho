@@ -306,7 +306,8 @@ namespace rpc{
 	template<typename... Fs>
 	struct Handlers : private RemoteInvocablePairs<Fs...> {
 	private:
-		//point-to-point communication
+		const Node_id nid;
+		//listen here
 		LocalMessager my_lm;
 		bool alive{true};
 		//constructed *before* initialization
@@ -316,7 +317,8 @@ namespace rpc{
 		mutils::DeserializationManager dsm{{}};
 
 		inline static auto header_space(const who_t &who) {
-			return sizeof(Opcode) + mutils::bytes_size(who);
+			return sizeof(Opcode) + sizeof(Node_id) + mutils::bytes_size(who);
+			//          operation           from                         to
 		}
 		
 		inline static char* extra_alloc (const who_t &who, int i){
@@ -325,35 +327,35 @@ namespace rpc{
 		}
 		
 	public:
-		const who_t empty;
 		
 		void receive_call_loop(){
 			using namespace std::placeholders;
 			while (alive){
 				//TODO: DERECHO RECEIVE HERE
-				auto recv_pair = lm.receive();
-				Node_id received_from{0};
+				auto recv_pair = my_lm.receive();
 				auto *buf = recv_pair.second;
 				auto size = recv_pair.first;
 				assert(size);
 				auto indx = ((Opcode*)buf)[0];
+				Node_id received_from = ((Node_id*)(sizeof(Opcode) + buf))[0];
 				assert(indx);
-				auto who = mutils::from_bytes<who_t>(&dsm,buf + sizeof(Opcode));
-				buf += header_space(*who);
-				auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,empty,_1));
-				auto * reply_buf = std::get<2>(reply_tuple);
-				if (reply_buf){
-					//we don't need to tell the destination
-					//any information about where they should
-					//send replies, because the destination
-					//isn't sending any replies.
-					reply_buf -= header_space(empty);
-					const auto id = std::get<0>(reply_tuple);
-					const auto size = std::get<1>(reply_tuple);
-					((Opcode*)reply_buf)[0] = id;
-					//TODO: DERECHO SEND HERE
-					lm.send(size + header_space(empty),reply_buf);
-					free(reply_buf);
+				auto who_to = mutils::from_bytes<who_t>(&dsm,buf + sizeof(Opcode) + sizeof(Node_id));
+				buf += header_space(*who_to);
+				if (std::find(who_to.begin(), who_to.end(), nid) != who_to.end()){
+					who_t reply_addr{received_from};
+					auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,reply_addr,_1));
+					auto * reply_buf = std::get<2>(reply_tuple);
+					if (reply_buf){
+						reply_buf -= header_space(reply_addr);
+						const auto id = std::get<0>(reply_tuple);
+						const auto size = std::get<1>(reply_tuple);
+						((Opcode*)reply_buf)[0] = id; //what
+						((Node_id*)(sizeof(Opcode) + reply_buf))[0] = nid; //from
+						mutils::to_bytes(reply_addr,reply_buf + sizeof(Opcode) + sizeof(Node_id)); //to
+						//TODO: DERECHO SEND HERE
+						LocalMessager::get_send_to(received_from).send(size + header_space(reply_addr),reply_buf);
+						free(reply_buf);
+					}
 				}
 			}
 		}
