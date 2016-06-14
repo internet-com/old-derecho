@@ -385,20 +385,20 @@ namespace rpc{
 		template<Opcode tag, typename... Args>
 		auto Send(const who_t &who, Args && ... args){
 			//this "who" is the destination of this send.
-			//the "who" we include in this payload should
-			//be all targets which expect a reply.
-			who_t send_replies;
-			send_replies.emplace_back(0);
 			using namespace std::placeholders;
 			constexpr std::integral_constant<Opcode, tag>* choice{nullptr};
 			auto &hndl = this->handler(choice,args...);
-			auto sent_tuple = hndl.Send(who,std::bind(extra_alloc,send_replies,_1),
+			auto sent_tuple = hndl.Send(who,std::bind(extra_alloc,who,_1),
 										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
-			char * buf = std::get<1>(sent_tuple) - header_space(send_replies);
+			char * buf = std::get<1>(sent_tuple) - header_space(who);
 			((Opcode*)buf)[0] = hndl.invoke_id;
-			mutils::to_bytes(send_replies,buf + sizeof(Opcode));
-			lm.send(used + sizeof(Opcode),buf);
+			((Node_id*)(sizeof(Opcode) + buf))[0] = nid; //from
+			mutils::to_bytes(who,buf + sizeof(Opcode) + sizeof(Node_id)); //to
+			//TODO: Derecho integration site
+			for (const auto &dest : who){
+				LocalMessager::get_send_to(dest).send(used + header_space(who),buf);
+			}
 			free(buf);
 			return std::move(std::get<2>(sent_tuple));
 		}
@@ -474,17 +474,14 @@ auto test3(const std::vector<Opcode> & oc){
 }
 
 int main() {
-	auto msg_pair = LocalMessager::build_pair();
-	HANDLERS[SET_1] += something_here;
-	auto hndlers1 = handlers(std::move(msg_pair.first),0,test1,0,test2,0,test3);
+	auto hndlers1 = handlers(0,0,test1,0,test2,0,test3);
 	/*
 	handlers1 = {0,test1} + {0,test2} + {0,test3};
 	HANDLERS[0] += test1;
 	HANDLERS[0] += test2;
 	HANDLERS[0] += test3;*/
-	auto hndlers2 = handlers(std::move(msg_pair.second),0,test1,0,test2,0,test3);
-	who_t other;
-	other.emplace_back(0);
+	auto hndlers2 = handlers(1,0,test1,0,test2,0,test3);
+	who_t all{{0,1}};
 
 	/*
 	OrderedQuery<Opcode>(ALL,arguments...) --> future<map<Node_id,std::future<Return> > >; //make a type alias that wraps this
@@ -504,8 +501,8 @@ int main() {
 	}
 	*/	
 
-	assert(hndlers1->Send<0>(other,1).at(0).get() == 1);
-	assert(hndlers1->Send<0>(other,1,2,3).at(0).get() == 6);
-	assert((hndlers1->Send<0,const std::vector<Opcode> &>(other,{1,2,3}).at(0).get() == 1));
+	assert(hndlers1->Send<0>(all,1).get(0) == 1);
+	assert(hndlers1->Send<0>(all,1,2,3).get(0) == 6);
+	assert((hndlers1->Send<0,const std::vector<Opcode> &>(all,{1,2,3}).get(0) == 1));
 	std::cout << "done" << std::endl;
 }
