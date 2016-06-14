@@ -110,6 +110,21 @@ namespace rpc{
 			}
 			auto ret = _receive->front();
 			_receive->pop();
+			{
+				//DEBUG
+				Opcode op;
+				Node_id from;
+				std::unique_ptr<who_t> to;
+				{
+					auto* reply_buf = ret.second;
+					mutils::DeserializationManager *dsm{nullptr};
+					//retreive_header
+					op = ((Opcode*)reply_buf)[0];
+					from = ((Node_id*)(sizeof(Opcode) + reply_buf))[0];
+					to = mutils::from_bytes<who_t>(dsm,reply_buf + sizeof(Opcode) + sizeof(Node_id));
+				}
+				std::cout << "Opcode:" << op << "::" << "Node" << from << "::" << "Who:" << *to << std::endl;
+			}
 			assert(((const Opcode*)ret.second)[0].id > 0);
 			return ret;
 		}
@@ -368,8 +383,8 @@ namespace rpc{
 		}
 
 		inline static auto retrieve_header(mutils::DeserializationManager* dsm, char const * const reply_buf, Opcode &op, Node_id& from, std::unique_ptr<who_t> &to){
-			op = ((Opcode*)reply_buf)[0];
-			from = ((Node_id*)(sizeof(Opcode) + reply_buf))[0];
+			op = ((Opcode const * const)reply_buf)[0];
+			from = ((Node_id const * const)(sizeof(Opcode) + reply_buf))[0];
 			to = mutils::from_bytes<who_t>(dsm,reply_buf + sizeof(Opcode) + sizeof(Node_id));
 		}
 		
@@ -410,7 +425,6 @@ namespace rpc{
 						populate_header(reply_buf,id,nid,reply_addr);
 						//TODO: DERECHO SEND HERE
 						LocalMessager::get_send_to(received_from).send(size + header_space(reply_addr),reply_buf);
-						free(reply_buf);
 					}
 				}
 				if (!continue_bool) break;
@@ -466,7 +480,6 @@ namespace rpc{
 					assert(*to == who);
 				}
 			}
-			free(buf);
 			return std::move(std::get<2>(sent_tuple));
 		}
 
