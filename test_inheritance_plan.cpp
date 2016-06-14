@@ -110,28 +110,12 @@ namespace rpc{
 			}
 			auto ret = _receive->front();
 			_receive->pop();
-			{
-				//DEBUG
-				Opcode op;
-				Node_id from;
-				std::unique_ptr<who_t> to;
-				{
-					auto* reply_buf = ret.second;
-					mutils::DeserializationManager *dsm{nullptr};
-					//retreive_header
-					op = ((Opcode*)reply_buf)[0];
-					from = ((Node_id*)(sizeof(Opcode) + reply_buf))[0];
-					to = mutils::from_bytes<who_t>(dsm,reply_buf + sizeof(Opcode) + sizeof(Node_id));
-				}
-				std::cout << "Opcode:" << op << "::" << "Node" << from << "::" << "Who:" << *to << std::endl;
-			}
 			assert(((const Opcode*)ret.second)[0].id > 0);
 			return ret;
 		}
 	};
 
 	LocalMessager LocalMessager::get_send_to(const Node_id &source){
-		std::cout << source << std::endl;
 		assert(send_to.count(source));
 		return send_to.at(source);
 	}
@@ -237,7 +221,6 @@ namespace rpc{
 		using cbarray = const char*;
 		template<typename A>
 		std::size_t to_bytes(barray& v, const A & a){
-			std::cout << "serializing::" << (void*) v << "::" << a << std::endl;
 			auto size = mutils::to_bytes(a, v);
 			v += size;
 			return size;
@@ -286,7 +269,6 @@ namespace rpc{
 			auto ds = mutils::from_bytes<Type>(dsm,mut_in);
 			const auto size = mutils::bytes_size(*ds);
 			mut_in += size;
-			std::cout << "deserializing::" << (void*)mut_in << "::" << *ds << std::endl;
 			return ds;
 		}
 		
@@ -376,7 +358,6 @@ namespace rpc{
 			//          operation           from                         to
 		}
 		inline static auto populate_header(char* reply_buf, const Opcode &op, const Node_id& from, const who_t &to){
-			std::cout << "Opcode:" << op << "::" << "Node" << from << "::" << "Who:" << to << std::endl;
 			((Opcode*)reply_buf)[0] = op; //what
 			((Node_id*)(sizeof(Opcode) + reply_buf))[0] = from; //from
 			mutils::to_bytes(to,reply_buf + sizeof(Opcode) + sizeof(Node_id)); //to
@@ -407,20 +388,14 @@ namespace rpc{
 				Node_id received_from;
 				std::unique_ptr<who_t> who_to;
 				retrieve_header(&dsm,buf,indx,received_from,who_to);
-				assert(received_from.id > 8 && received_from.id < 20);
 				buf += header_space(*who_to);
 				if (std::find(who_to->begin(), who_to->end(), nid) != who_to->end()){
 					who_t reply_addr{received_from};
-					std::cerr << indx << "::" << received_from << "::" << *who_to << std::endl;
-					for (const auto &e : *receivers){
-						std::cerr << e.first << "::" << std::endl;
-					}
 					auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,reply_addr,_1));
 					auto * reply_buf = std::get<2>(reply_tuple);
 					if (reply_buf){
 						reply_buf -= header_space(reply_addr);
 						const auto id = std::get<0>(reply_tuple);
-						std::cout << "id from registered function: " << id << std::endl;
 						const auto size = std::get<1>(reply_tuple);
 						populate_header(reply_buf,id,nid,reply_addr);
 						//TODO: DERECHO SEND HERE
@@ -439,7 +414,7 @@ namespace rpc{
 			my_lm(LocalMessager::init_pipe(nid)),
 			receivers(std::move(rvrs))
 			{
-				//receiver.reset(new std::thread{[&](){receive_call_loop();}});
+				receiver.reset(new std::thread{[&](){receive_call_loop();}});
 			}
 		
 		//these are the functions (no names) from Fs
@@ -463,22 +438,10 @@ namespace rpc{
 										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
 			char * buf = std::get<1>(sent_tuple) - header_space(who);
-			std::cout << "invoke id: " << hndl.invoke_id << std::endl;
 			populate_header(buf,hndl.invoke_id,nid,who);
 			//TODO: Derecho integration site
 			for (const auto &dest : who){
-				assert(dest.id > 8 && dest.id < 20);
 				LocalMessager::get_send_to(dest).send(used + header_space(who),buf);
-				{
-					//DEBUG
-					Opcode op;
-					Node_id from;
-					std::unique_ptr<who_t> to;
-					retrieve_header(&dsm,buf,op,from,to);
-					assert(op == hndl.invoke_id);
-					assert(from == nid);
-					assert(*to == who);
-				}
 			}
 			return std::move(std::get<2>(sent_tuple));
 		}
@@ -503,18 +466,6 @@ namespace rpc{
     const QueryReplies<Q>& P2PQuery(NodeId who, Opcode opcode, const Args &... arg);
 		*/
 		
-	};
-
-	struct Handlers_erased{
-		std::shared_ptr<void> erased_handlers;
-
-		template<typename... T>
-		Handlers_erased(std::unique_ptr<Handlers<T...> > h):erased_handlers(h.release()){}
-
-		template<FunctionTag tag, typename Ret, typename... Args>
-		auto Send (Args && ... args){
-			return static_cast<RemoteInvocable<tag, Ret (Args...) >* >(erased_handlers.get())->Send(std::forward<Args>(args)...);
-		}
 	};
 }
 
@@ -542,7 +493,10 @@ using namespace rpc;
 
 #define handlers(m,a...) std::make_unique<Handlers<HANDLERS_TYPE_ARGS(a)> >(m,HANDLERS_ONLY_FUNS(a))
 
-int test1(int i){return i;}
+int test1(int i){
+	std::cout << "called with " << i << std::endl;
+	return i;
+}
 
 unsigned long test2(int i, double d, Opcode c){
 	std::cout << "called with " << i << "::" << d << "::" << c.id  << std::endl;
@@ -550,6 +504,7 @@ unsigned long test2(int i, double d, Opcode c){
 }
 
 auto test3(const std::vector<Opcode> & oc){
+	std::cout << "called with " << oc  << std::endl;
 	return oc.front();
 }
 
@@ -578,29 +533,19 @@ int main() {
 	for (auto &pair : returned_map){
 		if (pair.second.valid())
 			break; //found it!
-	}
-	*/
-	auto loop = [&](){
-		hndlers1->receive_call_loop(false);
-		hndlers2->receive_call_loop(false);
-		hndlers1->receive_call_loop(false);
-		hndlers2->receive_call_loop(false);
-	};
+			} */
 
 	{
 		auto ret1 = hndlers1->Send<0>(all,1);
-		loop();
-		assert(ret1.get(Node_id{0}) == 1);
+		assert(ret1.get(Node_id{14}) == 1);
 	}
 	{
 		auto ret2 = hndlers1->Send<0>(all,1,2,3);
-		loop();
-		assert(ret2.get(Node_id{0}) == 6);
+		assert(ret2.get(Node_id{14}) == 6);
 	}
 	{
 		auto ret3 = hndlers1->Send<0,const std::vector<Opcode> &>(all,{1,2,3});
-		loop();
-		assert((ret3.get(Node_id{0}) == 1));
+		assert((ret3.get(Node_id{14}) == 1));
 	}
 	
 	std::cout << "done" << std::endl;
