@@ -26,11 +26,40 @@ namespace rpc{
 		return print_all(t << a,b...);
 	}//*/
 
-	using Opcode = unsigned long long;
-	using who_t = std::vector<Opcode>;
-	using Node_id = typename who_t::value_type;
+	struct Opcode{
+		using t = unsigned long long;
+		t id;
+		Opcode(const decltype(id) &id):id(id){}
+		Opcode() = default;
+		bool operator==(const Opcode& n) const {
+			return id == n.id;
+		}
+		bool operator<(const Opcode& n) const {
+			return id < n.id;
+		}
+	};
+	auto& operator<<(std::ostream& out, const Opcode& op){
+		return out << op.id;
+	}
+	using FunctionTag = unsigned long long;
+	struct Node_id{
+		unsigned long long id;
+		Node_id(const decltype(id) &id):id(id){}
+		Node_id() = default;
+		bool operator==(const Node_id& n) const {
+			return id == n.id;
+		}
+		bool operator<(const Node_id& n) const {
+			return id < n.id;
+		}
+	};
+	auto& operator<<(std::ostream& out, const Node_id& nid){
+		return out << nid.id;
+	}
+	
+	using who_t = std::vector<Node_id>;
 
-	template<Opcode, typename>
+	template<FunctionTag, typename>
 	struct RemoteInvocable;
 	
 	class LocalMessager{
@@ -85,6 +114,7 @@ namespace rpc{
 	};
 
 	LocalMessager LocalMessager::get_send_to(const Node_id &source){
+		std::cout << source << std::endl;
 		assert(send_to.count(source));
 		return send_to.at(source);
 	}
@@ -121,6 +151,7 @@ namespace rpc{
 		QueryResults(map_fut pm):pending_rmap(std::move(pm)){}
 
 		bool valid(const Node_id &nid){
+			assert(rmap.size() == 0 || rmap.count(nid));
 			return (rmap.size() > 0) && rmap.at(nid).valid();
 		}
 
@@ -129,6 +160,7 @@ namespace rpc{
 				assert(pending_rmap.valid());
 				rmap = std::move(*pending_rmap.get());
 			}
+			assert(rmap.count(nid));
 			assert(rmap.at(nid).valid());
 			return rmap.at(nid).get();
 		}
@@ -148,6 +180,7 @@ namespace rpc{
 		}
 
 		std::promise<T>& receive_message(const Node_id& nid){
+			assert(populated_promises.count(nid));
 			return populated_promises.at(nid);
 		}
 
@@ -160,7 +193,7 @@ namespace rpc{
 //each specific instance of this class provies a mechanism for communicating with
 //remote sites.
 
-	template<Opcode tag, typename Ret, typename... Args>
+	template<FunctionTag tag, typename Ret, typename... Args>
 	struct RemoteInvocable<tag, Ret (Args...)> {
 		
 		using f_t = Ret (*) (Args...);
@@ -179,7 +212,7 @@ namespace rpc{
 
 		//use this from within a derived class to receive precisely this RemoteInvocable
 		//(this way, all RemoteInvocable methods do not need to worry about type collisions)
-		inline RemoteInvocable& handler(std::integral_constant<Opcode, tag> const * const, const Args & ...) {
+		inline RemoteInvocable& handler(std::integral_constant<FunctionTag, tag> const * const, const Args & ...) {
 			return *this;
 		}
 
@@ -224,6 +257,7 @@ namespace rpc{
 			assert(ret.count(invocation_id));
 			lock_t l{ret_lock};
 			//TODO: garbage collection for the responses.
+			assert(ret.count(invocation_id));
 			ret.at(invocation_id).receive_message(who).set_value(*mutils::from_bytes<Ret>(dsm,response + sizeof(invocation_id)));
 			return recv_ret{0,0,nullptr};
 		}
@@ -247,7 +281,7 @@ namespace rpc{
 			long int invocation_id = ((long int*)_recv_buf)[0];
 			auto recv_buf = _recv_buf + sizeof(long int);
 			const auto result = f(*deserialize<Args>(dsm,recv_buf)... );
-			const auto result_size = mutils::bytes_size(result + sizeof(long int));
+			const auto result_size = mutils::bytes_size(result) + sizeof(long int);
 			auto out = out_alloc(result_size);
 			((long int*)out)[0] = invocation_id;
 			mutils::to_bytes(result,out + sizeof(invocation_id));
@@ -272,17 +306,17 @@ namespace rpc{
 		}
 	};
 	
-	template<Opcode tag, typename Ret, typename... Args>
+	template<FunctionTag tag, typename Ret, typename... Args>
 	const Opcode RemoteInvocable<tag, Ret (Args...)>::invoke_id{mutils::gensym()};
 
-	template<Opcode tag, typename Ret, typename... Args>
+	template<FunctionTag tag, typename Ret, typename... Args>
 	const Opcode RemoteInvocable<tag, Ret (Args...)>::reply_id{mutils::gensym()};
 	
 	template<typename...>
 	struct RemoteInvocablePairs;
 	
-	template<Opcode id, typename Q>
-	struct RemoteInvocablePairs<std::integral_constant<Opcode, id>,Q>
+	template<FunctionTag id, typename Q>
+	struct RemoteInvocablePairs<std::integral_constant<FunctionTag, id>,Q>
 		: public RemoteInvocable<id,Q> {
 		RemoteInvocablePairs(std::map<Opcode,receive_fun_t> &receivers, Q q)
 			:RemoteInvocable<id,Q>(receivers, q){}
@@ -291,8 +325,8 @@ namespace rpc{
 	};
 	
 //id better be an integral constant of Opcode
-	template<Opcode id, typename Q,typename... rest>
-	struct RemoteInvocablePairs<std::integral_constant<Opcode, id>, Q, rest...> :
+	template<FunctionTag id, typename Q,typename... rest>
+	struct RemoteInvocablePairs<std::integral_constant<FunctionTag, id>, Q, rest...> :
 		public RemoteInvocable<id,Q>,
 		public RemoteInvocablePairs<rest...> {
 
@@ -324,6 +358,17 @@ namespace rpc{
 			return sizeof(Opcode) + sizeof(Node_id) + mutils::bytes_size(who);
 			//          operation           from                         to
 		}
+		inline static auto populate_header(char* reply_buf, const Opcode &op, const Node_id& from, const who_t &to){
+			((Opcode*)reply_buf)[0] = op; //what
+			((Node_id*)(sizeof(Opcode) + reply_buf))[0] = from; //from
+			mutils::to_bytes(to,reply_buf + sizeof(Opcode) + sizeof(Node_id)); //to
+		}
+
+		inline static auto retrieve_header(mutils::DeserializationManager* dsm, char const * const reply_buf, Opcode &op, Node_id& from, std::unique_ptr<who_t> &to){
+			op = ((Opcode*)reply_buf)[0];
+			from = ((Node_id*)(sizeof(Opcode) + reply_buf))[0];
+			to = mutils::from_bytes<who_t>(dsm,reply_buf + sizeof(Opcode) + sizeof(Node_id));
+		}
 		
 		inline static char* extra_alloc (const who_t &who, int i){
 			const auto hs = header_space(who);
@@ -332,7 +377,7 @@ namespace rpc{
 		
 	public:
 		
-		void receive_call_loop(){
+		void receive_call_loop(bool continue_bool = true){
 			using namespace std::placeholders;
 			while (alive){
 				//TODO: DERECHO RECEIVE HERE
@@ -340,27 +385,29 @@ namespace rpc{
 				auto *buf = recv_pair.second;
 				auto size = recv_pair.first;
 				assert(size);
-				auto indx = ((Opcode*)buf)[0];
-				Node_id received_from = ((Node_id*)(sizeof(Opcode) + buf))[0];
-				assert(indx);
-				auto who_to = mutils::from_bytes<who_t>(&dsm,buf + sizeof(Opcode) + sizeof(Node_id));
+				Opcode indx;
+				Node_id received_from;
+				std::unique_ptr<who_t> who_to;
+				retrieve_header(&dsm,buf,indx,received_from,who_to);
+				assert(received_from.id > 8 && received_from.id < 12);
+				std::cout << received_from << "DDD" << std::endl;
 				buf += header_space(*who_to);
 				if (std::find(who_to->begin(), who_to->end(), nid) != who_to->end()){
 					who_t reply_addr{received_from};
+					std::cerr << indx << std::endl;
 					auto reply_tuple = receivers->at(indx)(&dsm, received_from,buf, std::bind(extra_alloc,reply_addr,_1));
 					auto * reply_buf = std::get<2>(reply_tuple);
 					if (reply_buf){
 						reply_buf -= header_space(reply_addr);
 						const auto id = std::get<0>(reply_tuple);
 						const auto size = std::get<1>(reply_tuple);
-						((Opcode*)reply_buf)[0] = id; //what
-						((Node_id*)(sizeof(Opcode) + reply_buf))[0] = nid; //from
-						mutils::to_bytes(reply_addr,reply_buf + sizeof(Opcode) + sizeof(Node_id)); //to
+						populate_header(reply_buf,id,nid,reply_addr);
 						//TODO: DERECHO SEND HERE
 						LocalMessager::get_send_to(received_from).send(size + header_space(reply_addr),reply_buf);
 						free(reply_buf);
 					}
 				}
+				if (!continue_bool) break;
 			}
 		}
 
@@ -372,7 +419,7 @@ namespace rpc{
 			my_lm(LocalMessager::init_pipe(nid)),
 			receivers(std::move(rvrs))
 			{
-				receiver.reset(new std::thread{[&](){receive_call_loop();}});
+				//receiver.reset(new std::thread{[&](){receive_call_loop();}});
 			}
 		
 		//these are the functions (no names) from Fs
@@ -386,19 +433,17 @@ namespace rpc{
 			receiver->join();
 		}
 		
-		template<Opcode tag, typename... Args>
+		template<FunctionTag tag, typename... Args>
 		auto Send(const who_t &who, Args && ... args){
 			//this "who" is the destination of this send.
 			using namespace std::placeholders;
-			constexpr std::integral_constant<Opcode, tag>* choice{nullptr};
+			constexpr std::integral_constant<FunctionTag, tag>* choice{nullptr};
 			auto &hndl = this->handler(choice,args...);
 			auto sent_tuple = hndl.Send(who,std::bind(extra_alloc,who,_1),
 										std::forward<Args>(args)...);
 			std::size_t used = std::get<0>(sent_tuple);
 			char * buf = std::get<1>(sent_tuple) - header_space(who);
-			((Opcode*)buf)[0] = hndl.invoke_id;
-			((Node_id*)(sizeof(Opcode) + buf))[0] = nid; //from
-			mutils::to_bytes(who,buf + sizeof(Opcode) + sizeof(Node_id)); //to
+			populate_header(buf,hndl.invoke_id,nid,who);
 			//TODO: Derecho integration site
 			for (const auto &dest : who){
 				LocalMessager::get_send_to(dest).send(used + header_space(who),buf);
@@ -435,7 +480,7 @@ namespace rpc{
 		template<typename... T>
 		Handlers_erased(std::unique_ptr<Handlers<T...> > h):erased_handlers(h.release()){}
 
-		template<Opcode tag, typename Ret, typename... Args>
+		template<FunctionTag tag, typename Ret, typename... Args>
 		auto Send (Args && ... args){
 			return static_cast<RemoteInvocable<tag, Ret (Args...) >* >(erased_handlers.get())->Send(std::forward<Args>(args)...);
 		}
@@ -445,11 +490,11 @@ namespace rpc{
 using namespace rpc;
 
 //handles up to 5 args
-#define HANDLERS_TYPE_ARGS2(a, b) std::integral_constant<rpc::Opcode, a>, decltype(b)
-#define HANDLERS_TYPE_ARGS4(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS2(c)
-#define HANDLERS_TYPE_ARGS6(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS4(c)
-#define HANDLERS_TYPE_ARGS8(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS6(c)
-#define HANDLERS_TYPE_ARGS10(a, b,c...) std::integral_constant<rpc::Opcode, a>, decltype(b), HANDLERS_TYPE_ARGS8(c)
+#define HANDLERS_TYPE_ARGS2(a, b) std::integral_constant<rpc::FunctionTag, a>, decltype(b)
+#define HANDLERS_TYPE_ARGS4(a, b,c...) std::integral_constant<rpc::FunctionTag, a>, decltype(b), HANDLERS_TYPE_ARGS2(c)
+#define HANDLERS_TYPE_ARGS6(a, b,c...) std::integral_constant<rpc::FunctionTag, a>, decltype(b), HANDLERS_TYPE_ARGS4(c)
+#define HANDLERS_TYPE_ARGS8(a, b,c...) std::integral_constant<rpc::FunctionTag, a>, decltype(b), HANDLERS_TYPE_ARGS6(c)
+#define HANDLERS_TYPE_ARGS10(a, b,c...) std::integral_constant<rpc::FunctionTag, a>, decltype(b), HANDLERS_TYPE_ARGS8(c)
 #define HANDLERS_TYPE_ARGS_IMPL2(count, ...) HANDLERS_TYPE_ARGS ## count (__VA_ARGS__)
 #define HANDLERS_TYPE_ARGS_IMPL(count, ...) HANDLERS_TYPE_ARGS_IMPL2(count, __VA_ARGS__)
 #define HANDLERS_TYPE_ARGS(...) HANDLERS_TYPE_ARGS_IMPL(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
@@ -468,9 +513,9 @@ using namespace rpc;
 
 int test1(int i){return i;}
 
-auto test2(int i, double d, Opcode c){
-	std::cout << "called with " << i << "::" << d << "::" << (int)c  << std::endl;
-	return i + d + c;
+unsigned long test2(int i, double d, Opcode c){
+	std::cout << "called with " << i << "::" << d << "::" << c.id  << std::endl;
+	return i + d + c.id;
 }
 
 auto test3(const std::vector<Opcode> & oc){
@@ -478,14 +523,14 @@ auto test3(const std::vector<Opcode> & oc){
 }
 
 int main() {
-	auto hndlers1 = handlers(0,0,test1,0,test2,0,test3);
+	auto hndlers1 = handlers(13,0,test1,0,test2,0,test3);
 	/*
 	handlers1 = {0,test1} + {0,test2} + {0,test3};
 	HANDLERS[0] += test1;
 	HANDLERS[0] += test2;
 	HANDLERS[0] += test3;*/
-	auto hndlers2 = handlers(1,0,test1,0,test2,0,test3);
-	who_t all{{0,1}};
+	auto hndlers2 = handlers(14,0,test1,0,test2,0,test3);
+	who_t all{{Node_id{0},Node_id{1}}};
 
 	/*
 	OrderedQuery<Opcode>(ALL,arguments...) --> future<map<Node_id,std::future<Return> > >; //make a type alias that wraps this
@@ -503,10 +548,29 @@ int main() {
 		if (pair.second.valid())
 			break; //found it!
 	}
-	*/	
+	*/
+	auto loop = [&](){
+		hndlers1->receive_call_loop(false);
+		hndlers2->receive_call_loop(false);
+		hndlers1->receive_call_loop(false);
+		hndlers2->receive_call_loop(false);
+	};
 
-	assert(hndlers1->Send<0>(all,1).get(0) == 1);
-	assert(hndlers1->Send<0>(all,1,2,3).get(0) == 6);
-	assert((hndlers1->Send<0,const std::vector<Opcode> &>(all,{1,2,3}).get(0) == 1));
+	{
+		auto ret1 = hndlers1->Send<0>(all,1);
+		loop();
+		assert(ret1.get(Node_id{0}) == 1);
+	}
+	{
+		auto ret2 = hndlers1->Send<0>(all,1,2,3);
+		loop();
+		assert(ret2.get(Node_id{0}) == 6);
+	}
+	{
+		auto ret3 = hndlers1->Send<0,const std::vector<Opcode> &>(all,{1,2,3});
+		loop();
+		assert((ret3.get(Node_id{0}) == 1));
+	}
+	
 	std::cout << "done" << std::endl;
 }
