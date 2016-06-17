@@ -121,8 +121,8 @@ class ManagedGroup {
 
         /** Creates the SST and derecho_group for the current view, using the current view's member list.
          * The parameters are all the possible parameters for constructing derecho_group. */
-        void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers, long long unsigned int _max_payload_size, message_callback global_stability_callback,
-                long long unsigned int _block_size, unsigned int _window_size, rdmc::send_algorithm _type);
+        void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers, long long unsigned int _max_payload_size, const CallbackSet& stability_callbacks,
+                long long unsigned int _block_size, const std::string& filename, unsigned int _window_size, rdmc::send_algorithm _type);
         /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
          * (and copying over the SST data from the current view). */
         void transition_sst_and_rdmc(View& newView, int whichFailed);
@@ -142,8 +142,8 @@ class ManagedGroup {
          * The rest of the parameters are the parameters for the derecho_group that should
          * be constructed for communications within this managed group. */
         ManagedGroup(const int gms_port, const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
-                long long unsigned int _max_payload_size, message_callback global_stability_callback, long long unsigned int _block_size,
-                unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+                long long unsigned int _max_payload_size, CallbackSet stability_callbacks, long long unsigned int _block_size,
+                std::string filename = std::string(), unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
         ~ManagedGroup();
 
         static void global_setup(const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id);

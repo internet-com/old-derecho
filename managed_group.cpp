@@ -44,8 +44,8 @@ using unique_lock_t = std::unique_lock<std::mutex>;
 bool ManagedGroup::rdmc_globals_initialized = false;
 
 ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
-        long long unsigned int _max_payload_size, message_callback global_stability_callback,
-        long long unsigned int _block_size, unsigned int _window_size, rdmc::send_algorithm _type) :
+        long long unsigned int _max_payload_size, CallbackSet stability_callbacks,
+        long long unsigned int _block_size, std::string filename, unsigned int _window_size, rdmc::send_algorithm _type) :
         member_ips_by_id(member_ips), last_suspected(View::MAX_MEMBERS), gms_port(gms_port), server_socket(gms_port),
         thread_shutdown(false), next_view(nullptr) {
 
@@ -96,7 +96,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
 //    }
     
     log_event("Initializing SST and RDMC for the first time.");
-    setup_sst_and_rdmc(message_buffers, _max_payload_size, global_stability_callback, _block_size, _window_size, _type);
+    setup_sst_and_rdmc(message_buffers, _max_payload_size, stability_callbacks, _block_size, filename, _window_size, _type);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
 	log_event("Done setting up initial SST and RDMC");
@@ -132,6 +132,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
     });
 
     register_predicates();
+    log_event("Starting predicate evaluation");
 	curr_view->gmsSST->start_predicate_evaluation();
 
 	// curr_view->rdmc_sending_group->debug_print();
@@ -425,18 +426,19 @@ ManagedGroup::~ManagedGroup() {
     }
 }
 
-void ManagedGroup::setup_sst_and_rdmc(vector<MessageBuffer>& message_buffers, long long unsigned int max_payload_size, message_callback global_stability_callback,
-        long long unsigned int block_size, unsigned int window_size, rdmc::send_algorithm type) {
+void ManagedGroup::setup_sst_and_rdmc(vector<MessageBuffer>& message_buffers, long long unsigned int max_payload_size,
+        const CallbackSet& stability_callbacks, long long unsigned int block_size, const std::string& filename,
+        unsigned int window_size, rdmc::send_algorithm type) {
 
     curr_view->gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(curr_view->members, curr_view->members[curr_view->my_rank],
-            [this](const uint32_t node_id){report_failure(node_id);});
+            [this](const uint32_t node_id){report_failure(node_id);}, false);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
     gmssst::set((*curr_view->gmsSST)[curr_view->my_rank].vid, curr_view->vid);
 
     curr_view->rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(curr_view->members, curr_view->members[curr_view->my_rank],
-            curr_view->gmsSST, message_buffers, max_payload_size, global_stability_callback, block_size, window_size, 1, type);
+            curr_view->gmsSST, message_buffers, max_payload_size, stability_callbacks, block_size, filename, window_size, 1, type);
 }
 
 /**
@@ -454,7 +456,7 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 //    std::map<node_id_t, ip_addr> new_member_map {{newView.members[newView.my_rank], newView.member_ips[newView.my_rank]}, {newView.members.back(), newView.member_ips.back()}};
 //    sst::tcp::tcp_initialize(newView.members[newView.my_rank], new_member_map);
     newView.gmsSST = make_shared<sst::SST<DerechoRow<View::MAX_MEMBERS>>>(newView.members, newView.members[newView.my_rank],
-            [this](const uint32_t node_id){report_failure(node_id);});
+            [this](const uint32_t node_id){report_failure(node_id);}, false);
     newView.rdmc_sending_group = make_unique<DerechoGroup<View::MAX_MEMBERS>>(newView.members, newView.members[newView.my_rank],
             newView.gmsSST, std::move(*curr_view->rdmc_sending_group));
 	curr_view->rdmc_sending_group.reset();
@@ -733,6 +735,7 @@ void ManagedGroup::report_failure(const node_id_t who) {
 }
 
 void ManagedGroup::leave() {
+    lock_guard_t lock(view_mutex);
     log_event("Cleanly leaving the group.");
     curr_view->rdmc_sending_group->wedge();
     curr_view->gmsSST->delete_all_predicates();

@@ -6,7 +6,7 @@ add_subdirectory(rdmc EXCLUDE_FROM_ALL)
 add_subdirectory(sst EXCLUDE_FROM_ALL)
 add_subdirectory(experiments EXCLUDE_FROM_ALL)
 
-add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp)
+add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp filewriter.cpp)
 target_link_libraries(derecho rdmacm ibverbs  rt pthread atomic rdmc sst)
 
 add_executable(main main.cpp)

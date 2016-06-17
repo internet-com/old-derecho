@@ -48,7 +48,7 @@ int main (int argc, char *argv[]) {
   std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
           std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
   vector<derecho::MessageBuffer> free_message_buffers;
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, msg_size, stability_callback, block_size, window_size);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, msg_size, derecho::CallbackSet{stability_callback, nullptr}, block_size, "", window_size);
 
   struct timespec start_time;
   // start timer

@@ -84,19 +84,20 @@ int main (int argc, char *argv[]) {
     fflush(stdout);
 	cout << endl << endl;
 
+	derecho::CallbackSet callback_set{stability_callback, derecho::message_callback{}};
 
 	if(node_rank == num_nodes - 1){
 		cout << "Sleeping for 10 seconds..." << endl;
 		std::this_thread::sleep_for(10s);
 		cout << "Connecting to group" << endl;
-		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, callback_set, block_size);
 		managed_group->log_event("About to start sending");
 		send_messages(10 * SECOND);
 		managed_group->log_event("About to exit");
 		managed_group->print_log(cout);
 		exit(0);
 	}else{
-		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+		managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, callback_set, block_size);
 		cout << "Created group, waiting for others to join." << endl;
 		while(managed_group->get_members().size() < (num_nodes-1)) {
 			std::this_thread::sleep_for(1ms);

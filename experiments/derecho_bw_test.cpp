@@ -73,7 +73,7 @@ int main (int argc, char *argv[]) {
     }
   };
   
-  derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, stability_callback, block_size);
+  derecho::ManagedGroup managed_group(GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
 
   cout <<  "Finished constructing/joining ManagedGroup" << endl;
 

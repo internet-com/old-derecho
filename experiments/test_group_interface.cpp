@@ -28,11 +28,12 @@ int main () {
   long long unsigned int block_size = 10;
 
   auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {cout << "Some message is stable" << endl;};
+  derecho::CallbackSet callbacks{stability_callback, derecho::message_callback{}};
   
   std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
           std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
   vector<derecho::MessageBuffer> free_message_buffers;
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, stability_callback, block_size);
+  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, callbacks, block_size);
 
   cout << "Derecho group created" << endl;
 

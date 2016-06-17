@@ -47,10 +47,6 @@ void send_messages(uint64_t duration){
     }
 }
 
-/*
- * This test runs a group of nodes for 30 seconds of continuous sending with no
- * failures. It tests the bandwidth of a ManagedGroup in the "steady state."
- */
 int main (int argc, char *argv[]) {
     srand(time(nullptr));
     query_addresses(node_addresses, node_rank);
@@ -85,7 +81,7 @@ int main (int argc, char *argv[]) {
         cout << "Sleeping for 10 seconds..." << endl;
         std::this_thread::sleep_for(10s);
         cout << "Connecting to group" << endl;
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
         managed_group->log_event("About to start sending");
         send_messages(10 * SECOND);
         managed_group->log_event("About to exit");
@@ -94,7 +90,7 @@ int main (int argc, char *argv[]) {
         logfile.close();
         exit(0);
     }else{
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, stability_callback, block_size);
+        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
         cout << "Created group, waiting for others to join." << endl;
         while(managed_group->get_members().size() < (num_nodes-1)) {
             std::this_thread::sleep_for(1ms);

@@ -1,3 +1,9 @@
+/*
+ * basic_persistence_test.cpp
+ *
+ *  Created on: Jun 7, 2016
+ *      Author: edward
+ */
 #include "../derecho_group.h"
 #include "../managed_group.h"
 #include "../rdmc/util.h"
@@ -22,44 +28,42 @@ using std::chrono::microseconds;
 
 const int GMS_PORT = 12345;
 const uint64_t SECOND = 1000000000ull;
-const size_t message_size = 200000000;
-const size_t block_size = 1000000;
+const size_t message_size = 1000;
+const size_t block_size = 1000;
 
 uint32_t num_nodes, node_rank;
 map<uint32_t, std::string> node_addresses;
 
-unsigned int message_number = 0;
-vector<uint64_t> message_times;
+const int num_messages = 1000;
+bool done = false;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
-    message_times.push_back(get_time());
 
     derecho::util::debug_log().log_event(stringstream() << "Global stability for message " << index << " from sender " << sender_id);
 
-    while(!managed_group) {
-
-    }
-
-    unsigned int n = managed_group->get_members().size();
-    if(message_number >= n){
-        unsigned int dt = message_times.back() - message_times[message_number - n];
-        double bandwidth = (message_size * n * 8.0) / dt;
-        managed_group->log_event(std::to_string(bandwidth));
-    }
-
-    ++message_number;
 }
 
-void send_messages(uint64_t duration){
-    uint64_t end_time = get_time() + duration;
-    while(get_time() < end_time){
+void persistence_callback(int sender_id, long long int index, char *data, long long int size) {
+
+    cout << "Persistence complete for message " << index << " from sender " << sender_id << endl;
+    derecho::util::debug_log().log_event(stringstream() << "Persistence complete for message " << index << " from sender " << sender_id);
+    if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+      cout << "Done" << endl;
+      done = true;
+    }
+
+}
+
+void send_messages(int count){
+    for(int i = 0; i < count; ++i){
         char* buffer = managed_group->get_sendbuffer_ptr(message_size);
-        if(buffer){
-            memset(buffer, rand() % 256, message_size);
-//          cout << "Send function call succeeded at the client side" << endl;
-            managed_group->send();
+        while(!buffer){
+            buffer = managed_group->get_sendbuffer_ptr(message_size);
         }
+        memset(buffer, rand() % 256, message_size);
+//        cout << "Send function call succeeded at the client side" << endl;
+        managed_group->send();
     }
 }
 
@@ -96,14 +100,17 @@ int main (int argc, char *argv[]) {
     cout << endl << endl;
 
     string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
-    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, derecho::message_callback{}}, block_size);
+    managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, persistence_callback}, block_size, message_filename);
     cout << "Created group, waiting for others to join." << endl;
     while(managed_group->get_members().size() < (num_nodes-1)) {
         std::this_thread::sleep_for(1ms);
     }
     cout << "Starting to send messages." << endl;
-    send_messages(30 * SECOND);
+    send_messages(num_messages);
+    while(!done) {
+    }
     // managed_group->barrier_sync();
     ofstream logfile(log_filename);
     managed_group->print_log(logfile);
@@ -113,5 +120,7 @@ int main (int argc, char *argv[]) {
     managed_group->leave();
 
 }
+
+
 
 

@@ -34,6 +34,10 @@ struct DerechoRow {
          * at this node. Messages are only delievered once stable, so it must be
          * at least stable_num. */
         long long int delivered_num;
+        /** This represents the highest sequence number that has been persisted
+         * to disk at this node, if persistence is enabled. Messages are only
+         * persisted to disk once delivered to the application. */
+        long long int persisted_num;
 
         /** View ID associated with this SST */
         int vid;
