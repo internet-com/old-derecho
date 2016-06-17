@@ -10,7 +10,7 @@
 #include <atomic>
 
 namespace derecho {
-namespace gmssst{
+namespace gmssst {
 
 /**
  * Thread-safe setter for GMSTableRow members, specialized to the cstring type.
@@ -18,8 +18,8 @@ namespace gmssst{
  * @param element A reference to the cstring member to set
  * @param value The value to set it to, as a C++ string.
  */
-void set(volatile cstring& element, const std::string& value){
-    strcpy(const_cast<cstring&>(element), value.c_str());
+void set(volatile cstring &element, const std::string &value) {
+    strcpy(const_cast<cstring &>(element), value.c_str());
     std::atomic_signal_fence(std::memory_order_acq_rel);
 }
 
@@ -28,7 +28,7 @@ void set(volatile cstring& element, const std::string& value){
  * a std::atomic_signal_fence after updating the value.
  * @param member A reference to the member to increment.
  */
-void increment(volatile int& member) {
+void increment(volatile int &member) {
     member++;
     std::atomic_signal_fence(std::memory_order_acq_rel);
 }
@@ -41,10 +41,9 @@ void increment(volatile int& member) {
  * @param value A std::string value to compare it to.
  * @return True if the strings are equal
  */
-bool equals(const volatile cstring& element, const std::string& value) {
-    return strcmp(const_cast<const cstring&>(element), value.c_str()) == 0;
+bool equals(const volatile cstring &element, const std::string &value) {
+    return strcmp(const_cast<const cstring &>(element), value.c_str()) == 0;
 }
 
-
-} //namespace gmssst
-} //namespace derecho
+}  // namespace gmssst
+}  // namespace derecho

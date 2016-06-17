@@ -30,30 +30,33 @@ map<uint32_t, std::string> node_addresses;
 
 shared_ptr<derecho::ManagedGroup> managed_group;
 
-void stability_callback(int sender_id, long long int index, char *data, long long int size){
-
-    managed_group->log_event(std::stringstream() << "Message " << index << " from sender " << sender_id << " delivered");
+void stability_callback(int sender_id, long long int index, char *data,
+                        long long int size) {
+    managed_group->log_event(std::stringstream() << "Message " << index
+                                                 << " from sender " << sender_id
+                                                 << " delivered");
 }
 
-void send_messages(uint64_t duration){
+void send_messages(uint64_t duration) {
     uint64_t end_time = get_time() + duration;
-    while(get_time() < end_time){
-        char* buffer = managed_group->get_sendbuffer_ptr(message_size);
-        if(buffer){
+    while(get_time() < end_time) {
+        char *buffer = managed_group->get_sendbuffer_ptr(message_size);
+        if(buffer) {
             memset(buffer, rand() % 256, message_size);
-//          cout << "Send function call succeeded at the client side" << endl;
+            //          cout << "Send function call succeeded at the client
+            //          side" << endl;
             managed_group->send();
         }
     }
 }
 
-int main (int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     srand(time(nullptr));
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
 
-    //Synchronize clocks
+    // Synchronize clocks
     vector<uint32_t> members;
     for(uint32_t i = 0; i < num_nodes; i++) members.push_back(i);
     auto universal_barrier_group = make_unique<rdmc::barrier_group>(members);
@@ -73,15 +76,19 @@ int main (int argc, char *argv[]) {
         duration<double, std::micro>(t3 - t1).count(),
         duration<double, std::micro>(max((t2 - t1), (t3 - t2))).count());
     fflush(stdout);
-    cout << endl << endl;
+    cout << endl
+         << endl;
 
-    string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string log_filename =
+        (std::stringstream() << "events_node" << node_rank << ".csv").str();
 
-    if(node_rank == num_nodes - 1){
+    if(node_rank == num_nodes - 1) {
         cout << "Sleeping for 10 seconds..." << endl;
         std::this_thread::sleep_for(10s);
         cout << "Connecting to group" << endl;
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
+        managed_group = make_shared<derecho::ManagedGroup>(
+            GMS_PORT, node_addresses, node_rank, 0, message_size,
+            derecho::CallbackSet{stability_callback, nullptr}, block_size);
         managed_group->log_event("About to start sending");
         send_messages(10 * SECOND);
         managed_group->log_event("About to exit");
@@ -89,10 +96,12 @@ int main (int argc, char *argv[]) {
         managed_group->print_log(logfile);
         logfile.close();
         exit(0);
-    }else{
-        managed_group = make_shared<derecho::ManagedGroup>(GMS_PORT, node_addresses, node_rank, 0, message_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
+    } else {
+        managed_group = make_shared<derecho::ManagedGroup>(
+            GMS_PORT, node_addresses, node_rank, 0, message_size,
+            derecho::CallbackSet{stability_callback, nullptr}, block_size);
         cout << "Created group, waiting for others to join." << endl;
-        while(managed_group->get_members().size() < (num_nodes-1)) {
+        while(managed_group->get_members().size() < (num_nodes - 1)) {
             std::this_thread::sleep_for(1ms);
         }
         send_messages(30 * SECOND);
@@ -103,7 +112,3 @@ int main (int argc, char *argv[]) {
         managed_group->leave();
     }
 }
-
-
-
-

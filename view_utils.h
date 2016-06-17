@@ -14,13 +14,12 @@
 
 namespace derecho {
 
-bool IAmTheNewLeader(View& Vc);
+bool IAmTheNewLeader(View &Vc);
 
-void merge_changes(View& Vc);
+void merge_changes(View &Vc);
 
-void wedge_view(View& Vc);
+void wedge_view(View &Vc);
 
-} //namespace derecho
-
+}  // namespace derecho
 
 #endif /* VIEW_UTILS_H_ */

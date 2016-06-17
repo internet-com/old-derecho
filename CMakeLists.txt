@@ -21,3 +21,4 @@ target_link_libraries(gms_test derecho)
 add_executable(gms_test2 gms_test2.cpp experiments/block_size.cpp)
 target_link_libraries(gms_test2 derecho)
 
+add_custom_target(format_derecho clang-format-3.6 -i *.cpp *.h)

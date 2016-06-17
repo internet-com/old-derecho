@@ -63,3 +63,5 @@ target_link_libraries(basic_persistence_test derecho)
 
 add_executable(local_filewriter_test local_filewriter_test.cpp)
 target_link_libraries(local_filewriter_test derecho)
+
+add_custom_target(format_experiments clang-format-3.6 -i *.cpp *.h)

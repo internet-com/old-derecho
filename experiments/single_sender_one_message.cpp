@@ -19,53 +19,55 @@ using derecho::DerechoRow;
 
 constexpr int MAX_GROUP_SIZE = 8;
 
+int main() {
+    srand(time(NULL));
 
-int main () {
-  srand(time(NULL));
-  
-  uint32_t node_rank;
-  uint32_t num_nodes;
+    uint32_t node_rank;
+    uint32_t num_nodes;
 
-  initialize(node_rank, num_nodes);
-  
-  vector <uint32_t> members(num_nodes);
-  for (int i = 0; i < (int)num_nodes; ++i) {
-    members[i] = i;
-  }
+    initialize(node_rank, num_nodes);
 
-  
-  long long unsigned int max_msg_size = 100;
-  long long unsigned int block_size = 10;
-
-  auto stability_callback = [] (int sender_id, long long int index, char *buf, long long int msg_size) {
-    cout << "Delivered a message" << endl;
-    cout << "The message is:" << endl;
-    for (int i = 0; i < msg_size; ++i) {
-      cout << buf[i];
+    vector<uint32_t> members(num_nodes);
+    for(int i = 0; i < (int)num_nodes; ++i) {
+        members[i] = i;
     }
-    cout << endl;
-  };
-  
-  std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>> derecho_sst =
-          std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(members, node_rank);
-  vector<derecho::MessageBuffer> free_message_buffers;
-  DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst, free_message_buffers, max_msg_size, derecho::CallbackSet{stability_callback, nullptr}, block_size);
 
-  cout << "Derecho group created" << endl;
+    long long unsigned int max_msg_size = 100;
+    long long unsigned int block_size = 10;
 
-  if (node_rank == 0) {
-    unsigned int msg_size = 10;
-    char* buf = g.get_position (msg_size);
-    for (unsigned int i = 0; i < msg_size; ++i) {
-      buf[i] = rand ()%26 + 'a';
+    auto stability_callback = [](int sender_id, long long int index, char* buf,
+                                 long long int msg_size) {
+        cout << "Delivered a message" << endl;
+        cout << "The message is:" << endl;
+        for(int i = 0; i < msg_size; ++i) {
+            cout << buf[i];
+        }
+        cout << endl;
+    };
+
+    std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>>
+        derecho_sst =
+            std::make_shared<sst::SST<DerechoRow<8>, sst::Mode::Writes>>(
+                members, node_rank);
+    vector<derecho::MessageBuffer> free_message_buffers;
+    DerechoGroup<MAX_GROUP_SIZE> g(
+        members, node_rank, derecho_sst, free_message_buffers, max_msg_size,
+        derecho::CallbackSet{stability_callback, nullptr}, block_size);
+
+    cout << "Derecho group created" << endl;
+
+    if(node_rank == 0) {
+        unsigned int msg_size = 10;
+        char* buf = g.get_position(msg_size);
+        for(unsigned int i = 0; i < msg_size; ++i) {
+            buf[i] = rand() % 26 + 'a';
+        }
+        cout << "Calling send" << endl;
+        g.send();
+        cout << "send call finished" << endl;
     }
-    cout << "Calling send" << endl;
-    g.send();
-    cout << "send call finished" << endl;
-  }
-  while (true) {
-    
-  }
-  
-  return 0;
+    while(true) {
+    }
+
+    return 0;
 }
