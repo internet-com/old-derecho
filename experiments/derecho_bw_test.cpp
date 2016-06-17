@@ -45,10 +45,7 @@ int main (int argc, char *argv[]) {
   long long unsigned int block_size = get_block_size (max_msg_size);
   int num_senders_selector = atoi(argv[2]);
   int num_messages = 1000;
-  if (max_msg_size == 100000000ull) {
-    cout << "Setting number of messages to 100 for this case" << endl;
-    num_messages = 100;
-  }
+  max_msg_size -= 8;
   
   bool done = false;
   auto stability_callback = [&num_messages, &done, &num_nodes, num_senders_selector, num_last_received=0u] (int sender_id, long long int index, char *buf, long long int msg_size) mutable {
