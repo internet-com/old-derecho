@@ -81,7 +81,6 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     assert(window_size >= 1);
 
     if (!filename.empty()) {
-		cout << "Constructing file_writer; this = " << this << endl;
 		file_writer = std::make_unique<FileWriter>(make_file_written_callback(), filename);
     }
 
@@ -89,9 +88,6 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
     while(free_message_buffers.size() < window_size * num_members) {
         free_message_buffers.emplace_back(max_msg_size);
     }
-//	for(unsigned int i = 0; i < window_size * num_members; i++){
-//		free_message_buffers.emplace_back(max_msg_size);
-//	}
     total_message_buffers = free_message_buffers.size();
 
 	initialize_sst_row();
@@ -102,7 +98,7 @@ DerechoGroup<N>::DerechoGroup(vector<node_id_t> _members, node_id_t my_node_id, 
 
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
 
-    cout << "DerechoGroup: Registered predicates and started thread. this = " << this << endl;
+//    cout << "DerechoGroup: Registered predicates and started thread." << endl;
 }
 
 template<unsigned int N>
@@ -227,6 +223,8 @@ std::function<void(FileWriter::message)> DerechoGroup<N>::make_file_written_call
 //            cout << "Putting MessageBuffer onto free_message_buffers: buffer=" << (void*) m_msg_info.message_buffer.buffer.get() << ", mr=" << m_msg_info.message_buffer.mr.get() << endl;
             free_message_buffers.push_back(std::move(m_msg_info.message_buffer));
             non_persistent_messages.erase(find_result);
+            (*sst)[member_index].persisted_num = sequence_number;
+            sst->put();
         }
 
     };
@@ -351,6 +349,7 @@ void DerechoGroup<N>::initialize_sst_row(){
         (*sst)[i].seq_num = -1;
         (*sst)[i].stable_num = -1;
         (*sst)[i].delivered_num = -1;
+        (*sst)[i].persisted_num = -1;
     }
     sst->put();
     sst->sync_with_members();
@@ -499,7 +498,7 @@ void DerechoGroup<N>::wedge() {
 
 template<unsigned int N>
 void DerechoGroup<N>::send_loop() {
-    cout << "send_loop thread forked" << endl;
+//    cout << "send_loop thread forked" << endl;
     auto should_send = [&]() {
         if (pending_sends.empty()) {
             return false;
@@ -510,7 +509,8 @@ void DerechoGroup<N>::send_loop() {
         }
 
         for (int i = 0; i < num_members; ++i) {
-            if ((*sst)[i].delivered_num < (msg.index-window_size)*num_members + member_index) {
+            if ((*sst)[i].delivered_num < (msg.index-window_size)*num_members + member_index
+                    || (file_writer && (*sst)[i].persisted_num < (msg.index-window_size)*num_members + member_index)) {
                 return false;
             }
         }
@@ -540,7 +540,7 @@ void DerechoGroup<N>::send_loop() {
 
 template<unsigned int N>
 void DerechoGroup<N>::check_failures_loop() {
-    cout << "Check failures thread forked" << endl;
+//    cout << "Check failures thread forked" << endl;
     while(!thread_shutdown) {
            std::this_thread::sleep_for(milliseconds(sender_timeout));
            if(sst)
@@ -553,11 +553,11 @@ char* DerechoGroup<N>::get_position(long long unsigned int payload_size, int pau
     long long unsigned int msg_size = payload_size + sizeof(header);
     if (msg_size > max_msg_size) {
         cout << "Can't send messages of size larger than the maximum message size which is equal to " << max_msg_size << endl;
-        return NULL;
+        return nullptr;
     }
     for (int i = 0; i < num_members; ++i) {
         if ((*sst)[i].delivered_num < (future_message_index-window_size)*num_members + member_index) {
-            return NULL;
+            return nullptr;
         }
     }
 

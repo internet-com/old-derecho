@@ -41,7 +41,6 @@ void FileWriter::set_message_written_upcall(std::function<void(message)> _messag
 }
 
 void FileWriter::perform_writes(std::string filename) {
-//    std::cout << "perform_writes thread forked" << std::endl;
   ofstream data_file(filename);
   ofstream metadata_file(filename + ".metadata");
 
@@ -57,10 +56,9 @@ void FileWriter::perform_writes(std::string filename) {
   while (!exit) {
     pending_writes_cv.wait(writes_lock);
 
-    if (!pending_writes.empty()) {
+    while (!pending_writes.empty()) {
       message m = pending_writes.front();
       pending_writes.pop();
-//      std::cout << "About to write message " << m.index << " from sender " << m.sender << std::endl;
 
       message_metadata metadata;
       metadata.sender = m.sender;
@@ -78,25 +76,21 @@ void FileWriter::perform_writes(std::string filename) {
 
       {
         unique_lock<mutex> callbacks_lock(pending_callbacks_mutex);
-//        std::cout << "Binding a callback" << std::endl;
         pending_callbacks.push(std::bind(message_written_upcall, m));
       }
       pending_callbacks_cv.notify_all();
     }
   }
-//  std::cout << "perform_writes thread shutting down" << std::endl;
 }
 
 void FileWriter::issue_callbacks() {
-//    std::cout << "issue_callbacks thread forked" << std::endl;
   unique_lock<mutex> lock(pending_callbacks_mutex);
 
   while (!exit) {
     pending_callbacks_cv.wait(lock);
 
 
-    if (!pending_callbacks.empty()) {
-//        std::cout << "FileWriter woke up and is about to issue a callback" << std::endl;
+    while (!pending_callbacks.empty()) {
       auto callback = pending_callbacks.front();
       pending_callbacks.pop();
       lock.unlock();
@@ -104,14 +98,12 @@ void FileWriter::issue_callbacks() {
       lock.lock();
     }
   }
-//  std::cout << "issue_callbacks thread shutting down" << std::endl;
 }
 
 void FileWriter::write_message(message m) {
   {
     unique_lock<mutex> lock(pending_writes_mutex);
     pending_writes.push(m);
-//    std::cout << "Message submitted for writing: " << m.index << " from sender " << m.sender << std::endl;
   }
   pending_writes_cv.notify_all();
 }

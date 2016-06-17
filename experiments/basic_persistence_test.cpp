@@ -28,13 +28,14 @@ using std::chrono::microseconds;
 
 const int GMS_PORT = 12345;
 const uint64_t SECOND = 1000000000ull;
-const size_t message_size = 200000000;
-const size_t block_size = 1000000;
+const size_t message_size = 1000;
+const size_t block_size = 1000;
 
 uint32_t num_nodes, node_rank;
 map<uint32_t, std::string> node_addresses;
 
-unsigned int message_number = 0;
+const int num_messages = 1000;
+bool done = false;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
 void stability_callback(int sender_id, long long int index, char *data, long long int size){
@@ -45,19 +46,24 @@ void stability_callback(int sender_id, long long int index, char *data, long lon
 
 void persistence_callback(int sender_id, long long int index, char *data, long long int size) {
 
+    cout << "Persistence complete for message " << index << " from sender " << sender_id << endl;
     derecho::util::debug_log().log_event(stringstream() << "Persistence complete for message " << index << " from sender " << sender_id);
+    if (index == num_messages-1 && sender_id == (int)num_nodes-1) {
+      cout << "Done" << endl;
+      done = true;
+    }
 
 }
 
-void send_messages(uint64_t duration){
-    uint64_t end_time = get_time() + duration;
-    while(get_time() < end_time){
+void send_messages(int count){
+    for(int i = 0; i < count; ++i){
         char* buffer = managed_group->get_sendbuffer_ptr(message_size);
-        if(buffer){
-            memset(buffer, rand() % 256, message_size);
-//          cout << "Send function call succeeded at the client side" << endl;
-            managed_group->send();
+        while(!buffer){
+            buffer = managed_group->get_sendbuffer_ptr(message_size);
         }
+        memset(buffer, rand() % 256, message_size);
+//        cout << "Send function call succeeded at the client side" << endl;
+        managed_group->send();
     }
 }
 
@@ -102,7 +108,9 @@ int main (int argc, char *argv[]) {
         std::this_thread::sleep_for(1ms);
     }
     cout << "Starting to send messages." << endl;
-    send_messages(30 * SECOND);
+    send_messages(num_messages);
+    while(!done) {
+    }
     // managed_group->barrier_sync();
     ofstream logfile(log_filename);
     managed_group->print_log(logfile);
