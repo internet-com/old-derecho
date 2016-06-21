@@ -37,11 +37,6 @@ int main(int argc, char *argv[]) {
 
     vector<int> counts(num_nodes, 0);
     int num_messages = 1000;
-    if(msg_size == 100000000) {
-        std::cout << "Setting number of messages to 100 for this case"
-                  << std::endl;
-        num_messages = 100;
-    }
     // type of send algorithm
     rdmc::send_algorithm type = rdmc::BINOMIAL_SEND;
 
