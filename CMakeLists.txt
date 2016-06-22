@@ -1,13 +1,25 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 2.8.1)
 
 project(derecho CXX)
 set(CMAKE_CXX_FLAGS "-std=c++14 -Wall -ggdb -gdwarf-3")
 add_subdirectory(rdmc EXCLUDE_FROM_ALL)
 add_subdirectory(sst EXCLUDE_FROM_ALL)
-add_subdirectory(experiments EXCLUDE_FROM_ALL)
+add_subdirectory(experiments)
+add_custom_target(
+	mutils_serialization
+	COMMAND make
+	WORKING_DIRECTORY ./serialization
+)
+add_custom_target(
+	mutils
+	COMMAND make
+	WORKING_DIRECTORY ./mutils
+)
+find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./serialization)
 
 add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp filewriter.cpp)
-target_link_libraries(derecho rdmacm ibverbs  rt pthread atomic rdmc sst)
+target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst ${SERIALIZATION_LIBRARY})
+add_dependencies(derecho mutils_serialization)
 
 add_executable(main main.cpp)
 target_link_libraries(main derecho)
