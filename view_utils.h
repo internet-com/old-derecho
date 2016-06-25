@@ -14,13 +14,17 @@
 
 namespace derecho {
 
-bool IAmTheNewLeader(View& Vc);
+template <typename handlersType>
+bool IAmTheNewLeader(View<handlersType>& Vc);
 
-void merge_changes(View& Vc);
+template <typename handlersType>
+void merge_changes(View<handlersType>& Vc);
 
-void wedge_view(View& Vc);
+template <typename handlersType>
+void wedge_view(View<handlersType>& Vc);
 
-} //namespace derecho
+}  // namespace derecho
 
+#include "view_utils_impl.h"
 
 #endif /* VIEW_UTILS_H_ */
