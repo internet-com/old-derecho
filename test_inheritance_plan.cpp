@@ -202,11 +202,6 @@ namespace rpc{
 		static const Opcode invoke_id;
 		static const Opcode reply_id;
 		
-		RemoteInvocable(std::map<Opcode,receive_fun_t> &receivers, Ret (*f) (Args...)):f(f){
-			receivers[invoke_id] = [this](auto... a){return receive_call(a...);};
-			receivers[reply_id] = [this](auto... a){return receive_response(a...);};
-		}
-		
 		std::map<std::size_t, PendingResults<Ret> > ret;
 		std::mutex ret_lock;
 		using lock_t = std::unique_lock<std::mutex>;
@@ -301,7 +296,12 @@ namespace rpc{
 							  const char * recv_buf,
 							  const std::function<char* (int)>& out_alloc){
 			constexpr std::is_same<Ret,void> *choice{nullptr};
-			return receive_call(choice, dsm, who,recv_buf, out_alloc);
+			return this->receive_call(choice, dsm, who,recv_buf, out_alloc);
+		}
+		
+		RemoteInvocable(std::map<Opcode,receive_fun_t> &receivers, Ret (*f) (Args...)):f(f){
+			receivers[invoke_id] = [this](auto... a){return this->receive_call(a...);};
+			receivers[reply_id] = [this](auto... a){return this->receive_response(a...);};
 		}
 	};
 	
