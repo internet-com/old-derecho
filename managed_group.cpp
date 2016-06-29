@@ -16,6 +16,7 @@
 #include <iterator>
 #include <cstring>
 #include <atomic>
+#include <functional>
 
 #include "managed_group.h"
 
@@ -61,6 +62,7 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
         curr_view = join_existing(member_ips_by_id[leader_id], gms_port);
     } else {
         curr_view = start_group(my_id);
+        //Wait for the second member to join, then send him the initial view
 //        tcp::connection_listener serversocket(gms_port);
         tcp::socket client_socket = server_socket.accept();
         ip_addr& joiner_ip = client_socket.remote_ip;
@@ -74,20 +76,14 @@ ManagedGroup::ManagedGroup(const int gms_port, const map<node_id_t, ip_addr>& me
         }
         curr_view->failed.push_back(false);
 
-        client_socket.write((char*) &curr_view->vid, sizeof(curr_view->vid));
-        client_socket.write((char*) &curr_view->num_members, sizeof(curr_view->num_members));
-        for (auto nodeID : curr_view->members) {
-            client_socket.write((char*) &nodeID, sizeof(nodeID));
-        }
-        for (auto & str : curr_view->member_ips) {
-            //includes null-terminator
-            const int str_size = str.size() + 1;
-            client_socket.write((char*) &str_size, sizeof(str_size));
-            client_socket.write(str.c_str(), str_size);
-        }
-        for (bool fbool : curr_view->failed) {
-            client_socket.write((char*) &fbool, sizeof(fbool));
-        }
+        auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size){
+            bool success = client_socket.write(bytes, size);
+            assert(success);
+        };
+        std::size_t size_of_view = mutils::bytes_size(*curr_view);
+        mutils::post_object(bind_socket_write, size_of_view);
+        mutils::post_object(bind_socket_write, *curr_view);
+
     }
     curr_view->my_rank = curr_view->rank_of(my_id);
     //Temporarily disabled because all member IP->ID mappings are fixed at startup
@@ -461,20 +457,6 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
             newView.gmsSST, std::move(*curr_view->rdmc_sending_group));
 	curr_view->rdmc_sending_group.reset();
 	
-	//Don't need to initialize every row in the SST - all the others will be filled by the first put()
-//    int m = 0;
-//    for (int n = 0; n < curr_view->num_members; n++)
-//    {
-//        if (n != whichFailed)
-//        {
-//            //the compiler won't upcast these references inside the function call,
-//            //but it can figure out what I mean if I declare them as locals.
-//            volatile auto& new_row = (*newView.gmsSST)[m++];
-//            volatile auto& old_row = (*curr_view->gmsSST)[n];
-//            gmssst::template init_from_existing<View::MAX_MEMBERS>(new_row, old_row);
-//            new_row.vid = newView.vid;
-//        }
-//    }
 	//Initialize this node's row in the new SST
 	gmssst::template init_from_existing<View::MAX_MEMBERS>((*newView.gmsSST)[newView.my_rank], (*curr_view->gmsSST)[curr_view->my_rank]);
 	gmssst::set((*newView.gmsSST)[newView.my_rank].vid, newView.vid);
@@ -495,45 +477,21 @@ unique_ptr<View> ManagedGroup::join_existing(const ip_addr& leader_ip, const int
 //    cout << "Joining group by contacting node at " << leader_ip << endl;
 	log_event("Joining group: waiting for a response from the leader");
     tcp::socket leader_socket{leader_ip, leader_port};
-    int viewID;
-    int numMembers;
-//    node_id_t myNodeID;
+
     //Temporarily disabled because all node IDs are fixed at startup
     //First the leader sends the node ID this client has been assigned
+//    node_id_t myNodeID;
 //    bool success = leader_socket.read((char*)&myNodeID,sizeof(myNodeID));
 //    assert(success);
-    //The leader will send the members of View in the order they're declared
-    bool success = leader_socket.read((char*)&viewID,sizeof(viewID));
+
+    //The leader will first send the size of the necessary buffer, then the serialized View
+    std::size_t size_of_view;
+    bool success = leader_socket.read((char*) &size_of_view, sizeof(std::size_t));
     assert(success);
-    bool success2 = leader_socket.read((char*)&numMembers,sizeof(numMembers));
-    assert(success2);
-    unique_ptr<View> newView = std::make_unique<View>(numMembers);
-    newView->vid = viewID;
-    for (int i = 0; i < numMembers; ++i){
-        bool success = leader_socket.read((char*)&newView->members[i],
-                sizeof(decltype(newView->members)::value_type));
-        assert(success);
-    }
-    //protocol for sending strings: size, followed by string
-    //including null terminator
-    for (int i = 0; i < numMembers; ++i){
-        int str_size{-1};
-        bool success = leader_socket.read((char*)&str_size,sizeof(str_size));
-        assert(success);
-        char str_rec[str_size];
-        bool success2 = leader_socket.read(str_rec,str_size);
-        assert(success2);
-        newView->member_ips[i] = std::string(str_rec);
-    }
-    //Receive failed[], and also calculate nFailed
-    for (int i = 0; i < numMembers; ++i){
-        bool newView_failed_i;
-        bool success = leader_socket.read((char*) &newView_failed_i,
-                sizeof(newView_failed_i));
-        assert(success);
-        newView->failed[i] = newView_failed_i;
-        if(newView->failed[i]) newView->nFailed++;
-    }
+    char buffer[size_of_view];
+    success = leader_socket.read(buffer, size_of_view);
+    assert(success);
+    unique_ptr<View> newView = mutils::from_bytes<View>(nullptr, buffer);
 
 	log_event("Received View from leader");
     return newView;
@@ -575,20 +533,11 @@ void ManagedGroup::commit_join(const View &new_view, tcp::socket &client_socket)
 	log_event("Sending client the new view");
     //Temporarily disabled because all node IDs are globally fixed at startup
 //    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
-    client_socket.write((char*) &new_view.vid, sizeof(new_view.vid));
-    client_socket.write((char*) &new_view.num_members, sizeof(new_view.num_members));
-    for (auto nodeID : new_view.members) {
-        client_socket.write((char*) &nodeID, sizeof(nodeID));
-    }
-    for (auto & str : new_view.member_ips) {
-        //includes null-terminator
-        const int str_size = str.size() + 1;
-        client_socket.write((char*) &str_size, sizeof(str_size));
-        client_socket.write(str.c_str(), str_size);
-    }
-    for (bool fbool : new_view.failed) {
-        client_socket.write((char*) &fbool, sizeof(fbool));
-    }
+
+	auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size){client_socket.write(bytes, size);};
+	std::size_t size_of_view = mutils::bytes_size(new_view);
+	mutils::post_object(bind_socket_write, size_of_view);
+	mutils::post_object(bind_socket_write, new_view);
 }
 
 /* ------------------------- Static helper methods ------------------------- */
@@ -622,7 +571,7 @@ bool ManagedGroup::changes_contains(const View::DerechoSST& gmsSST, const node_i
     return false;
 }
 
-int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const vector<bool>& failed) {
+int ManagedGroup::min_acked(const View::DerechoSST& gmsSST, const vector<char>& failed) {
     int myRank = gmsSST.get_local_index();
     int min = gmsSST[myRank].nAcked;
     for (size_t n = 0; n < failed.size(); n++) {

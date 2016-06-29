@@ -17,7 +17,7 @@ using std::endl;
 using namespace derecho;
 
 int main (int argc, char *argv[])  {
-    auto file_written_callback = [](FileWriter::message m) {
+    auto file_written_callback = [](persistence::message m) {
         cout << "Message " << m.index << " written to file!" << endl;
     };
 
@@ -39,7 +39,7 @@ int main (int argc, char *argv[])  {
     m.size = 1000;
 //    m.message_buffer = std::move(buffer);
 
-    FileWriter::message message{&buf[0], m.size, m.sender_rank, (uint64_t) m.index};
+    persistence::message message{&buf[0], m.size, m.sender_rank, (uint64_t) m.index};
 
     file_writer->write_message(message);
 

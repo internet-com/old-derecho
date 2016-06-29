@@ -186,7 +186,7 @@ class DerechoGroup {
         /** Checks for failures when a sender reaches its timeout. This function implements the timeout thread. */
         void check_failures_loop();
 
-        std::function<void(FileWriter::message)> make_file_written_callback();
+        std::function<void(persistence::message)> make_file_written_callback();
 		void create_rdmc_groups();
 		void initialize_sst_row();
 		void register_predicates();

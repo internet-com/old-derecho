@@ -16,12 +16,14 @@
 #include "derecho_group.h"
 #include "sst/sst.h"
 #include "derecho_row.h"
+#include "serialization/SerializationMacros.hpp"
+#include "serialization/SerializationSupport.hpp"
 #include "max_members.h"
 
 namespace derecho {
 
 
-class View {
+class View : public mutils::ByteRepresentable {
     public:
         /** Upper bound on the number of members that will ever be in any one view. */
   static constexpr int MAX_MEMBERS = ::MAX_MEMBERS;
@@ -36,7 +38,7 @@ class View {
         std::vector<ip_addr> member_ips;
         /** failed[i] is true if members[i] is considered to have failed.
          * Once a member is failed, it will be removed from the members list in a future view. */
-        std::vector<bool> failed;
+        std::vector<char> failed; //Note: std::vector<bool> is broken, so we pretend these char values are C-style booleans
         /** Number of current outstanding failures in this view. After
          * transitioning to a new view that excludes a failed member, this count
          * will decrease by one. */
@@ -77,6 +79,20 @@ class View {
         std::shared_ptr<node_id_t> Departed() const;
 
         std::string ToString() const;
+
+        DEFAULT_SERIALIZATION_SUPPORT(View, vid, members, member_ips, failed, nFailed, num_members, my_rank);
+
+        /** Constructor used by deserialization: constructs a View given the values of its serialized fields. */
+        View(const int vid, const std::vector<node_id_t>& members, const std::vector<ip_addr>& member_ips,
+                const std::vector<char>& failed, const int nFailed, const int num_members, const int my_rank) :
+            vid(vid), members(members), member_ips(member_ips), failed(failed), nFailed(nFailed), num_members(num_members), my_rank(my_rank) {}
+
+//    public:
+//        /** Copy constructor, used only by deserialization. Copies all fields except the RDMC and SST pointers,
+//         * which are set to null because they need to be set manually after deserializing anyway. */
+//        View(const View& other) : vid(other.vid), members(other.members), member_ips(other.member_ips),
+//                failed(other.failed), nFailed(other.nFailed), who(other.who), num_members(other.num_members),
+//                my_rank(other.my_rank), rdmc_sending_group(nullptr), gmsSST(nullptr) {}
 };
 
 }

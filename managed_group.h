@@ -114,7 +114,7 @@ class ManagedGroup {
         static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool>& old);
         static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);
         static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
-        static int min_acked(const View::DerechoSST& gmsSST, const std::vector<bool>& failed);
+        static int min_acked(const View::DerechoSST& gmsSST, const std::vector<char>& failed);
 
 		/** Constructor helper method to encapsulate creating all the predicates. */
 		void register_predicates();

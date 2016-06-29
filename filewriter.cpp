@@ -12,6 +12,8 @@ using std::ofstream;
 
 namespace derecho {
 
+using namespace persistence;
+
 const uint8_t MAGIC_NUMBER[8] = {'D', 'E', 'R', 'E', 'C', 'H', 'O', 29};
 
 FileWriter::FileWriter(std::function<void(message)> _message_written_upcall,

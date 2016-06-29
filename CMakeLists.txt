@@ -6,15 +6,17 @@ add_subdirectory(rdmc EXCLUDE_FROM_ALL)
 add_subdirectory(sst EXCLUDE_FROM_ALL)
 add_subdirectory(experiments)
 add_custom_target(
-	mutils_serialization
-	COMMAND make
-	WORKING_DIRECTORY ./serialization
-)
-add_custom_target(
 	mutils
 	COMMAND make
 	WORKING_DIRECTORY ./mutils
 )
+include_directories(mutils)
+add_custom_target(
+	mutils_serialization
+	COMMAND make
+	WORKING_DIRECTORY ./serialization
+)
+include_directories(serialization)
 find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./serialization)
 
 add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp filewriter.cpp)

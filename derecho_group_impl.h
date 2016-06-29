@@ -195,8 +195,8 @@ DerechoGroup<N>::DerechoGroup(std::vector<node_id_t> _members, node_id_t my_node
 
 
 template<unsigned int N>
-std::function<void(FileWriter::message)> DerechoGroup<N>::make_file_written_callback() {
-    return [this](FileWriter::message m) {
+std::function<void(persistence::message)> DerechoGroup<N>::make_file_written_callback() {
+    return [this](persistence::message m) {
         //m.sender is an ID, not a rank
         int sender_rank;
         for(sender_rank = 0; sender_rank < num_members; ++sender_rank) {
@@ -363,7 +363,7 @@ void DerechoGroup<N>::deliver_message(Message& msg) {
         callbacks.global_stability_callback(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
         if(file_writer) {
             //msg.sender_rank is the 0-indexed rank within this group, but FileWriter::message needs the sender's globally unique ID
-            FileWriter::message msg_for_filewriter{buf + h->header_size, msg.size, members[msg.sender_rank], (uint64_t) msg.index};
+            persistence::message msg_for_filewriter{buf + h->header_size, msg.size, members[msg.sender_rank], (uint64_t) msg.index};
             auto sequence_number = msg.index * num_members + msg.sender_rank;
             non_persistent_messages.emplace(sequence_number, std::move(msg));
             file_writer->write_message(msg_for_filewriter);
@@ -445,7 +445,7 @@ void DerechoGroup<N>::register_predicates(){
     auto sender_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
         long long int seq_num = next_message_to_deliver*num_members + member_index;
         for (int i = 0; i < num_members; ++i) {
-            if (sst[i].delivered_num < seq_num) {
+            if (sst[i].delivered_num < seq_num || (file_writer && sst[i].persisted_num < seq_num)) {
                 return false;
             }
         }
@@ -509,8 +509,8 @@ void DerechoGroup<N>::send_loop() {
         }
 
         for (int i = 0; i < num_members; ++i) {
-            if ((*sst)[i].delivered_num < (msg.index-window_size)*num_members + member_index
-                    || (file_writer && (*sst)[i].persisted_num < (msg.index-window_size)*num_members + member_index)) {
+            if ((*sst)[i].delivered_num < (msg.index - window_size) * num_members + member_index
+                    || (file_writer && (*sst)[i].persisted_num < (msg.index - window_size) * num_members + member_index)) {
                 return false;
             }
         }
