@@ -173,7 +173,7 @@ class DerechoGroup {
     std::thread timeout_thread;
 
     /** The SST, shared between this group and its GMS. */
-    std::shared_ptr<sst::SST<DerechoRow<N>>>sst;
+    std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
 
     using pred_handle = typename sst::SST<DerechoRow<N>>::Predicates::pred_handle;
     pred_handle stability_pred_handle;
@@ -192,7 +192,7 @@ class DerechoGroup {
     void create_rdmc_groups();
     void initialize_sst_row();
     void register_predicates();
-    void deliver_message(Message& msg);
+    void deliver_message(Message &msg);
 
 public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
@@ -211,9 +211,9 @@ public:
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         DerechoGroup &&old_group);
     ~DerechoGroup();
-    void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);
+    void deliver_messages_upto(const std::vector<long long int> &max_indices_for_senders);
     /** get a pointer into the buffer, to write data into it before sending */
-    char* get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
+    char *get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
     /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
      * This still allows making multiple send calls without acknowledgement; at a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
@@ -223,7 +223,7 @@ public:
     /** Debugging function; prints the current state of the SST to stdout. */
     void debug_print();
     static long long unsigned int compute_max_msg_size(const long long unsigned int max_payload_size,
-        const long long unsigned int block_size);
+                                                       const long long unsigned int block_size);
 };
 }  // namespace derecho
 

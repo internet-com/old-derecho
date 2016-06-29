@@ -205,7 +205,7 @@ DerechoGroup<N>::DerechoGroup(
     //    endl;
 }
 
-template<unsigned int N>
+template <unsigned int N>
 std::function<void(persistence::message)> DerechoGroup<N>::make_file_written_callback() {
     return [this](persistence::message m) {
         //m.sender is an ID, not a rank
@@ -494,8 +494,8 @@ void DerechoGroup<N>::register_predicates() {
         }
     };
     delivery_pred_handle = sst->predicates.insert(delivery_pred, delivery_trig, sst::PredicateType::RECURRENT);
-    
-    auto sender_pred = [this] (const sst::SST <DerechoRow<N>, sst::Mode::Writes> & sst) {
+
+    auto sender_pred = [this](const sst::SST<DerechoRow<N>, sst::Mode::Writes> &sst) {
         long long int seq_num = next_message_to_deliver*num_members + member_index;
         for (int i = 0; i < num_members; ++i) {
             if (sst[i].delivered_num < seq_num || (file_writer && sst[i].persisted_num < seq_num)) {

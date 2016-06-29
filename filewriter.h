@@ -15,17 +15,17 @@ namespace derecho {
 
 class FileWriter {
 public:
-//  const uint32_t MSG_LOCALLY_STABLE = 0x1;
-//  const uint32_t MSG_GLOBAL_ORDERED = 0x2;
-//  const uint32_t MSG_GLOBAL_STABLE = 0x4;
-//  const uint32_t MSG_LOCALLY_PERSISTENT = 0x8;
+    //  const uint32_t MSG_LOCALLY_STABLE = 0x1;
+    //  const uint32_t MSG_GLOBAL_ORDERED = 0x2;
+    //  const uint32_t MSG_GLOBAL_STABLE = 0x4;
+    //  const uint32_t MSG_LOCALLY_PERSISTENT = 0x8;
 
 private:
-  std::function<void(persistence::message)> message_written_upcall;
+    std::function<void(persistence::message)> message_written_upcall;
 
-  std::mutex pending_writes_mutex;
-  std::condition_variable pending_writes_cv;
-  std::queue<persistence::message> pending_writes;
+    std::mutex pending_writes_mutex;
+    std::condition_variable pending_writes_cv;
+    std::queue<persistence::message> pending_writes;
 
     bool exit;
 
@@ -36,9 +36,9 @@ private:
     void issue_callbacks();
 
 public:
-  FileWriter(std::function<void(persistence::message)> _message_written_upcall,
-             std::string filename);
-  ~FileWriter();
+    FileWriter(std::function<void(persistence::message)> _message_written_upcall,
+               std::string filename);
+    ~FileWriter();
 
     FileWriter(FileWriter &) = delete;
     FileWriter(FileWriter &&) = default;
@@ -46,7 +46,7 @@ public:
     FileWriter &operator=(FileWriter &) = delete;
     FileWriter &operator=(FileWriter &&) = default;
 
-  void set_message_written_upcall(std::function<void(persistence::message)> _message_written_upcall);
-  void write_message(persistence::message m);
+    void set_message_written_upcall(std::function<void(persistence::message)> _message_written_upcall);
+    void write_message(persistence::message m);
 };
 }

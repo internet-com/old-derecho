@@ -13,30 +13,28 @@ namespace derecho {
 
 namespace persistence {
 
-
 struct message {
-        char *data;
-        uint64_t length;
+    char *data;
+    uint64_t length;
 
-        uint32_t sender;
-        uint64_t index;
+    uint32_t sender;
+    uint64_t index;
 };
 
-
 struct __attribute__((__packed__)) header {
-        uint8_t magic[8];
-        uint32_t version;
+    uint8_t magic[8];
+    uint32_t version;
 };
 
 struct __attribute__((__packed__)) message_metadata {
-        uint32_t sender;
-        uint32_t padding;
+    uint32_t sender;
+    uint32_t padding;
 
-        uint64_t index;
+    uint64_t index;
 
-        uint64_t offset;
-        uint64_t length;
+    uint64_t offset;
+    uint64_t length;
 };
 
-} // namespace persistence
-} // namespace derecho
+}  // namespace persistence
+}  // namespace derecho
