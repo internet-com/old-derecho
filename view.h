@@ -22,11 +22,10 @@
 
 namespace derecho {
 
-
 class View : public mutils::ByteRepresentable {
     public:
         /** Upper bound on the number of members that will ever be in any one view. */
-  static constexpr int MAX_MEMBERS = ::MAX_MEMBERS;
+        static constexpr int MAX_MEMBERS = ::MAX_MEMBERS;
 
         using DerechoSST = sst::SST<DerechoRow<MAX_MEMBERS>>;
 
@@ -86,17 +85,8 @@ class View : public mutils::ByteRepresentable {
         View(const int vid, const std::vector<node_id_t>& members, const std::vector<ip_addr>& member_ips,
                 const std::vector<char>& failed, const int nFailed, const int num_members, const int my_rank) :
             vid(vid), members(members), member_ips(member_ips), failed(failed), nFailed(nFailed), num_members(num_members), my_rank(my_rank) {}
-
-//    public:
-//        /** Copy constructor, used only by deserialization. Copies all fields except the RDMC and SST pointers,
-//         * which are set to null because they need to be set manually after deserializing anyway. */
-//        View(const View& other) : vid(other.vid), members(other.members), member_ips(other.member_ips),
-//                failed(other.failed), nFailed(other.nFailed), who(other.who), num_members(other.num_members),
-//                my_rank(other.my_rank), rdmc_sending_group(nullptr), gmsSST(nullptr) {}
 };
 
 }
-
-
 
 #endif /* VIEW_H_ */

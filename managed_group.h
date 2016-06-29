@@ -18,38 +18,35 @@
 namespace derecho {
 
 struct derecho_exception : public std::exception {
-    public:
-        const std::string message;
-        derecho_exception(const std::string& message) : message(message) {}
+public:
+    const std::string message;
+    derecho_exception(const std::string &message) : message(message) {}
 
-        const char * what() const noexcept {
-            return message.c_str();
-        }
+    const char *what() const noexcept { return message.c_str(); }
 };
 
-template<typename T>
+template <typename T>
 class LockedQueue {
+private:
+    using unique_lock_t = std::unique_lock<std::mutex>;
+    std::mutex mutex;
+    std::list<T> underlying_list;
+
+public:
+    struct LockedListAccess {
     private:
-        using unique_lock_t = std::unique_lock<std::mutex>;
-        std::mutex mutex;
-        std::list<T> underlying_list;
+        unique_lock_t lock;
     public:
-        struct LockedListAccess {
-            private:
-                unique_lock_t lock;
-            public:
-                std::list<T> &access;
-                LockedListAccess(std::mutex& m, std::list<T>& a) :
-                    lock(m), access(a) {};
-        };
-        LockedListAccess locked() {
-            return LockedListAccess{ mutex, underlying_list };
-        }
+        std::list<T> &access;
+        LockedListAccess(std::mutex &m, std::list<T> &a) : lock(m), access(a){};
+    };
+    LockedListAccess locked() {
+        return LockedListAccess{mutex, underlying_list};
+    }
 };
 
 class ManagedGroup {
-    private:
-
+private:
         using pred_handle = View::DerechoSST::Predicates::pred_handle;
 
         /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
@@ -69,11 +66,11 @@ class ManagedGroup {
         tcp::socket joining_client_socket;
         /** The node ID that has been assigned to the client that is currently joining, if any. */
         node_id_t joining_client_id;
-		/** A cached copy of the last known value of this node's suspected[] array.
-		 * Helps the SST predicate detect when there's been a change to suspected[].*/ 
-		std::vector<bool> last_suspected;
+        /** A cached copy of the last known value of this node's suspected[] array.
+         * Helps the SST predicate detect when there's been a change to suspected[].*/
+        std::vector<bool> last_suspected;
 
-		/** The port that this instance of the GMS communicates on. */
+        /** The port that this instance of the GMS communicates on. */
         const int gms_port;
 
         tcp::connection_listener server_socket;
@@ -116,8 +113,8 @@ class ManagedGroup {
         static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
         static int min_acked(const View::DerechoSST& gmsSST, const std::vector<char>& failed);
 
-		/** Constructor helper method to encapsulate creating all the predicates. */
-		void register_predicates();
+        /** Constructor helper method to encapsulate creating all the predicates. */
+        void register_predicates();
 
         /** Creates the SST and derecho_group for the current view, using the current view's member list.
          * The parameters are all the possible parameters for constructing derecho_group. */
@@ -137,40 +134,59 @@ class ManagedGroup {
         std::unique_ptr<View> next_view;
         std::unique_ptr<View> curr_view; //must be a pointer so we can re-assign it
 
-    public:
-        /** Constructor, starts or joins a managed Derecho group.
-         * The rest of the parameters are the parameters for the derecho_group that should
-         * be constructed for communications within this managed group. */
-        ManagedGroup(const int gms_port, const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id, node_id_t leader_id,
-                long long unsigned int _max_payload_size, CallbackSet stability_callbacks, long long unsigned int _block_size,
-                std::string filename = std::string(), unsigned int _window_size = 3, rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
-        ~ManagedGroup();
+public:
+    /** Constructor, starts or joins a managed Derecho group.
+     * The rest of the parameters are the parameters for the derecho_group that
+     * should
+     * be constructed for communications within this managed group. */
+    ManagedGroup(const int gms_port,
+                 const std::map<node_id_t, ip_addr> &member_ips,
+                 node_id_t my_id, node_id_t leader_id,
+                 long long unsigned int _max_payload_size,
+                 CallbackSet stability_callbacks,
+                 long long unsigned int _block_size,
+                 std::string filename = std::string(),
+                 unsigned int _window_size = 3,
+                 rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+    ~ManagedGroup();
 
-        static void global_setup(const std::map<node_id_t, ip_addr>& member_ips, node_id_t my_id);
-        /** Causes this node to cleanly leave the group by setting itself to "failed." */
-        void leave();
-        /** Creates and returns a vector listing the nodes that are currently members of the group. */
-  std::vector<node_id_t> get_members();
-        /** Gets a pointer into the managed DerechoGroup's send buffer, at a position where
-         * there are at least payload_size bytes remaining in the buffer. The returned pointer
-         * can be used to write a message into the buffer. (Analogous to DerechoGroup::get_position) */
-        char* get_sendbuffer_ptr(long long unsigned int payload_size, int pause_sending_turns = 0);
-        /** Instructs the managed DerechoGroup to send the next message. This returns immediately;
-         * the send is scheduled to happen some time in the future. */
-        void send();
-        /** Reports to the GMS that the given node has failed. */
-        void report_failure(const node_id_t who);
-        /** Waits until all members of the group have called this function. */
-        void barrier_sync();
-        void debug_print_status() const;
-		static void log_event(const std::string& event_text) {
-			util::debug_log().log_event(event_text);
-		}
-		static void log_event(const std::stringstream& event_text) {
-		    util::debug_log().log_event(event_text);
-		}
-		void print_log(std::ostream& output_dest) const;
-
+    static void global_setup(const std::map<node_id_t, ip_addr> &member_ips,
+                             node_id_t my_id);
+    /** Causes this node to cleanly leave the group by setting itself to
+     * "failed."
+     */
+    void leave();
+    /** Creates and returns a vector listing the nodes that are currently
+     * members
+     * of the group. */
+    std::vector<node_id_t> get_members();
+    /** Gets a pointer into the managed DerechoGroup's send buffer, at a
+     * position
+     * where
+     * there are at least payload_size bytes remaining in the buffer. The
+     * returned
+     * pointer
+     * can be used to write a message into the buffer. (Analogous to
+     * DerechoGroup::get_position) */
+    char *get_sendbuffer_ptr(long long unsigned int payload_size,
+                             int pause_sending_turns = 0);
+    /** Instructs the managed DerechoGroup to send the next message. This
+     * returns
+     * immediately;
+     * the send is scheduled to happen some time in the future. */
+    void send();
+    /** Reports to the GMS that the given node has failed. */
+    void report_failure(const node_id_t who);
+    /** Waits until all members of the group have called this function. */
+    void barrier_sync();
+    void debug_print_status() const;
+    static void log_event(const std::string &event_text) {
+        util::debug_log().log_event(event_text);
+    }
+    static void log_event(const std::stringstream &event_text) {
+        util::debug_log().log_event(event_text);
+    }
+    void print_log(std::ostream &output_dest) const;
 };
 
 } /* namespace derecho */

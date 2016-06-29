@@ -22,12 +22,19 @@
  * cleanly accept stream-constructed messages.
  * @param out The ostringstream to operate on
  * @param t The item to input into the string
- * @return An rvalue reference to the ostringstream (basically, "return *this" but correctly typed).
+ * @return An rvalue reference to the ostringstream (basically, "return *this"
+ * but correctly typed).
  */
-template<typename S, typename T,
-        class = typename std::enable_if<std::is_base_of<std::basic_ostream<typename S::char_type, typename S::traits_type>, S>::value>::type>
-S&& operator<<(S&& out, const T& t) {
-    static_cast<std::basic_ostream<typename S::char_type, typename S::traits_type>&>(out) << t;
+template <
+    typename S, typename T,
+    class = typename std::enable_if<std::is_base_of<
+        std::basic_ostream<typename S::char_type, typename S::traits_type>,
+        S>::value>::type>
+S &&operator<<(S &&out, const T &t) {
+    static_cast<
+        std::basic_ostream<typename S::char_type, typename S::traits_type> &>(
+        out)
+        << t;
     return std::move(out);
 }
 
@@ -40,23 +47,22 @@ extern std::chrono::high_resolution_clock::time_point program_start_time;
 namespace util {
 
 class Logger {
-    private:
-        std::mutex log_mutex;
+private:
+    std::mutex log_mutex;
 
-    public:
-        std::vector<std::string> events;
-        std::vector<std::chrono::microseconds::rep> times;
-        size_t curr_event;
+public:
+    std::vector<std::string> events;
+    std::vector<std::chrono::microseconds::rep> times;
+    size_t curr_event;
 
-        Logger() : events(10000000), times(10000000), curr_event(0) {};
+    Logger() : events(10000000), times(10000000), curr_event(0){};
 
-        void log_event(std::string event_text);
-        void log_event(const std::stringstream& event_text);
-
+    void log_event(std::string event_text);
+    void log_event(const std::stringstream &event_text);
 };
 
 /** Gets a single global Logger instance to use for debugging. */
-Logger& debug_log();
+Logger &debug_log();
 
 } /* namespace util */
 } /* namespace derecho */

@@ -27,31 +27,26 @@ private:
   std::condition_variable pending_writes_cv;
   std::queue<persistence::message> pending_writes;
 
-  std::mutex pending_callbacks_mutex;
-  std::condition_variable pending_callbacks_cv;
-  std::queue<std::function<void()>> pending_callbacks;
+    bool exit;
 
-  bool exit;
+    std::thread writer_thread;
+    std::thread callback_thread;
 
-  std::thread writer_thread;
-  std::thread callback_thread;
-
-  void perform_writes(std::string filename);
-  void issue_callbacks();
+    void perform_writes(std::string filename);
+    void issue_callbacks();
 
 public:
   FileWriter(std::function<void(persistence::message)> _message_written_upcall,
              std::string filename);
   ~FileWriter();
 
-  FileWriter(FileWriter &) = delete;
-  FileWriter(FileWriter &&) = default;
+    FileWriter(FileWriter &) = delete;
+    FileWriter(FileWriter &&) = default;
 
-  FileWriter &operator=(FileWriter &) = delete;
-  FileWriter &operator=(FileWriter &&) = default;
+    FileWriter &operator=(FileWriter &) = delete;
+    FileWriter &operator=(FileWriter &&) = default;
 
   void set_message_written_upcall(std::function<void(persistence::message)> _message_written_upcall);
   void write_message(persistence::message m);
 };
-
 }
