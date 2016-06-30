@@ -16,8 +16,8 @@ using namespace persistence;
 
 const uint8_t MAGIC_NUMBER[8] = {'D', 'E', 'R', 'E', 'C', 'H', 'O', 29};
 
-FileWriter::FileWriter(std::function<void(message)> _message_written_upcall,
-                       std::string filename)
+FileWriter::FileWriter(const std::function<void(message)>& _message_written_upcall,
+                       const std::string& filename)
     : message_written_upcall(_message_written_upcall),
       exit(false),
       writer_thread(&FileWriter::perform_writes, this, filename),
@@ -39,7 +39,7 @@ FileWriter::~FileWriter() {
 }
 
 void FileWriter::set_message_written_upcall(
-    std::function<void(message)> _message_written_upcall) {
+    const std::function<void(message)>& _message_written_upcall) {
     message_written_upcall = _message_written_upcall;
 }
 
