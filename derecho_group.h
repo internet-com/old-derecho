@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "derecho_row.h"
+#include "derecho_caller.h"
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
 
@@ -84,6 +85,7 @@ struct MessageTrackingRow {
  * send
  * template parameter is the maximum possible group size - used for the GMS SST
  * row-struct */
+
 template <unsigned int N, typename handlersType>
 class DerechoGroup {
     /** vector of member id's */
@@ -103,7 +105,7 @@ class DerechoGroup {
     const rdmc::send_algorithm type;
     const unsigned int window_size;
     /** callback for when a message is globally stable */
-    const handlersType handlers;
+    handlersType group_handlers;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
     unsigned int total_message_buffers;
@@ -184,7 +186,7 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         std::vector<MessageBuffer>& free_message_buffers,
-        long long unsigned int _max_payload_size, handlersType _handlers,
+        long long unsigned int _max_payload_size, handlersType _group_handlers,
         long long unsigned int _block_size, unsigned int _window_size = 3,
         unsigned int timeout_ms = 1,
         rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
@@ -206,15 +208,34 @@ public:
      * a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
     bool send();
+  
+    template <unsigned long long tag, typename... Args>
+    auto orderedSend(const vector<Node_id>& who, Args&&... args) {
+        char* buf;
+        auto max_payload_size = max_msg_size - sizeof(header);
+        while((buf = get_position(max_payload_size)) == nullptr) {
+        }
+        auto futures = group_handlers->Send<tag>(
+            who, [&buf, max_payload_size](int size) -> char* {
+                if(size <= max_payload_size) {
+                    return buf;
+                } else {
+                    return nullptr;
+                }
+            }/*, std::forward<Args>(args)...*/);
+        while(!send()) {
+        };
+        return futures;
+    }
     /** Stops all sending and receiving in this group, in preparation for
-     * shutting it down. */
+       * shutting it down. */
     void wedge();
     /** Debugging function; prints the current state of the SST to stdout. */
     void debug_print();
     static long long unsigned int compute_max_msg_size(
         const long long unsigned int max_payload_size,
         const long long unsigned int block_size);
-};
+    };
 }  // namespace derecho
 
 #include "derecho_group_impl.h"

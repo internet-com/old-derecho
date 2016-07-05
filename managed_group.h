@@ -198,6 +198,11 @@ public:
      * returns immediately;
      * the send is scheduled to happen some time in the future. */
     void send();
+    template <unsigned long long tag, typename... Args>
+    auto orderedSend(const vector<Node_id>& who, Args... args) {
+      return curr_view->rdmc_sending_group->orderedSend<tag,Args...>(who, args...);
+    }
+
     /** Reports to the GMS that the given node has failed. */
     void report_failure(const node_id_t who);
     /** Waits until all members of the group have called this function. */
@@ -210,7 +215,7 @@ public:
         util::debug_log().log_event(event_text);
     }
     void print_log(std::ostream& output_dest) const;
-};
+      };
 
 } /* namespace derecho */
 

@@ -54,7 +54,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     vector<MessageBuffer>& _free_message_buffers,
-    long long unsigned int _max_payload_size, handlersType _handlers,
+    long long unsigned int _max_payload_size, handlersType _group_handlers,
     long long unsigned int _block_size, unsigned int _window_size,
     unsigned int timeout_ms, rdmc::send_algorithm _type)
     : members(_members),
@@ -64,7 +64,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
       type(_type),
       window_size(_window_size),
-      handlers(_handlers),
+      group_handlers(std::move(_group_handlers)),
       rdmc_group_num_offset(0),
       sender_timeout(timeout_ms),
       sst(_sst) {
@@ -101,12 +101,14 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       max_msg_size(old_group.max_msg_size),
       type(old_group.type),
       window_size(old_group.window_size),
-      handlers(old_group.handlers),
+      group_handlers(std::move(old_group.group_handlers)),
       rdmc_group_num_offset(old_group.rdmc_group_num_offset +
                             old_group.num_members),
       total_message_buffers(old_group.total_message_buffers),
       sender_timeout(old_group.sender_timeout),
       sst(_sst) {
+  // group_handlers = std::move(old_group.group_handlers);
+
     // Make sure rdmc_group_num_offset didn't overflow.
     assert(old_group.rdmc_group_num_offset <=
            std::numeric_limits<uint16_t>::max() - old_group.num_members -
@@ -335,8 +337,7 @@ void DerechoGroup<N, handlersType>::deliver_message(msg_info& msg) {
     if(msg.size > 0) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*)(buf);
-        // come back to this
-        handlers(msg.sender_rank, msg.index, buf + h->header_size, msg.size);
+        group_handlers->handle_receive(buf + h->header_size, msg.size);
         free_message_buffers.push_back(std::move(msg.message_buffer));
         //        cout << "Size is " << free_message_buffers.size() << ".
         //        Delivered a message, added its buffer to
@@ -592,6 +593,12 @@ bool DerechoGroup<N, handlersType>::send() {
     sender_cv.notify_all();
     return true;
 }
+  
+// template <unsigned int N, typename handlersType>
+// template <unsigned long long tag, typename... Args>
+// auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who,
+//                                                Args&&... args) {
+// }
 
 template <unsigned int N, typename handlersType>
 void DerechoGroup<N, handlersType>::debug_print() {

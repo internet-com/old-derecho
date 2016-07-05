@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "../derecho_group.h"
+#include "../derecho_caller.h"
 #include "../managed_group.h"
 #include "../view.h"
 #include "block_size.h"
@@ -20,6 +21,10 @@ using std::endl;
 
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
+
+int stability_callback (int sender_id, long long int index, char *buf, long long int msg_size) {
+  return 0;
+}
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
@@ -42,13 +47,21 @@ int main(int argc, char *argv[]) {
     long long unsigned int block_size = get_block_size(max_msg_size);
     int num_messages = 10;
 
-    auto stability_callback =
-        [](int sender_id, long long int index, char *buf,
-           long long int msg_size) mutable { cout << "Here" << endl; };
+    // auto stability_callback =
+    //     [](int sender_id, long long int index, char *buf,
+    //        long long int msg_size) mutable { return 0;};
 
-    derecho::ManagedGroup<decltype(stability_callback)> managed_group(
+    auto group_handlers = handlers(node_rank, 0, stability_callback);
+
+    derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
-        stability_callback, block_size);
+        std::move(group_handlers), block_size);
+
+    {
+      const vector<Node_id> who;
+      int sender_id{0}; long long int index{0}; char *buf{0}; long long int msg_size{0};
+      managed_group.orderedSend<0,int, long long int, char *, long long int>(who,sender_id, index, buf,msg_size);
+    }
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
 

@@ -110,7 +110,7 @@ ManagedGroup<handlersType>::ManagedGroup(
     //    }
 
     log_event("Initializing SST and RDMC for the first time.");
-    setup_sst_and_rdmc(message_buffers, _max_payload_size, handlers,
+    setup_sst_and_rdmc(message_buffers, _max_payload_size, std::move(handlers),
                        _block_size, _window_size, _type);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
@@ -546,7 +546,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(
     curr_view->rdmc_sending_group = make_unique<
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
-        curr_view->gmsSST, message_buffers, max_payload_size, handlers,
+        curr_view->gmsSST, message_buffers, max_payload_size, std::move(handlers),
         block_size, window_size, 1, type);
 }
 

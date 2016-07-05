@@ -25,4 +25,4 @@ target_link_libraries(gms_test2 derecho)
 
 include_directories("mutils" "mutils-serialization")
 add_executable(test_inheritance_plan test_inheritance_plan.cpp)
-target_link_libraries(test_inheritance_plan mutils-serialization)
+target_link_libraries(test_inheritance_plan mutils-serialization pthread)
