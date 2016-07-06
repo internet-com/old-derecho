@@ -215,14 +215,14 @@ public:
         auto max_payload_size = max_msg_size - sizeof(header);
         while((buf = get_position(max_payload_size)) == nullptr) {
         }
-        auto futures = group_handlers->Send<tag>(
+        auto futures = group_handlers->template Send<tag>(
             who, [&buf, max_payload_size](int size) -> char* {
                 if(size <= max_payload_size) {
                     return buf;
                 } else {
                     return nullptr;
                 }
-            }/*, std::forward<Args>(args)...*/);
+            }, std::forward<Args>(args)...);
         while(!send()) {
         };
         return futures;

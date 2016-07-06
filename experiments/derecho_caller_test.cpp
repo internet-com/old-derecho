@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
     {
       const vector<Node_id> who;
       int sender_id{0}; long long int index{0}; char *buf{0}; long long int msg_size{0};
-      managed_group.orderedSend<0,int, long long int, char *, long long int>(who,sender_id, index, buf,msg_size);
+      managed_group.template orderedSend<0,int, long long int, char *, long long int>(who,sender_id, index, buf,msg_size);
     }
 
     cout << "Finished constructing/joining ManagedGroup" << endl;

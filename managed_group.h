@@ -200,7 +200,7 @@ public:
     void send();
     template <unsigned long long tag, typename... Args>
     auto orderedSend(const vector<Node_id>& who, Args... args) {
-      return curr_view->rdmc_sending_group->orderedSend<tag,Args...>(who, args...);
+      return curr_view->rdmc_sending_group->template orderedSend<tag,Args...>(who, args...);
     }
 
     /** Reports to the GMS that the given node has failed. */
