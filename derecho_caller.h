@@ -198,7 +198,7 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     // use this from within a derived class to receive precisely this
     // RemoteInvocable
     //(this way, all RemoteInvocable methods do not need to worry about type
-    //collisions)
+    // collisions)
     inline RemoteInvocable &handler(
         std::integral_constant<FunctionTag, tag> const *const,
         const Args &...) {
@@ -214,30 +214,31 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         return size;
     }
 
-  struct send_return{
-    std::size_t size;
-    char * buf;
-    QueryResults<Ret> results;
-  };
+    struct send_return {
+        std::size_t size;
+        char *buf;
+        QueryResults<Ret> results;
+    };
 
-  send_return Send(
-        const who_t &destinations, const std::function<char *(int)> &out_alloc,
-        const std::decay_t<Args> &... a) {
+  send_return Send(const who_t &destinations, size_t header_size,
+                     const std::function<char *(int)> &out_alloc,
+                     const std::decay_t<Args> &... a) {
         auto invocation_id = mutils::long_rand();
-	const std::size_t size = mutils::bytes_size(invocation_id);
-	{ auto t = {mutils::bytes_size(a)...};
-	  size += std::accumulate(t.begin(), t.end(), 0);
-	}
-	char* serialized_args = out_alloc(size);
+        std::size_t size = mutils::bytes_size(invocation_id);
+        {
+            auto t = {mutils::bytes_size(a)...};
+            size += std::accumulate(t.begin(), t.end(), 0);
+        }
+        char *serialized_args = out_alloc(size+header_size) + header_size;
         {
             auto v = serialized_args +
                      mutils::to_bytes(invocation_id, serialized_args);
             auto check_size = mutils::bytes_size(invocation_id);
-	    {
-	      auto t = {to_bytes(v, a)...};
-	      check_size += std::accumulate(t.begin(), t.end(), 0);
-	    }
-	    assert(check_size == size);
+            {
+                auto t = {to_bytes(v, a)...};
+                check_size += std::accumulate(t.begin(), t.end(), 0);
+            }
+            assert(check_size == size);
         }
 
         lock_t l{ret_lock};
@@ -247,9 +248,7 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         // DERECHO TODO: "destinations" may be discovered lazily.
         // if that becomes the case, we must defer this until later.
         pending_results.fulfill_map(destinations);
-	if (true) QueryResults<Ret> dead = pending_results.get_future();
-        return send_return {size, serialized_args,
-	    pending_results.get_future()};
+        return send_return{size, serialized_args, pending_results.get_future()};
     }
 
     inline recv_ret receive_response(mutils::DeserializationManager *dsm,
@@ -369,7 +368,7 @@ private:
     }
     inline static auto populate_header(char *reply_buf, const Opcode &op,
                                        const Node_id &from, const who_t &to) {
-        ((Opcode *)reply_buf)[0] = op;  // what
+        ((Opcode *)reply_buf)[0] = op;                        // what
         ((Node_id *)(sizeof(Opcode) + reply_buf))[0] = from;  // from
         mutils::to_bytes(to,
                          reply_buf + sizeof(Opcode) + sizeof(Node_id));  // to
@@ -427,29 +426,28 @@ public:
 
     void handle_receive(char *buf, size_t size) {
         using namespace std::placeholders;
-	assert(size);
-	Opcode indx;
-	Node_id received_from;
-	std::unique_ptr<who_t> who_to;
-	retrieve_header(&dsm, buf, indx, received_from, who_to);
-	buf += header_space(*who_to);
-	if(std::find(who_to->begin(), who_to->end(), nid) !=
-	   who_to->end()) {
-	  who_t reply_addr{received_from};
-	  auto reply_tuple =
-	    receivers->at(indx)(&dsm, received_from, buf,
-				std::bind(extra_alloc, reply_addr, _1));
-	  auto *reply_buf = std::get<2>(reply_tuple);
-	  if(reply_buf) {
-	    reply_buf -= header_space(reply_addr);
-	    const auto id = std::get<0>(reply_tuple);
-	    const auto size = std::get<1>(reply_tuple);
-	    populate_header(reply_buf, id, nid, reply_addr);
-	    // TODO: DERECHO SEND HERE
-	    LocalMessager::get_send_to(received_from)
-	      .send(size + header_space(reply_addr), reply_buf);
-	  }
-	}
+        assert(size);
+        Opcode indx;
+        Node_id received_from;
+        std::unique_ptr<who_t> who_to;
+        retrieve_header(&dsm, buf, indx, received_from, who_to);
+        buf += header_space(*who_to);
+        if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
+            who_t reply_addr{received_from};
+            auto reply_tuple =
+                receivers->at(indx)(&dsm, received_from, buf,
+                                    std::bind(extra_alloc, reply_addr, _1));
+            auto *reply_buf = std::get<2>(reply_tuple);
+            if(reply_buf) {
+                // reply_buf -= header_space(reply_addr);
+                // const auto id = std::get<0>(reply_tuple);
+                // const auto size = std::get<1>(reply_tuple);
+                // populate_header(reply_buf, id, nid, reply_addr);
+                // TODO: DERECHO SEND HERE
+                // LocalMessager::get_send_to(received_from)
+                // .send(size + header_space(reply_addr), reply_buf);
+            }
+        }
     }
 
     // these are the functions (no names) from Fs
@@ -459,7 +457,7 @@ public:
           nid(nid),
           my_lm(LocalMessager::init_pipe(nid)),
           receivers(std::move(rvrs)) {
-        receiver.reset(new std::thread{[&]() { receive_call_loop(); }});
+        // receiver.reset(new std::thread{[&]() { receive_call_loop(); }});
     }
 
     // these are the functions (no names) from Fs
@@ -476,21 +474,22 @@ public:
     }
 
     template <FunctionTag tag, typename... Args>
-    auto Send(const who_t &who, const std::function<char *(int)> out_alloc, Args &&... args) {
+    auto Send(const who_t &who, const std::function<char *(int)> out_alloc,
+              Args &&... args) {
         // this "who" is the destination of this send.
         using namespace std::placeholders;
         constexpr std::integral_constant<FunctionTag, tag> *choice{nullptr};
         auto &hndl = this->handler(choice, args...);
-        auto sent_return = hndl.Send(who, out_alloc,
-                                    std::forward<Args>(args)...);
-        std::size_t used = sent_return.size;
+        auto sent_return =
+	  hndl.Send(who, header_space(who), out_alloc, std::forward<Args>(args)...);
+        // std::size_t used = sent_return.size;
         char *buf = sent_return.buf - header_space(who);
         populate_header(buf, hndl.invoke_id, nid, who);
         // TODO: Derecho integration site
-        for(const auto &dest : who) {
-            LocalMessager::get_send_to(dest)
-                .send(used + header_space(who), buf);
-        }
+        // for(const auto &dest : who) {
+        //     LocalMessager::get_send_to(dest)
+        //         .send(used + header_space(who), buf);
+        // }
         return std::move(sent_return.results);
     }
 
@@ -555,4 +554,3 @@ using namespace rpc;
 
 #define handlers(m, a...) \
     std::make_unique<Handlers<HANDLERS_TYPE_ARGS(a)> >(m, HANDLERS_ONLY_FUNS(a))
-

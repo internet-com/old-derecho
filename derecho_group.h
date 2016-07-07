@@ -208,25 +208,9 @@ public:
      * a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
     bool send();
-  
     template <unsigned long long tag, typename... Args>
-    auto orderedSend(const vector<Node_id>& who, Args&&... args) {
-        char* buf;
-        auto max_payload_size = max_msg_size - sizeof(header);
-        while((buf = get_position(max_payload_size)) == nullptr) {
-        }
-        auto futures = group_handlers->template Send<tag>(
-            who, [&buf, max_payload_size](int size) -> char* {
-                if(size <= max_payload_size) {
-                    return buf;
-                } else {
-                    return nullptr;
-                }
-            }, std::forward<Args>(args)...);
-        while(!send()) {
-        };
-        return futures;
-    }
+    auto orderedSend(const vector<Node_id>& who, Args&&... args);
+
     /** Stops all sending and receiving in this group, in preparation for
        * shutting it down. */
     void wedge();

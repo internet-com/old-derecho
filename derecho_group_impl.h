@@ -580,7 +580,7 @@ char* DerechoGroup<N, handlersType>::get_position(
 
     return buf + sizeof(header);
 }
-
+  
 template <unsigned int N, typename handlersType>
 bool DerechoGroup<N, handlersType>::send() {
     lock_guard<mutex> lock(msg_state_mtx);
@@ -593,12 +593,26 @@ bool DerechoGroup<N, handlersType>::send() {
     sender_cv.notify_all();
     return true;
 }
-  
-// template <unsigned int N, typename handlersType>
-// template <unsigned long long tag, typename... Args>
-// auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who,
-//                                                Args&&... args) {
-// }
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who, Args&&... args) {
+    char* buf;
+    auto max_payload_size = max_msg_size - sizeof(header);
+    while((buf = get_position(max_payload_size)) == nullptr) {
+    }
+    auto futures = group_handlers->template Send<tag>(
+        who, [&buf, max_payload_size](size_t size) -> char* {
+            if(size <= max_payload_size) {
+                return buf;
+            } else {
+                return nullptr;
+            }
+        }, std::forward<Args>(args)...);
+    while(!send()) {
+    };
+    return futures;
+}
 
 template <unsigned int N, typename handlersType>
 void DerechoGroup<N, handlersType>::debug_print() {

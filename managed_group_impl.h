@@ -927,6 +927,14 @@ void ManagedGroup<handlersType>::send() {
 }
 
 template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto ManagedGroup<handlersType>::orderedSend(const vector<Node_id>& who,
+                                             Args&&... args) {
+    return curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
+        who, std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
 std::vector<node_id_t> ManagedGroup<handlersType>::get_members() {
     lock_guard_t lock(view_mutex);
     // Since pointer swapping is atomic, this doesn't need the view_mutex - it

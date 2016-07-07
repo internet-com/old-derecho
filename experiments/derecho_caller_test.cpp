@@ -23,6 +23,13 @@ using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
 int stability_callback (int sender_id, long long int index, char *buf, long long int msg_size) {
+  cout << "sender_id = " << sender_id << " index = " << index << " buf = " << buf << " msg_size = " << msg_size << endl;
+  if (sender_id == 0) {
+    cout << "here" << endl;
+  }
+  else {
+    cout << "yo" << endl;
+  }
   return 0;
 }
 
@@ -45,7 +52,7 @@ int main(int argc, char *argv[]) {
 
     long long unsigned int max_msg_size = 1000000;
     long long unsigned int block_size = get_block_size(max_msg_size);
-    int num_messages = 10;
+    // int num_messages = 10;
 
     // auto stability_callback =
     //     [](int sender_id, long long int index, char *buf,
@@ -57,11 +64,11 @@ int main(int argc, char *argv[]) {
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
         std::move(group_handlers), block_size);
 
-    {
-      const vector<Node_id> who;
-      int sender_id{0}; long long int index{0}; char *buf{0}; long long int msg_size{0};
-      managed_group.template orderedSend<0,int, long long int, char *, long long int>(who,sender_id, index, buf,msg_size);
-    }
+    const vector<Node_id> who = {Node_id(0),Node_id(1)};
+    char buf[18] = "Here is a message";
+    long long int index = 0;
+    long long int msg_size = 18;
+    managed_group.template orderedSend<0>(who,node_rank,index,buf,msg_size);
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
 
