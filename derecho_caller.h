@@ -207,12 +207,21 @@ struct RemoteInvocable<tag, Ret(Args...)> {
 
     using barray = char *;
     using cbarray = const char *;
-    template <typename A>
-    std::size_t to_bytes(barray &v, const A &a) {
-        auto size = mutils::to_bytes(a, v);
-        v += size;
-        return size;
-    }
+
+	inline auto serialize_one(barray v){
+		return 0;
+	}
+	
+	template<typename A, typename... Rest>
+	inline auto serialize_one(barray v, const A &a, const Rest&... rest){
+		std::cout << std::endl << "this type is being serialized: " << mutils::type_name<A>() << std::endl;
+		auto size = mutils::to_bytes(a, v);
+		return size + serialize_one(v + size, rest...);
+	}
+	
+	inline auto serialize_all(barray v, const Args&... args){
+		return serialize_one(v,args...);
+	}
 
     struct send_return {
         std::size_t size;
@@ -233,11 +242,7 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         {
             auto v = serialized_args +
                      mutils::to_bytes(invocation_id, serialized_args);
-            auto check_size = mutils::bytes_size(invocation_id);
-            {
-                auto t = {to_bytes(v, a)...};
-                check_size += std::accumulate(t.begin(), t.end(), 0);
-            }
+            auto check_size = mutils::bytes_size(invocation_id) + serialize_all(v,a...);
             assert(check_size == size);
         }
 
@@ -266,15 +271,24 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         return recv_ret{0, 0, nullptr};
     }
 
-    template <typename _Type>
-    inline auto deserialize(mutils::DeserializationManager *dsm,
-                            cbarray &mut_in) {
-        using Type = std::decay_t<_Type>;
-        auto ds = mutils::from_bytes<Type>(dsm, mut_in);
-        const auto size = mutils::bytes_size(*ds);
-        mut_in += size;
-        return ds;
-    }
+	std::tuple<> _deserialize(mutils::DeserializationManager *dsm, char const * const buf){
+		return std::tuple<>{};
+	}
+	
+	template<typename fst, typename... rst>
+	std::tuple<std::unique_ptr<fst>,std::unique_ptr<rst>...> _deserialize(
+		mutils::DeserializationManager *dsm, char const * const buf, fst* , rst*...)
+		{
+			std::cout << std::endl << "this type is being deserialized: " << mutils::type_name<fst>() << std::endl;
+			using Type = std::decay_t<fst>;
+			auto ds = mutils::from_bytes<Type>(dsm,buf);
+			const auto size = mutils::bytes_size(*ds);
+			return std::tuple_cat(std::make_tuple(std::move(ds)),_deserialize(dsm,buf + size,mutils::mke_p<rst>()...));
+		}
+	
+	std::tuple<std::unique_ptr<std::decay_t<Args> >... > deserialize(mutils::DeserializationManager *dsm, char const * const buf){
+		return _deserialize(dsm,buf,mutils::mke_p<std::decay_t<Args> >()...);
+	}
 
     inline recv_ret receive_call(std::false_type const *const,
                                  mutils::DeserializationManager *dsm,
@@ -282,7 +296,8 @@ struct RemoteInvocable<tag, Ret(Args...)> {
                                  const std::function<char *(int)> &out_alloc) {
         long int invocation_id = ((long int *)_recv_buf)[0];
         auto recv_buf = _recv_buf + sizeof(long int);
-        const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
+		const auto result = mutils::callFunc([&](const auto&... a){return f(*a...);},deserialize(dsm,recv_buf));
+        //const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
         const auto result_size = mutils::bytes_size(result) + sizeof(long int);
         auto out = out_alloc(result_size);
         ((long int *)out)[0] = invocation_id;
@@ -295,7 +310,8 @@ struct RemoteInvocable<tag, Ret(Args...)> {
                                  const Node_id &, const char *_recv_buf,
                                  const std::function<char *(int)> &) {
         auto recv_buf = _recv_buf + sizeof(long int);
-        f(*deserialize<Args>(dsm, recv_buf)...);
+		mutils::callFunc([&](const auto&... a){f(*a...);},deserialize(dsm,recv_buf));
+        //f(*deserialize<Args>(dsm, recv_buf)...);
         return recv_ret{reply_id, 0, nullptr};
     }
 
