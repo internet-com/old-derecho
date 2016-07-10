@@ -338,7 +338,12 @@ void DerechoGroup<N, handlersType>::deliver_message(msg_info& msg) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*)(buf);
         group_handlers->handle_receive(buf + h->header_size, msg.size);
-        free_message_buffers.push_back(std::move(msg.message_buffer));
+        cout << "Buffer in message delivery" << endl;
+	for (unsigned int i = 0; i < max_msg_size-h->header_size; ++i) {
+	  cout << (int)(buf+h->header_size)[i] << " ";
+	}
+	cout << endl;
+	free_message_buffers.push_back(std::move(msg.message_buffer));
         //        cout << "Size is " << free_message_buffers.size() << ".
         //        Delivered a message, added its buffer to
         //        free_message_buffers." << endl;
@@ -604,13 +609,19 @@ auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who, Args
     auto futures = group_handlers->template Send<tag>(
         who, [&buf, max_payload_size](size_t size) -> char* {
             if(size <= max_payload_size) {
+                cout << "Returning buf" << endl;
                 return buf;
             } else {
                 return nullptr;
             }
         }, std::forward<Args>(args)...);
+    cout << "Buffer before sending via Derecho" << endl;
+    for (unsigned int i = 0; i < max_payload_size; ++i) {
+      cout << (int)buf[i] << " ";
+    }
+    cout << endl;
     while(!send()) {
-    };
+    }
     return futures;
 }
 

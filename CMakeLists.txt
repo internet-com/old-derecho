@@ -9,7 +9,7 @@ add_subdirectory(mutils-serialization EXCLUDE_FROM_ALL)
 add_subdirectory(experiments EXCLUDE_FROM_ALL)
 
 add_library(derecho SHARED derecho_row.cpp logger.cpp)
-target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst)
+target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst mutils-serialization)
 
 add_executable(main main.cpp)
 target_link_libraries(main derecho)
@@ -25,4 +25,4 @@ target_link_libraries(gms_test2 derecho)
 
 include_directories("mutils" "mutils-serialization")
 add_executable(test_inheritance_plan test_inheritance_plan.cpp)
-target_link_libraries(test_inheritance_plan mutils-serialization pthread)
+target_link_libraries(test_inheritance_plan mutils-serialization)

@@ -22,15 +22,22 @@ using std::endl;
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
-int stability_callback (int sender_id, long long int index, char *buf, long long int msg_size) {
-  cout << "sender_id = " << sender_id << " index = " << index << " buf = " << buf << " msg_size = " << msg_size << endl;
-  if (sender_id == 0) {
-    cout << "here" << endl;
-  }
-  else {
-    cout << "yo" << endl;
-  }
-  return 0;
+int stability_callback(int sender_id, long long int index, char *buf,
+                       long long int msg_size) {
+    // cout << "sender_id = " << sender_id << " index = " << index
+    //      << " buf = " << buf << " msg_size = " << msg_size << endl;
+    // if(sender_id == 0) {
+    //     cout << "here" << endl;
+    // } else {
+    //     cout << "yo" << endl;
+    // }
+    cout << "Here in stability callback" << endl;
+    cout << "sender_id = " << sender_id << endl;
+    if (sender_id == 1) {
+      cout << "Exiting" << endl;
+      exit(0);
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -50,7 +57,7 @@ int main(int argc, char *argv[]) {
         members[i] = i;
     }
 
-    long long unsigned int max_msg_size = 1000000;
+    long long unsigned int max_msg_size = 100;
     long long unsigned int block_size = get_block_size(max_msg_size);
     // int num_messages = 10;
 
@@ -64,12 +71,6 @@ int main(int argc, char *argv[]) {
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
         std::move(group_handlers), block_size);
 
-    const vector<Node_id> who = {Node_id(0),Node_id(1)};
-    char buf[18] = "Here is a message";
-    long long int index = 0;
-    long long int msg_size = 18;
-    managed_group.template orderedSend<0>(who,node_rank,index,buf,msg_size);
-
     cout << "Finished constructing/joining ManagedGroup" << endl;
 
     while(managed_group.get_members().size() < num_nodes) {
@@ -80,4 +81,13 @@ int main(int argc, char *argv[]) {
         cout << id << " ";
     }
     cout << endl;
+
+    const vector<Node_id> who = {Node_id(0), Node_id(1)};
+    char buf[18] = "Here is a message";
+    long long int index = 0;
+    long long int msg_size = 18;
+    managed_group.template orderedSend<0>(who, node_rank, index, buf, msg_size);
+
+    while (true) {
+    }
 }
