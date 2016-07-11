@@ -208,20 +208,20 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     using barray = char *;
     using cbarray = const char *;
 
-	inline auto serialize_one(barray v){
-		return 0;
-	}
-	
-	template<typename A, typename... Rest>
-	inline auto serialize_one(barray v, const A &a, const Rest&... rest){
-		std::cout << std::endl << "this type is being serialized: " << mutils::type_name<A>() << std::endl;
-		auto size = mutils::to_bytes(a, v);
-		return size + serialize_one(v + size, rest...);
-	}
-	
-	inline auto serialize_all(barray v, const Args&... args){
-		return serialize_one(v,args...);
-	}
+    inline auto serialize_one(barray v) { return 0; }
+
+    template <typename A, typename... Rest>
+    inline auto serialize_one(barray v, const A &a, const Rest &... rest) {
+        std::cout << std::endl
+                  << "this type is being serialized: " << mutils::type_name<A>()
+                  << std::endl;
+        auto size = mutils::to_bytes(a, v);
+        return size + serialize_one(v + size, rest...);
+    }
+
+    inline auto serialize_all(barray v, const Args &... args) {
+        return serialize_one(v, args...);
+    }
 
     struct send_return {
         std::size_t size;
@@ -242,7 +242,8 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         {
             auto v = serialized_args +
                      mutils::to_bytes(invocation_id, serialized_args);
-            auto check_size = mutils::bytes_size(invocation_id) + serialize_all(v,a...);
+            auto check_size =
+                mutils::bytes_size(invocation_id) + serialize_all(v, a...);
             assert(check_size == size);
         }
 
@@ -271,24 +272,29 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         return recv_ret{0, 0, nullptr};
     }
 
-	std::tuple<> _deserialize(mutils::DeserializationManager *dsm, char const * const buf){
-		return std::tuple<>{};
-	}
-	
-	template<typename fst, typename... rst>
-	std::tuple<std::unique_ptr<fst>,std::unique_ptr<rst>...> _deserialize(
-		mutils::DeserializationManager *dsm, char const * const buf, fst* , rst*... rest)
-		{
-			std::cout << std::endl << "this type is being deserialized: " << mutils::type_name<fst>() << std::endl;
-			using Type = std::decay_t<fst>;
-			auto ds = mutils::from_bytes<Type>(dsm,buf);
-			const auto size = mutils::bytes_size(*ds);
-			return std::tuple_cat(std::make_tuple(std::move(ds)),_deserialize(dsm,buf + size,rest...));
-		}
-	
-	std::tuple<std::unique_ptr<std::decay_t<Args> >... > deserialize(mutils::DeserializationManager *dsm, char const * const buf){
-		return _deserialize(dsm,buf,((std::decay_t<Args>*)(nullptr))...);
-	}
+    std::tuple<> _deserialize(mutils::DeserializationManager *dsm,
+                              char const *const buf) {
+        return std::tuple<>{};
+    }
+
+    template <typename fst, typename... rst>
+    std::tuple<std::unique_ptr<fst>, std::unique_ptr<rst>...> _deserialize(
+        mutils::DeserializationManager *dsm, char const *const buf, fst *,
+        rst *... rest) {
+        std::cout << std::endl
+                  << "this type is being deserialized: "
+                  << mutils::type_name<fst>() << std::endl;
+        using Type = std::decay_t<fst>;
+        auto ds = mutils::from_bytes<Type>(dsm, buf);
+        const auto size = mutils::bytes_size(*ds);
+        return std::tuple_cat(std::make_tuple(std::move(ds)),
+                              _deserialize(dsm, buf + size, rest...));
+    }
+
+    std::tuple<std::unique_ptr<std::decay_t<Args> >...> deserialize(
+        mutils::DeserializationManager *dsm, char const *const buf) {
+        return _deserialize(dsm, buf, ((std::decay_t<Args> *)(nullptr))...);
+    }
 
     inline recv_ret receive_call(std::false_type const *const,
                                  mutils::DeserializationManager *dsm,
@@ -296,8 +302,10 @@ struct RemoteInvocable<tag, Ret(Args...)> {
                                  const std::function<char *(int)> &out_alloc) {
         long int invocation_id = ((long int *)_recv_buf)[0];
         auto recv_buf = _recv_buf + sizeof(long int);
-		const auto result = mutils::callFunc([&](const auto&... a){return f(*a...);},deserialize(dsm,recv_buf));
-        //const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
+        const auto result = mutils::callFunc([&](const auto &... a) {
+            return f(*a...);
+        }, deserialize(dsm, recv_buf));
+        // const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
         const auto result_size = mutils::bytes_size(result) + sizeof(long int);
         auto out = out_alloc(result_size);
         ((long int *)out)[0] = invocation_id;
@@ -310,8 +318,9 @@ struct RemoteInvocable<tag, Ret(Args...)> {
                                  const Node_id &, const char *_recv_buf,
                                  const std::function<char *(int)> &) {
         auto recv_buf = _recv_buf + sizeof(long int);
-		mutils::callFunc([&](const auto&... a){f(*a...);},deserialize(dsm,recv_buf));
-        //f(*deserialize<Args>(dsm, recv_buf)...);
+        mutils::callFunc([&](const auto &... a) { f(*a...); },
+                         deserialize(dsm, recv_buf));
+        // f(*deserialize<Args>(dsm, recv_buf)...);
         return recv_ret{reply_id, 0, nullptr};
     }
 
@@ -400,7 +409,7 @@ private:
         op = ((Opcode const *const)reply_buf)[0];
         from = ((Node_id const *const)(sizeof(Opcode) + reply_buf))[0];
         std::cout << "Retrieving the header:" << std::endl;
-	std::cout << op << std::endl;
+        std::cout << op << std::endl;
         std::cout << from << std::endl;
         to = mutils::from_bytes<who_t>(
             dsm, reply_buf + sizeof(Opcode) + sizeof(Node_id));
@@ -415,11 +424,11 @@ public:
     void receive_call_loop(bool continue_bool = true) {
         using namespace std::placeholders;
         while(alive) {
-	  assert(false);
-	  // dead code for now
-	  LocalMessager my_lm;
-	  // TODO: DERECHO RECEIVE HERE
-	  auto recv_pair = my_lm.receive();
+            assert(false);
+            // dead code for now
+            LocalMessager my_lm;
+            // TODO: DERECHO RECEIVE HERE
+            auto recv_pair = my_lm.receive();
             auto *buf = recv_pair.second;
             auto size = recv_pair.first;
             assert(size);
@@ -457,7 +466,7 @@ public:
         std::unique_ptr<who_t> who_to;
         retrieve_header(&dsm, buf, indx, received_from, who_to);
         buf += header_space(*who_to);
-	std::cout << "Buffer in handle_receive is: " << buf << std::endl;
+        std::cout << "Buffer in handle_receive is: " << buf << std::endl;
         if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
             who_t reply_addr{received_from};
             auto reply_tuple =
@@ -500,7 +509,7 @@ public:
     }
 
     template <FunctionTag tag, typename... Args>
-    auto Send(const who_t &who, const std::function<char *(int)>& out_alloc,
+    auto Send(const who_t &who, const std::function<char *(int)> &out_alloc,
               Args &&... args) {
         // this "who" is the destination of this send.
         using namespace std::placeholders;
@@ -514,7 +523,7 @@ public:
         // std::size_t used = sent_return.size;
         char *buf = sent_return.buf - header_size;
         populate_header(buf, hndl.invoke_id, nid, who);
-	std::cout << "Header size is: " << header_size << std::endl;
+        std::cout << "Header size is: " << header_size << std::endl;
         // TODO: Derecho integration site
         // for(const auto &dest : who) {
         //     LocalMessager::get_send_to(dest)

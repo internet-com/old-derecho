@@ -16,13 +16,14 @@ static const int GMS_PORT = 12345;
 
 using std::vector;
 using std::map;
+using std::string;
 using std::cout;
 using std::endl;
 
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
-int stability_callback(int sender_id, long long int index, char *buf,
+int stability_callback(int sender_id, long long int index, string buf,
                        long long int msg_size) {
     // cout << "sender_id = " << sender_id << " index = " << index
     //      << " buf = " << buf << " msg_size = " << msg_size << endl;
@@ -83,9 +84,9 @@ int main(int argc, char *argv[]) {
     cout << endl;
 
     const vector<Node_id> who = {Node_id(0), Node_id(1)};
-    char buf[18] = "Here is a message";
+    string buf = "Here is a message";
     long long int index = 0;
-    long long int msg_size = 18;
+    long long int msg_size = buf.size();
     managed_group.template orderedSend<0>(who, node_rank, index, buf, msg_size);
 
     while (true) {
