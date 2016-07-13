@@ -34,11 +34,11 @@ int stability_callback(int sender_id, long long int index, string buf,
     // }
     cout << "Here in stability callback" << endl;
     cout << "sender_id = " << sender_id << endl;
-    if(sender_id == 1) {
-        cout << "Exiting" << endl;
-        exit(0);
-    }
-    return 0;
+    // if(sender_id == 1) {
+    //   cout << "Exiting" << endl;
+    //   exit(0);
+    // }
+    return 17 + sender_id;
 }
 
 int main(int argc, char *argv[]) {
@@ -86,13 +86,14 @@ int main(int argc, char *argv[]) {
     string buf = "Here is a message";
     long long int index = 0;
     long long int msg_size = buf.size();
-    // managed_group.template orderedSend<0>({0, 1}, node_rank, index, buf,
-    //                                          msg_size);
-    managed_group.template p2pSend<0>(1 - node_rank, node_rank, index, buf,
-                                      msg_size);
+    // auto fut = managed_group.template orderedSend<0>({0, 1}, node_rank, index,
+    //                                                  buf, msg_size);
+    auto fut = managed_group.template p2pSend<0>(1-node_rank,
+    node_rank,index, buf, msg_size);
 
     cout << "Done" << endl;
 
-    while(true) {
-    }
+    // cout << "Obtained value: " << fut.get(0) << endl;
+    // cout << "Obtained value: " << fut.get(1) << endl;
+    cout << "Obtained value: " << fut.get(1-node_rank) << endl;
 }

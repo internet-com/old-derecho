@@ -360,8 +360,14 @@ void DerechoGroup<N, handlersType>::deliver_message(msg_info& msg) {
                 }
             });
         if(reply_size > 0) {
-            connections.tcp_write(members[msg.sender_rank],
-                                  deliveryBuffer.get(), reply_size);
+            node_id_t id = members[msg.sender_rank];
+            if(id == members[member_index]) {
+                group_handlers->handle_receive(
+                    deliveryBuffer.get(), reply_size,
+                    [](size_t size) -> char* { assert(false); });
+            } else {
+                connections.tcp_write(id, deliveryBuffer.get(), reply_size);
+            }
         }
         cout << "Buffer in message delivery" << endl;
         for(unsigned int i = 0; i < max_msg_size - h->header_size; ++i) {
@@ -662,6 +668,7 @@ template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
 auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
                                             Args&&... args) {
+    assert(dest_node != members[member_index]);
     vector<Node_id> who = {Node_id(dest_node)};
     size_t size;
     auto max_payload_size = max_msg_size - sizeof(header);
