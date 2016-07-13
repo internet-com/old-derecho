@@ -113,6 +113,8 @@ class DerechoGroup {
     /** Stores message buffers not currently in use. Protected by
      * msg_state_mtx */
     std::vector<MessageBuffer> free_message_buffers;
+    std::unique_ptr<char[]> p2pBuffer;
+    std::unique_ptr<char[]> deliveryBuffer;
 
     // int send_slot;
     // vector<int> recv_slots;
@@ -157,6 +159,7 @@ class DerechoGroup {
     std::thread sender_thread;
 
     std::thread timeout_thread;
+    std::thread rpc_thread;
 
     /** The SST, shared between this group and its GMS. */
     std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
@@ -215,7 +218,7 @@ public:
     auto orderedSend(const vector<node_id_t>& nodes, Args&&... args);
     template <unsigned long long tag, typename... Args>
     auto p2pSend(node_id_t dest_node, Args&&... args);
-
+    void rpc_process_loop();
     /** Stops all sending and receiving in this group, in preparation for
        * shutting it down. */
     void wedge();

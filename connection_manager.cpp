@@ -9,7 +9,6 @@ bool all_tcp_connections::add_connection(const node_id_t my_id,
                                          const ip_addr_t& other_ip) {
     if(other_id < my_id) {
         try {
-	  std::cout << "Changing sockets, key=" << other_id << std::endl;
             sockets[other_id] = socket(other_ip, port);
         } catch(exception) {
             std::cerr << "WARNING: failed to node " << other_id << " at "
@@ -43,7 +42,6 @@ bool all_tcp_connections::add_connection(const node_id_t my_id,
                           << std::endl;
                 return false;
             } else {
-	      std::cout << "Changing sockets, key=" << remote_id << std::endl;
                 sockets[remote_id] = std::move(s);
                 return true;
             }
@@ -90,5 +88,15 @@ bool all_tcp_connections::tcp_read(node_id_t node_id, char* buffer,
     const auto it = sockets.find(node_id);
     assert(it != sockets.end());
     return it->second.read(buffer, size);
+}
+
+int32_t all_tcp_connections::probe_all() {
+    for(auto& p : sockets) {
+        bool new_data_available = p.second.probe();
+        if(new_data_available == true) {
+            return p.first;
+        }
+    }
+    return -1;
 }
 }

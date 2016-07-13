@@ -23,5 +23,6 @@ public:
                         uint32_t _port);
     bool tcp_write(node_id_t node_id, char const* buffer, size_t size);
     bool tcp_read(node_id_t node_id, char* buffer, size_t size);
+    int32_t probe_all();
 };
 }

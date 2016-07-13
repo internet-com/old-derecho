@@ -387,100 +387,103 @@ private:
     std::unique_ptr<std::thread> receiver;
     mutils::DeserializationManager dsm{{}};
 
-    inline static auto header_space(const who_t &who) {
-        return sizeof(Opcode) + sizeof(Node_id) + mutils::bytes_size(who);
-        //          operation           from                         to
-    }
-    inline static auto populate_header(char *reply_buf, const Opcode &op,
-                                       const Node_id &from, const who_t &to) {
-        std::cout << "Populating the header:" << std::endl;
-        std::cout << op << std::endl;
-        std::cout << from << std::endl;
-        ((Opcode *)reply_buf)[0] = op;                        // what
-        ((Node_id *)(sizeof(Opcode) + reply_buf))[0] = from;  // from
-        mutils::to_bytes(to,
-                         reply_buf + sizeof(Opcode) + sizeof(Node_id));  // to
-    }
-
-    inline static auto retrieve_header(mutils::DeserializationManager *dsm,
-                                       char const *const reply_buf, Opcode &op,
-                                       Node_id &from,
-                                       std::unique_ptr<who_t> &to) {
-        op = ((Opcode const *const)reply_buf)[0];
-        from = ((Node_id const *const)(sizeof(Opcode) + reply_buf))[0];
-        std::cout << "Retrieving the header:" << std::endl;
-        std::cout << op << std::endl;
-        std::cout << from << std::endl;
-        to = mutils::from_bytes<who_t>(
-            dsm, reply_buf + sizeof(Opcode) + sizeof(Node_id));
-    }
-
     inline static char *extra_alloc(const who_t &who, int i) {
         const auto hs = header_space(who);
         return (char *)calloc(i + hs, sizeof(char)) + hs;
     }
 
 public:
-    void receive_call_loop(bool continue_bool = true) {
-        using namespace std::placeholders;
-        while(alive) {
-            assert(false);
-            // dead code for now
-            LocalMessager my_lm;
-            // TODO: DERECHO RECEIVE HERE
-            auto recv_pair = my_lm.receive();
-            auto *buf = recv_pair.second;
-            auto size = recv_pair.first;
-            assert(size);
-            Opcode indx;
-            Node_id received_from;
-            std::unique_ptr<who_t> who_to;
-            retrieve_header(&dsm, buf, indx, received_from, who_to);
-            buf += header_space(*who_to);
-            if(std::find(who_to->begin(), who_to->end(), nid) !=
-               who_to->end()) {
-                who_t reply_addr{received_from};
-                auto reply_tuple =
-                    receivers->at(indx)(&dsm, received_from, buf,
-                                        std::bind(extra_alloc, reply_addr, _1));
-                auto *reply_buf = std::get<2>(reply_tuple);
-                if(reply_buf) {
-                    reply_buf -= header_space(reply_addr);
-                    const auto id = std::get<0>(reply_tuple);
-                    const auto size = std::get<1>(reply_tuple);
-                    populate_header(reply_buf, id, nid, reply_addr);
-                    // TODO: DERECHO SEND HERE
-                    LocalMessager::get_send_to(received_from)
-                        .send(size + header_space(reply_addr), reply_buf);
-                }
-            }
-            if(!continue_bool) break;
-        }
+    inline static auto populate_header(char *reply_buf,
+                                       const std::size_t &payload_size,
+                                       const Opcode &op, const Node_id &from,
+                                       const who_t &to) {
+        std::cout << "Populating the header:" << std::endl;
+        std::cout << payload_size << std::endl;
+        std::cout << op << std::endl;
+        std::cout << from << std::endl;
+        ((std::size_t *)reply_buf)[0] = payload_size; // size
+        ((Opcode *)(sizeof(std::size_t) + reply_buf))[0] = op;  // what
+        ((Node_id *)(sizeof(std::size_t) + sizeof(Opcode) + reply_buf))[0] =
+            from;  // from
+        mutils::to_bytes(to,
+                         reply_buf + sizeof(std::size_t) + sizeof(Opcode) +
+                             sizeof(Node_id));  // to
     }
 
-    void handle_receive(char *buf, size_t size) {
+    inline static auto retrieve_header(mutils::DeserializationManager *dsm,
+                                       char const *const reply_buf,
+                                       std::size_t &payload_size, Opcode &op,
+                                       Node_id &from,
+                                       std::unique_ptr<who_t> &to) {
+        payload_size = ((std::size_t const *const)reply_buf)[0];
+        op = ((Opcode const *const)(sizeof(std::size_t) + reply_buf))[0];
+        from = ((Node_id const *const)(sizeof(std::size_t) + sizeof(Opcode) +
+                                       reply_buf))[0];
+        std::cout << "Retrieving the header:" << std::endl;
+        std::cout << payload_size << std::endl;
+        std::cout << op << std::endl;
+        std::cout << from << std::endl;
+        to = mutils::from_bytes<who_t>(
+            dsm, reply_buf + sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id));
+    }
+
+    inline static auto header_space(const who_t &who) {
+      return sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id) + mutils::bytes_size(who);
+        //          size           operation           from                         to
+    }
+
+  void handle_receive(char *buf, std::size_t size,
+                        const std::function<char *(int)> &out_alloc) {
         using namespace std::placeholders;
         assert(size);
+	std::size_t payload_size;
         Opcode indx;
         Node_id received_from;
         std::unique_ptr<who_t> who_to;
-        retrieve_header(&dsm, buf, indx, received_from, who_to);
+        retrieve_header(&dsm, buf, payload_size, indx, received_from, who_to);
         buf += header_space(*who_to);
         std::cout << "Buffer in handle_receive is: " << buf << std::endl;
         if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
             who_t reply_addr{received_from};
-            auto reply_tuple =
-                receivers->at(indx)(&dsm, received_from, buf,
-                                    std::bind(extra_alloc, reply_addr, _1));
+            auto reply_header_size = header_space(reply_addr);
+            auto reply_tuple = receivers->at(indx)(
+                &dsm, received_from, buf,
+                [&out_alloc, &reply_header_size](std::size_t size) {
+                    return out_alloc(size + reply_header_size) +
+                           reply_header_size;
+                });
             auto *reply_buf = std::get<2>(reply_tuple);
             if(reply_buf) {
-                // reply_buf -= header_space(reply_addr);
-                // const auto id = std::get<0>(reply_tuple);
-                // const auto size = std::get<1>(reply_tuple);
-                // populate_header(reply_buf, id, nid, reply_addr);
-                // TODO: DERECHO SEND HERE
-                // LocalMessager::get_send_to(received_from)
-                // .send(size + header_space(reply_addr), reply_buf);
+                reply_buf -= reply_header_size;
+                const auto id = std::get<0>(reply_tuple);
+                const auto size = std::get<1>(reply_tuple);
+                populate_header(reply_buf, size, id, nid, reply_addr);
+            }
+        }
+    }
+
+    void handle_receive(const Opcode &indx, const Node_id &received_from,
+                        const std::unique_ptr<who_t> &who_to, char *buf,
+                        std::size_t payload_size,
+                        const std::function<char *(int)> &out_alloc) {
+        using namespace std::placeholders;
+        assert(payload_size);
+        std::cout << "Buffer in handle_receive is: " << buf << std::endl;
+        if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
+            who_t reply_addr{received_from};
+            auto reply_header_size = header_space(reply_addr);
+            auto reply_tuple = receivers->at(indx)(
+                &dsm, received_from, buf,
+                [&out_alloc, &reply_header_size](std::size_t size) {
+                    return out_alloc(size + reply_header_size) +
+                           reply_header_size;
+                });
+            auto *reply_buf = std::get<2>(reply_tuple);
+            if(reply_buf) {
+                reply_buf -= reply_header_size;
+                const auto id = std::get<0>(reply_tuple);
+                const auto size = std::get<1>(reply_tuple);
+                populate_header(reply_buf, size, id, nid, reply_addr);
             }
         }
     }
@@ -509,7 +512,7 @@ public:
     }
 
     template <FunctionTag tag, typename... Args>
-    auto Send(const who_t &who, const std::function<char *(int)> &out_alloc,
+    auto Send(const who_t &who, const std::function<char *(int)>& out_alloc,
               Args &&... args) {
         // this "who" is the destination of this send.
         using namespace std::placeholders;
@@ -517,18 +520,13 @@ public:
         auto &hndl = this->handler(choice, args...);
         const auto header_size = header_space(who);
         auto sent_return =
-            hndl.Send(who, [&out_alloc, &header_size](size_t size) {
+            hndl.Send(who, [&out_alloc, &header_size](std::size_t size) {
                 return out_alloc(size + header_size) + header_size;
             }, std::forward<Args>(args)...);
-        // std::size_t used = sent_return.size;
+        std::size_t payload_size = sent_return.size;
         char *buf = sent_return.buf - header_size;
-        populate_header(buf, hndl.invoke_id, nid, who);
+        populate_header(buf, payload_size, hndl.invoke_id, nid, who);
         std::cout << "Header size is: " << header_size << std::endl;
-        // TODO: Derecho integration site
-        // for(const auto &dest : who) {
-        //     LocalMessager::get_send_to(dest)
-        //         .send(used + header_space(who), buf);
-        // }
         return std::move(sent_return.results);
     }
 

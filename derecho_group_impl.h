@@ -80,13 +80,16 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     //	}
     total_message_buffers = free_message_buffers.size();
 
+    p2pBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
+    deliveryBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
+
     initialize_sst_row();
     create_rdmc_groups();
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
 
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
-
+    rpc_thread = std::thread(&DerechoGroup::rpc_process_loop, this);
     //    cout << "DerechoGroup: Registered predicates and started thread" <<
     //    endl;
 }
@@ -95,7 +98,8 @@ template <unsigned int N, typename handlersType>
 DerechoGroup<N, handlersType>::DerechoGroup(
     std::vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-    DerechoGroup&& old_group, std::map<node_id_t, std::string>& ip_addrs, uint32_t port)
+    DerechoGroup&& old_group, std::map<node_id_t, std::string>& ip_addrs,
+    uint32_t port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
@@ -110,7 +114,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       total_message_buffers(old_group.total_message_buffers),
       sender_timeout(old_group.sender_timeout),
       sst(_sst) {
-  // group_handlers = std::move(old_group.group_handlers);
+    // group_handlers = std::move(old_group.group_handlers);
 
     // Make sure rdmc_group_num_offset didn't overflow.
     assert(old_group.rdmc_group_num_offset <=
@@ -145,6 +149,8 @@ DerechoGroup<N, handlersType>::DerechoGroup(
         free_message_buffers.push_back(std::move(msg.second.message_buffer));
     }
     old_group.current_receives.clear();
+    p2pBuffer = std::move(old_group.p2pBuffer);
+    deliveryBuffer = std::move(old_group.deliveryBuffer);
 
     // Assume that any locally stable messages failed. If we were the sender
     // than re-attempt, otherwise discard. TODO: Presumably the ragged edge
@@ -179,6 +185,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
+    rpc_thread = std::thread(&DerechoGroup::rpc_process_loop, this);
     //    cout << "DerechoGroup: Registered predicates and started thread" <<
     //    endl;
 }
@@ -340,13 +347,28 @@ void DerechoGroup<N, handlersType>::deliver_message(msg_info& msg) {
     if(msg.size > 0) {
         char* buf = msg.message_buffer.buffer.get();
         header* h = (header*)(buf);
-        group_handlers->handle_receive(buf + h->header_size, msg.size);
+        size_t reply_size = 0;
+        auto max_payload_size = max_msg_size - sizeof(header);
+        group_handlers->handle_receive(
+            buf + h->header_size, msg.size,
+            [this, &reply_size, &max_payload_size](size_t size) -> char* {
+                reply_size = size;
+                if(reply_size <= max_payload_size) {
+                    return deliveryBuffer.get();
+                } else {
+                    return nullptr;
+                }
+            });
+        if(reply_size > 0) {
+            connections.tcp_write(members[msg.sender_rank],
+                                  deliveryBuffer.get(), reply_size);
+        }
         cout << "Buffer in message delivery" << endl;
-	for (unsigned int i = 0; i < max_msg_size-h->header_size; ++i) {
-	  cout << (int)(buf+h->header_size)[i] << " ";
-	}
-	cout << endl;
-	free_message_buffers.push_back(std::move(msg.message_buffer));
+        for(unsigned int i = 0; i < max_msg_size - h->header_size; ++i) {
+            cout << (int)(buf + h->header_size)[i] << " ";
+        }
+        cout << endl;
+        free_message_buffers.push_back(std::move(msg.message_buffer));
         //        cout << "Size is " << free_message_buffers.size() << ".
         //        Delivered a message, added its buffer to
         //        free_message_buffers." << endl;
@@ -461,6 +483,9 @@ DerechoGroup<N, handlersType>::~DerechoGroup() {
     wedge();
     if(timeout_thread.joinable()) {
         timeout_thread.join();
+    }
+    if(rpc_thread.joinable()) {
+        rpc_thread.join();
     }
 }
 
@@ -588,7 +613,7 @@ char* DerechoGroup<N, handlersType>::get_position(
 
     return buf + sizeof(header);
 }
-  
+
 template <unsigned int N, typename handlersType>
 bool DerechoGroup<N, handlersType>::send() {
     lock_guard<mutex> lock(msg_state_mtx);
@@ -604,17 +629,18 @@ bool DerechoGroup<N, handlersType>::send() {
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes, Args&&... args) {
-  vector<Node_id> who;
-  for (auto id : nodes) {
-    who.push_back(Node_id(id));
-  }
+auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
+                                                Args&&... args) {
+    vector<Node_id> who;
+    for(auto id : nodes) {
+        who.push_back(Node_id(id));
+    }
     char* buf;
     auto max_payload_size = max_msg_size - sizeof(header);
     while((buf = get_position(max_payload_size)) == nullptr) {
     }
     auto futures = group_handlers->template Send<tag>(
-        who, [&buf, max_payload_size](size_t size) -> char* {
+        who, [&buf, &max_payload_size](size_t size) -> char* {
             if(size <= max_payload_size) {
                 cout << "Returning buf" << endl;
                 return buf;
@@ -623,8 +649,8 @@ auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes, 
             }
         }, std::forward<Args>(args)...);
     cout << "Buffer before sending via Derecho" << endl;
-    for (unsigned int i = 0; i < max_payload_size; ++i) {
-      cout << (int)buf[i] << " ";
+    for(unsigned int i = 0; i < max_payload_size; ++i) {
+        cout << (int)buf[i] << " ";
     }
     cout << endl;
     while(!send()) {
@@ -634,18 +660,60 @@ auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes, 
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
+auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
+                                            Args&&... args) {
     vector<Node_id> who = {Node_id(dest_node)};
-    char* buf;
     size_t size;
-    auto futures =
-      group_handlers->template Send<tag>(who, [&buf, &size](size_t _size) -> char* {
-	    size = _size;
-            buf = new char(size);
-            return buf;
+    auto max_payload_size = max_msg_size - sizeof(header);
+    auto futures = group_handlers->template Send<tag>(
+        who, [this, &max_payload_size, &size](size_t _size) -> char* {
+            size = _size;
+            if(size <= max_payload_size) {
+                return p2pBuffer.get();
+            } else {
+                return nullptr;
+            }
         }, std::forward<Args>(args)...);
-    connections.tcp_write(dest_node, buf, size);
+    connections.tcp_write(dest_node, p2pBuffer.get(), size);
     return futures;
+}
+
+template <unsigned int N, typename handlersType>
+void DerechoGroup<N, handlersType>::rpc_process_loop() {
+    const auto header_size = group_handlers->header_space({0});
+    std::unique_ptr<char[]> rpcBuffer;
+    while(!thread_shutdown) {
+        auto other_id = connections.probe_all();
+	if (other_id < 0) {
+	  continue;
+	}
+        connections.tcp_read(other_id, rpcBuffer.get(), header_size);
+        std::size_t payload_size;
+        Opcode indx;
+        Node_id received_from;
+        std::unique_ptr<who_t> who_to;
+        group_handlers->retrieve_header(nullptr, rpcBuffer.get(), payload_size, indx,
+                                       received_from, who_to);
+        connections.tcp_read(other_id, rpcBuffer.get() + header_size,
+                             payload_size);
+        auto max_payload_size = max_msg_size - sizeof(header);
+        size_t reply_size = 0;
+        group_handlers->handle_receive(
+            indx, received_from, who_to, rpcBuffer.get() + header_size,
+            payload_size, [&rpcBuffer, &max_payload_size, &reply_size](
+                              size_t _size) -> char* {
+                reply_size = _size;
+                if(reply_size <= max_payload_size) {
+                    return rpcBuffer.get();
+                } else {
+                    return nullptr;
+                }
+            });
+        if(reply_size > 0) {
+            connections.tcp_write(received_from.id, rpcBuffer.get(),
+                                  reply_size);
+        }
+    }
 }
 
 template <unsigned int N, typename handlersType>
