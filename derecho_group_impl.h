@@ -681,7 +681,8 @@ auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
 template <unsigned int N, typename handlersType>
 void DerechoGroup<N, handlersType>::rpc_process_loop() {
     const auto header_size = group_handlers->header_space({0});
-    std::unique_ptr<char[]> rpcBuffer;
+    auto max_payload_size = max_msg_size - sizeof(header);
+    std::unique_ptr<char[]> rpcBuffer = std::unique_ptr<char[]>(new char[max_payload_size]);
     while(!thread_shutdown) {
         auto other_id = connections.probe_all();
 	if (other_id < 0) {
@@ -696,7 +697,6 @@ void DerechoGroup<N, handlersType>::rpc_process_loop() {
                                        received_from, who_to);
         connections.tcp_read(other_id, rpcBuffer.get() + header_size,
                              payload_size);
-        auto max_payload_size = max_msg_size - sizeof(header);
         size_t reply_size = 0;
         group_handlers->handle_receive(
             indx, received_from, who_to, rpcBuffer.get() + header_size,

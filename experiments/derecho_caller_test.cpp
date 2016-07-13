@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
     long long int index = 0;
     long long int msg_size = buf.size();
     // managed_group.template orderedSend<0>({0, 1}, node_rank, index, buf,
-    // msg_size);
+    //                                          msg_size);
     managed_group.template p2pSend<0>(1 - node_rank, node_rank, index, buf,
                                       msg_size);
 
