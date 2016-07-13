@@ -199,7 +199,9 @@ public:
      * the send is scheduled to happen some time in the future. */
     void send();
     template <unsigned long long tag, typename... Args>
-    auto orderedSend(const vector<Node_id>& who, Args&&... args);
+    auto orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto p2pSend(node_id_t dest_node, Args&&... args);
     /** Reports to the GMS that the given node has failed. */
     void report_failure(const node_id_t who);
     /** Waits until all members of the group have called this function. */

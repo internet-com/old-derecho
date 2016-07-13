@@ -212,9 +212,9 @@ struct RemoteInvocable<tag, Ret(Args...)> {
 
     template <typename A, typename... Rest>
     inline auto serialize_one(barray v, const A &a, const Rest &... rest) {
-        std::cout << std::endl
-                  << "this type is being serialized: " << mutils::type_name<A>()
-                  << std::endl;
+        // std::cout << std::endl
+        //           << "this type is being serialized: " << mutils::type_name<A>()
+        //           << std::endl;
         auto size = mutils::to_bytes(a, v);
         return size + serialize_one(v + size, rest...);
     }

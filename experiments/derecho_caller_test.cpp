@@ -34,9 +34,9 @@ int stability_callback(int sender_id, long long int index, string buf,
     // }
     cout << "Here in stability callback" << endl;
     cout << "sender_id = " << sender_id << endl;
-    if (sender_id == 1) {
-      cout << "Exiting" << endl;
-      exit(0);
+    if(sender_id == 1) {
+        cout << "Exiting" << endl;
+        exit(0);
     }
     return 0;
 }
@@ -83,12 +83,16 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-    const vector<Node_id> who = {Node_id(0), Node_id(1)};
     string buf = "Here is a message";
     long long int index = 0;
     long long int msg_size = buf.size();
-    managed_group.template orderedSend<0>(who, node_rank, index, buf, msg_size);
+    // managed_group.template orderedSend<0>({0, 1}, node_rank, index, buf,
+    // msg_size);
+    managed_group.template p2pSend<0>(1 - node_rank, node_rank, index, buf,
+                                      msg_size);
 
-    while (true) {
+    cout << "Done" << endl;
+
+    while(true) {
     }
 }

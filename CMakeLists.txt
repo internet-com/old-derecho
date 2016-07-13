@@ -8,7 +8,7 @@ add_subdirectory(mutils EXCLUDE_FROM_ALL)
 add_subdirectory(mutils-serialization EXCLUDE_FROM_ALL)
 add_subdirectory(experiments EXCLUDE_FROM_ALL)
 
-add_library(derecho SHARED derecho_row.cpp logger.cpp)
+add_library(derecho SHARED derecho_row.cpp logger.cpp connection_manager.cpp)
 target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst mutils-serialization)
 
 add_executable(main main.cpp)

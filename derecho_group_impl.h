@@ -55,8 +55,9 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     vector<MessageBuffer>& _free_message_buffers,
     long long unsigned int _max_payload_size, handlersType _group_handlers,
-    long long unsigned int _block_size, unsigned int _window_size,
-    unsigned int timeout_ms, rdmc::send_algorithm _type)
+    long long unsigned int _block_size,
+    std::map<node_id_t, std::string>& ip_addrs, unsigned int _window_size,
+    unsigned int timeout_ms, rdmc::send_algorithm _type, uint32_t port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
@@ -65,6 +66,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       type(_type),
       window_size(_window_size),
       group_handlers(std::move(_group_handlers)),
+      connections(my_node_id, ip_addrs, port),
       rdmc_group_num_offset(0),
       sender_timeout(timeout_ms),
       sst(_sst) {
@@ -93,7 +95,7 @@ template <unsigned int N, typename handlersType>
 DerechoGroup<N, handlersType>::DerechoGroup(
     std::vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-    DerechoGroup&& old_group)
+    DerechoGroup&& old_group, std::map<node_id_t, std::string>& ip_addrs, uint32_t port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
@@ -102,6 +104,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       type(old_group.type),
       window_size(old_group.window_size),
       group_handlers(std::move(old_group.group_handlers)),
+      connections(my_node_id, ip_addrs, port),
       rdmc_group_num_offset(old_group.rdmc_group_num_offset +
                             old_group.num_members),
       total_message_buffers(old_group.total_message_buffers),
@@ -601,7 +604,11 @@ bool DerechoGroup<N, handlersType>::send() {
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who, Args&&... args) {
+auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes, Args&&... args) {
+  vector<Node_id> who;
+  for (auto id : nodes) {
+    who.push_back(Node_id(id));
+  }
     char* buf;
     auto max_payload_size = max_msg_size - sizeof(header);
     while((buf = get_position(max_payload_size)) == nullptr) {
@@ -622,6 +629,22 @@ auto DerechoGroup<N, handlersType>::orderedSend(const vector<Node_id>& who, Args
     cout << endl;
     while(!send()) {
     }
+    return futures;
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
+    vector<Node_id> who = {Node_id(dest_node)};
+    char* buf;
+    size_t size;
+    auto futures =
+      group_handlers->template Send<tag>(who, [&buf, &size](size_t _size) -> char* {
+	    size = _size;
+            buf = new char(size);
+            return buf;
+        }, std::forward<Args>(args)...);
+    connections.tcp_write(dest_node, buf, size);
     return futures;
 }
 

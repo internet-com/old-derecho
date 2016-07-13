@@ -12,6 +12,7 @@
 #include <vector>
 #include <memory>
 
+#include "connection_manager.h"
 #include "derecho_row.h"
 #include "derecho_caller.h"
 #include "rdmc/rdmc.h"
@@ -104,8 +105,8 @@ class DerechoGroup {
      *  Binomial pipeline by default. */
     const rdmc::send_algorithm type;
     const unsigned int window_size;
-    /** callback for when a message is globally stable */
     handlersType group_handlers;
+    tcp::all_tcp_connections connections;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
     unsigned int total_message_buffers;
@@ -187,15 +188,17 @@ public:
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         std::vector<MessageBuffer>& free_message_buffers,
         long long unsigned int _max_payload_size, handlersType _group_handlers,
-        long long unsigned int _block_size, unsigned int _window_size = 3,
-        unsigned int timeout_ms = 1,
-        rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+        long long unsigned int _block_size,
+        std::map<node_id_t, std::string>& ip_addrs,
+        unsigned int _window_size = 3, unsigned int timeout_ms = 1,
+        rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
+        uint32_t port = 12487);
     /** Constructor to initialize a new derecho_group from an old one,
      * preserving the same settings but providing a new list of members. */
     DerechoGroup(
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        DerechoGroup&& old_group);
+        DerechoGroup&& old_group, std::map<node_id_t, std::string>& ip_addrs, uint32_t port=12487);
     ~DerechoGroup();
     void deliver_messages_upto(
         const std::vector<long long int>& max_indices_for_senders);
@@ -209,7 +212,9 @@ public:
      * there is only one message per sender in the RDMC pipeline */
     bool send();
     template <unsigned long long tag, typename... Args>
-    auto orderedSend(const vector<Node_id>& who, Args&&... args);
+    auto orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto p2pSend(node_id_t dest_node, Args&&... args);
 
     /** Stops all sending and receiving in this group, in preparation for
        * shutting it down. */

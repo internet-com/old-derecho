@@ -547,7 +547,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
         curr_view->gmsSST, message_buffers, max_payload_size, std::move(handlers),
-        block_size, window_size, 1, type);
+        block_size, member_ips_by_id, window_size, 1, type);
 }
 
 /**
@@ -577,7 +577,7 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(
     newView.rdmc_sending_group = make_unique<
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
-        std::move(*curr_view->rdmc_sending_group));
+        std::move(*curr_view->rdmc_sending_group), member_ips_by_id);
     curr_view->rdmc_sending_group.reset();
 
     // Don't need to initialize every row in the SST - all the others will be
@@ -928,10 +928,17 @@ void ManagedGroup<handlersType>::send() {
 
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::orderedSend(const vector<Node_id>& who,
+auto ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
     return curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
-        who, std::forward<Args>(args)...);
+        nodes, std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
+    return curr_view->rdmc_sending_group->template p2pSend<tag, Args...>(
+        dest_node, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
