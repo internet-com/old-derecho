@@ -1,17 +1,17 @@
-/*
- * view.h
- *
- *  Created on: Apr 14, 2016
- *      Author: edward
+/**
+ * @file view.h
+ * @brief: Contains the definition of the View class
+ * @date: Apr 14, 2016
+ * @author: Edward
  */
 
-#ifndef VIEW_H_
-#define VIEW_H_
+#pragma once
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <iostream>
 
 #include "derecho_group.h"
 #include "sst/sst.h"
@@ -30,7 +30,7 @@ public:
     using DerechoSST = sst::SST<DerechoRow<MAX_MEMBERS>>;
 
     /** Sequential view ID: 0, 1, ... */
-    int vid;
+    int32_t vid;
     /** Node IDs of members in the current view, indexed by their SST rank. */
     std::vector<node_id_t> members;
     /** IP addresses of members in the current view, indexed by their SST rank. */
@@ -41,13 +41,13 @@ public:
     /** Number of current outstanding failures in this view. After
      * transitioning to a new view that excludes a failed member, this count
      * will decrease by one. */
-    int nFailed;
+    int32_t nFailed;
     /** ID of the node that joined or departed since the prior view; null if this is the first view */
     std::shared_ptr<node_id_t> who;
     /** Number of members in this view */
-    int num_members;
+    int32_t num_members;
     /** For member p, returns rankOf(p) */
-    int my_rank;
+    int32_t my_rank;
     /** RDMC manager object containing one RDMC group for each sender */
     std::unique_ptr<DerechoGroup<MAX_MEMBERS>> rdmc_sending_group;
     std::shared_ptr<DerechoSST> gmsSST;
@@ -57,7 +57,7 @@ public:
     View();
     /** Creates an empty new View with num_members members.
      * The vectors will have room for num_members elements. */
-    View(int num_members);
+    View(int32_t num_members);
     void newView(const View& Vc);
     /** When constructing a View piecemeal, call this after num_members has been set. */
     void init_vectors();
@@ -69,6 +69,12 @@ public:
     bool IKnowIAmLeader = false;  // I am the leader (and know it)
 
     bool IAmLeader() const;
+    /** Determines whether this node is the new leader after a view change. */
+    bool IAmTheNewLeader();
+    /** Merges changes lists from other SST rows into this node's SST row. */
+    void merge_changes();
+    /** Wedges the view, which means wedging both SST and DerechoGroup. */
+    void wedge();
 
     /** Returns a pointer to the (IP address of the) member who recently joined,
      * or null if the most recent change was not a join. */
@@ -77,16 +83,50 @@ public:
      * or null if the most recent change was not a departure. */
     std::shared_ptr<node_id_t> Departed() const;
 
+    /** Prints a human-readable string representing the state of the view.
+     *  Used for debugging only.*/
     std::string ToString() const;
 
     DEFAULT_SERIALIZATION_SUPPORT(View, vid, members, member_ips, failed, nFailed, num_members, my_rank);
 
     /** Constructor used by deserialization: constructs a View given the values of its serialized fields. */
-    View(const int vid, const std::vector<node_id_t>& members, const std::vector<ip_addr>& member_ips,
-         const std::vector<char>& failed, const int nFailed, const int num_members, const int my_rank) :
-             vid(vid), members(members), member_ips(member_ips), failed(failed), nFailed(nFailed),
-             num_members(num_members), my_rank(my_rank) {}
+    View(const int32_t vid, const std::vector<node_id_t>& members, const std::vector<ip_addr>& member_ips,
+         const std::vector<char>& failed, const int32_t nFailed, const int32_t num_members, const int32_t my_rank)
+        : vid(vid),
+          members(members),
+          member_ips(member_ips),
+          failed(failed),
+          nFailed(nFailed),
+          num_members(num_members),
+          my_rank(my_rank) {}
 };
-}
 
-#endif /* VIEW_H_ */
+/**
+ * Serializes a View to disk, using the "safe save" method (writing to a swap
+ * file first).
+ * @param view The View to serialize
+ * @param view_file_name The name of the file to create and write the View into
+ */
+void persist_view(const View& view, const std::string& view_file_name);
+
+/**
+ * Inverse of persist_view; constructs a new View using the serialized data in
+ * the file named view_file_name. If a swap file matching view_file_name exists
+ * and contains a newer or more complete View, the View from the swap file will
+ * be constructed instead (because this means a crash occurred before the swap
+ * file could be renamed).
+ * @param view_file_name The name of the file to read for a serialized View
+ * @return A new View constructed with the data in the file
+ */
+std::unique_ptr<View> load_view(const std::string& view_file_name);
+
+/**
+ * Prints a plaintext representation of the View to an output stream. This is
+ * not interchangeable with the serialization library, but can be used to create
+ * a log file parseable by standard bash tools.
+ * @param stream The output stream
+ * @param view The View to print
+ * @return The output stream
+ */
+std::ostream& operator<<(std::ostream& stream, const View& view);
+}

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <string>
+#include <cstdint>
 #include "derecho_row.h"
 
 namespace derecho {
@@ -35,6 +37,11 @@ struct __attribute__((__packed__)) message_metadata {
     uint64_t offset;
     uint64_t length;
 };
+
+static const std::string METADATA_EXTENSION = ".metadata";
+static const std::string PAXOS_STATE_EXTENSION = ".paxosstate";
+static const std::string SWAP_FILE_EXTENSION = ".swp";
+
 
 }  // namespace persistence
 }  // namespace derecho

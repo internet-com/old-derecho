@@ -1,10 +1,13 @@
 
 #include "filewriter.h"
+#include "serialization/SerializationSupport.hpp"
 
 #include <cstring>
 #include <thread>
 #include <iostream>
 #include <fstream>
+#include <utility>
+#include <functional>
 
 using std::mutex;
 using std::unique_lock;
@@ -45,13 +48,13 @@ void FileWriter::set_message_written_upcall(
 
 void FileWriter::perform_writes(std::string filename) {
     ofstream data_file(filename);
-    ofstream metadata_file(filename + ".metadata");
+    ofstream metadata_file(filename + METADATA_EXTENSION);
 
     unique_lock<mutex> writes_lock(pending_writes_mutex);
 
     uint64_t current_offset = 0;
 
-    header h;
+    persistence::header h;
     memcpy(h.magic, MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
     h.version = 0;
     metadata_file.write((char *)&h, sizeof(h));
@@ -60,6 +63,8 @@ void FileWriter::perform_writes(std::string filename) {
         pending_writes_cv.wait(writes_lock);
 
         while(!pending_writes.empty()) {
+            using namespace std::placeholders;
+
             message m = pending_writes.front();
             pending_writes.pop();
 
@@ -70,7 +75,7 @@ void FileWriter::perform_writes(std::string filename) {
             metadata.length = m.length;
 
             data_file.write(m.data, m.length);
-            metadata_file.write((char *)&metadata, sizeof(metadata));
+            mutils::post_object(std::bind(&std::ofstream::write, &metadata_file, _1, _2), metadata);
 
             data_file.flush();
             metadata_file.flush();

@@ -17,6 +17,9 @@
 
 namespace derecho {
 
+/**
+ * Base exception class for all exceptions raised by Derecho.
+ */
 struct derecho_exception : public std::exception {
 public:
     const std::string message;
@@ -25,6 +28,10 @@ public:
     const char* what() const noexcept { return message.c_str(); }
 };
 
+/**
+ * A little helper class that implements a threadsafe queue by requiring all
+ * clients to lock a mutex before accessing the queue.
+ */
 template <typename T>
 class LockedQueue {
 private:
@@ -46,6 +53,11 @@ public:
     }
 };
 
+/**
+ * A wrapper for DerechoGroup that adds the group management service (GMS)
+ * features. All members of a group should create instances of ManagedGroup
+ * (instead of creating DerechoGroup directly) in order to enable the GMS.
+ */
 class ManagedGroup {
 private:
     using pred_handle = View::DerechoSST::Predicates::pred_handle;
@@ -88,6 +100,21 @@ private:
     pred_handle leader_proposed_handle;
     pred_handle leader_committed_handle;
 
+    /** Lock this before accessing curr_view, since it's shared by multiple threads */
+    std::mutex view_mutex;
+    /** Notified when curr_view changes (i.e. we are finished with a pending view change).*/
+    std::condition_variable view_change_cv;
+
+    /** The current View, containing the state of the managed group.
+     *  Must be a pointer so we can re-assign it.*/
+    std::unique_ptr<View> curr_view;
+    /** May hold a pointer to the partially-constructed next view, if we are
+     *  in the process of transitioning to a new view. */
+    std::unique_ptr<View> next_view;
+
+    /** Name of the file to use to persist the current view (and other parameters) to disk. */
+    std::string view_file_name;
+
     /** Sends a joining node the new view that has been constructed to include it.*/
     void commit_join(const View& new_view, tcp::socket& client_socket);
 
@@ -118,37 +145,37 @@ private:
     void register_predicates();
 
     /** Creates the SST and derecho_group for the current view, using the current view's member list.
-         * The parameters are all the possible parameters for constructing derecho_group. */
+     *  The parameters are all the possible parameters for constructing derecho_group. */
     void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers, long long unsigned int _max_payload_size,
                             const CallbackSet& stability_callbacks, long long unsigned int _block_size, const std::string& filename,
-                            unsigned int _window_size, rdmc::send_algorithm _type);
+                            unsigned int _window_size, const rdmc::send_algorithm& _type);
     /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
-         * (and copying over the SST data from the current view). */
+     *  (and copying over the SST data from the current view). */
     void transition_sst_and_rdmc(View& newView, int whichFailed);
 
-    /** Lock this before accessing curr_view, since it's shared by multiple threads */
-    std::mutex view_mutex;
-    /** Notified when curr_view changes (i.e. we are finished with a pending view change).*/
-    std::condition_variable view_change_cv;
-
-    /** May hold a pointer to the partially-constructed next view, if we are
-     * in the process of transitioning to a new view. */
-    std::unique_ptr<View> next_view;
-    std::unique_ptr<View> curr_view;  //must be a pointer so we can re-assign it
-
 public:
-    /** Constructor, starts or joins a managed Derecho group.
-     * The rest of the parameters are the parameters for the derecho_group that should
-     * be constructed for communications within this managed group. */
+    /**
+     * Constructor, starts or joins a managed Derecho group.
+     * The parameters after leader_id are the parameters for the DerechoGroup
+     * that should be constructed for communications within this managed group.
+     * If a filename is specified, the group will run in persistent mode and log
+     * all messages to disk.
+     * @param gms_port The port to contact other group members on when sending
+     * group-management messages
+     * @param member_ips A map specifying all of the potential members in the
+     * group, mapping their node IDs to their IP addresses
+     * @param my_id The node ID of the node executing this code
+     * @param leader_id The node ID of the GMS leader
+     */
     ManagedGroup(const int gms_port,
                  const std::map<node_id_t, ip_addr>& member_ips,
                  node_id_t my_id, node_id_t leader_id,
-                 long long unsigned int _max_payload_size,
+                 const long long unsigned int _max_payload_size,
                  CallbackSet stability_callbacks,
-                 long long unsigned int _block_size,
+                 const long long unsigned int _block_size,
                  std::string filename = std::string(),
-                 unsigned int _window_size = 3,
-                 rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+                 const unsigned int _window_size = 3,
+                 const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
     ~ManagedGroup();
 
     static void global_setup(const std::map<node_id_t, ip_addr>& member_ips,
