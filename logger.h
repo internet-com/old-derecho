@@ -27,14 +27,13 @@ namespace derecho {
  * but correctly typed).
  */
 template <typename S, typename T,
-    class = typename std::enable_if<std::is_base_of<
-        std::basic_ostream<typename S::char_type, typename S::traits_type>,
-        S>::value>::type>
+          class = typename std::enable_if<std::is_base_of<
+              std::basic_ostream<typename S::char_type, typename S::traits_type>,
+              S>::value>::type>
 S&& operator<<(S&& out, const T& t) {
-    static_cast<std::basic_ostream<typename S::char_type, typename S::traits_type> &>(out) << t;
+    static_cast<std::basic_ostream<typename S::char_type, typename S::traits_type>&>(out) << t;
     return std::move(out);
 }
-
 
 /** The start time of the program, to be used for timestamps in Logger entries.
  * main() should set this after synchronizing clocks. */
@@ -54,11 +53,11 @@ public:
     Logger() : events(10000000), times(10000000), curr_event(0){};
 
     void log_event(std::string event_text);
-    void log_event(const std::stringstream &event_text);
+    void log_event(const std::stringstream& event_text);
 };
 
 /** Gets a single global Logger instance to use for debugging. */
-Logger &debug_log();
+Logger& debug_log();
 
 } /* namespace util */
 } /* namespace derecho */

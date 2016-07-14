@@ -49,7 +49,7 @@ int View::rank_of_leader() const {
     return -1;
 }
 
-int View::rank_of(const ip_addr &who) const {
+int View::rank_of(const ip_addr& who) const {
     for(int rank = 0; rank < num_members; ++rank) {
         if(member_ips[rank] == who) {
             return rank;
@@ -58,7 +58,7 @@ int View::rank_of(const ip_addr &who) const {
     return -1;
 }
 
-int View::rank_of(const node_id_t &who) const {
+int View::rank_of(const node_id_t& who) const {
     for(int rank = 0; rank < num_members; ++rank) {
         if(members[rank] == who) {
             return rank;
@@ -67,9 +67,8 @@ int View::rank_of(const node_id_t &who) const {
     return -1;
 }
 
-void View::newView(const View &Vc) {
-    // I don't know what this is supposed to do in real life. In the C#
-    // simulation
+void View::newView(const View& Vc) {
+    // I don't know what this is supposed to do in real life. In the C# simulation
     // it just prints to stdout.
     //    std::cout <<"Process " << Vc.members[Vc.my_rank] << " New view: " <<
     //    Vc.ToString() << std::endl;
@@ -165,13 +164,15 @@ shared_ptr<node_id_t> View::Departed() const {
 
 std::string View::ToString() const {
     std::stringstream s;
-    s << "View " << vid << ": MyRank=" << my_rank << ". " << "Members={";
+    s << "View " << vid << ": MyRank=" << my_rank << ". "
+      << "Members={";
     for(int m = 0; m < num_members; m++) {
         s << members[m] << "  ";
     }
-    s << "}, " << "Failed={";
+    s << "}, "
+      << "Failed={";
     for(int m = 0; m < num_members; m++) {
-        s << (failed[m] ? " T ": " F ");
+        s << (failed[m] ? " T " : " F ");
     }
     s << " }, nFailed=" << nFailed;
     shared_ptr<node_id_t> dep = Departed();
@@ -190,7 +191,7 @@ void persist_view(const View& view, const std::string& view_file_name) {
     using namespace std::placeholders;
     //Use the "safe save" paradigm to ensure a crash won't corrupt our saved View file
     std::ofstream view_file_swap(view_file_name + persistence::SWAP_FILE_EXTENSION);
-    auto view_file_swap_write = [&](char const * const c, std::size_t n){
+    auto view_file_swap_write = [&](char const* const c, std::size_t n) {
         //std::bind(&std::ofstream::write, &view_file_swap, _1, _2);
         view_file_swap.write(c,n);
     };
@@ -212,7 +213,7 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
         //Each file contains the size of the view (an int copied as bytes),
         //followed by a serialized view
         std::size_t size_of_view;
-        view_file.read((char*) &size_of_view, sizeof(size_of_view));
+        view_file.read((char*)&size_of_view, sizeof(size_of_view));
         char buffer[size_of_view];
         view_file.read(buffer, size_of_view);
         //If the view file doesn't contain a complete view (due to a crash
@@ -223,7 +224,7 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
     }
     if(view_file_swap.good()) {
         std::size_t size_of_view;
-        view_file_swap.read((char*) &size_of_view, sizeof(size_of_view));
+        view_file_swap.read((char*)&size_of_view, sizeof(size_of_view));
         char buffer[size_of_view];
         view_file_swap.read(buffer, size_of_view);
         if(!view_file_swap.fail()) {
@@ -231,7 +232,7 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
         }
     }
     if(swap_view == nullptr ||
-            (view != nullptr && view->vid >= swap_view->vid)) {
+       (view != nullptr && view->vid >= swap_view->vid)) {
         return view;
     } else {
         return swap_view;
@@ -254,4 +255,3 @@ std::ostream& operator<<(std::ostream& stream, const View& view) {
     return stream;
 }
 }
-

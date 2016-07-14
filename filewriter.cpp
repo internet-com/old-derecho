@@ -57,7 +57,7 @@ void FileWriter::perform_writes(std::string filename) {
     persistence::header h;
     memcpy(h.magic, MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
     h.version = 0;
-    metadata_file.write((char *)&h, sizeof(h));
+    metadata_file.write((char*)&h, sizeof(h));
 
     while(!exit) {
         pending_writes_cv.wait(writes_lock);
