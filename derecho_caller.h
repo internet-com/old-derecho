@@ -156,6 +156,13 @@ struct QueryResults {
     }
 };
 
+template <>
+struct QueryResults<void> {
+    /* This currently has no functionality; Ken suggested a "flush," which
+       we might want to have in both this and the non-void variant.
+    */
+};
+
 template <typename T>
 struct PendingResults {
     std::promise<std::unique_ptr<reply_map<T> > > pending_map;
@@ -177,6 +184,16 @@ struct PendingResults {
     QueryResults<T> get_future() {
         return QueryResults<T>{pending_map.get_future()};
     }
+};
+
+template <>
+struct PendingResults<void> {
+    /* This currently has no functionality; Ken suggested a "flush," which
+       we might want to have in both this and the non-void variant.
+    */
+
+    void fulfill_map(const who_t &who) {}
+    QueryResults<void> get_future() { return QueryResults<void>{}; }
 };
 
 // many versions of this class will be extended by a single Hanlders context.
@@ -212,9 +229,6 @@ struct RemoteInvocable<tag, Ret(Args...)> {
 
     template <typename A, typename... Rest>
     inline auto serialize_one(barray v, const A &a, const Rest &... rest) {
-        // std::cout << std::endl
-        //           << "this type is being serialized: " << mutils::type_name<A>()
-        //           << std::endl;
         auto size = mutils::to_bytes(a, v);
         return size + serialize_one(v + size, rest...);
     }
@@ -257,9 +271,11 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         return send_return{size, serialized_args, pending_results.get_future()};
     }
 
-    inline recv_ret receive_response(mutils::DeserializationManager *dsm,
-                                     const Node_id &who, const char *response,
-                                     const std::function<char *(int)> &) {
+    template <typename definitely_char>
+    inline recv_ret receive_response(
+        std::false_type *, mutils::DeserializationManager *dsm,
+        const Node_id &who, const char *response,
+        const std::function<definitely_char *(int)> &) {
         long int invocation_id = ((long int *)response)[0];
         assert(ret.count(invocation_id));
         lock_t l{ret_lock};
@@ -268,8 +284,22 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         ret.at(invocation_id)
             .receive_message(who)
             .set_value(*mutils::from_bytes<Ret>(
-                           dsm, response + sizeof(invocation_id)));
+                dsm, response + sizeof(invocation_id)));
         return recv_ret{0, 0, nullptr};
+    }
+
+    inline recv_ret receive_response(std::true_type *,
+                                     mutils::DeserializationManager *,
+                                     const Node_id &, const char *,
+                                     const std::function<char *(int)> &) {
+        assert(false && "was not expecting a response!");
+    }
+
+    inline recv_ret receive_response(mutils::DeserializationManager *dsm,
+                                     const Node_id &who, const char *response,
+                                     const std::function<char *(int)> &f) {
+        constexpr std::is_same<void, Ret> *choice{nullptr};
+        return receive_response(choice, dsm, who, response, f);
     }
 
     std::tuple<> _deserialize(mutils::DeserializationManager *dsm,
@@ -281,9 +311,6 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     std::tuple<std::unique_ptr<fst>, std::unique_ptr<rst>...> _deserialize(
         mutils::DeserializationManager *dsm, char const *const buf, fst *,
         rst *... rest) {
-        std::cout << std::endl
-                  << "this type is being deserialized: "
-                  << mutils::type_name<fst>() << std::endl;
         using Type = std::decay_t<fst>;
         auto ds = mutils::from_bytes<Type>(dsm, buf);
         const auto size = mutils::bytes_size(*ds);
