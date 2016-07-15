@@ -928,16 +928,45 @@ void ManagedGroup<handlersType>::send() {
 
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
+void ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
-    return curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
+  curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
         nodes, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
-    return curr_view->rdmc_sending_group->template p2pSend<tag, Args...>(
+void ManagedGroup<handlersType>::orderedSend(Args&&... args) {
+    curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
+        std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto ManagedGroup<handlersType>::orderedQuery(const vector<node_id_t>& nodes,
+                                              Args&&... args) {
+    return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
+        nodes, std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto ManagedGroup<handlersType>::orderedQuery(Args&&... args) {
+    return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
+        std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+void ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
+    curr_view->rdmc_sending_group->template p2pSend<tag, Args...>(
+        dest_node, std::forward<Args>(args)...);
+}
+
+template <typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto ManagedGroup<handlersType>::p2pQuery(node_id_t dest_node, Args&&... args) {
+  return curr_view->rdmc_sending_group->template p2pQuery<tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 

@@ -86,14 +86,14 @@ int main(int argc, char *argv[]) {
     string buf = "Here is a message";
     long long int index = 0;
     long long int msg_size = buf.size();
-    // auto fut = managed_group.template orderedSend<0>({0, 1}, node_rank, index,
-    //                                                  buf, msg_size);
-    auto fut = managed_group.template p2pSend<0>(1-node_rank,
-    node_rank,index, buf, msg_size);
+    // auto fut = managed_group.template orderedQuery<0>({0, 1}, node_rank, index,
+    //                                                     buf, msg_size);
+    auto fut = managed_group.template p2pQuery<0>(1 - node_rank, node_rank,
+                                                  index, buf, msg_size);
 
     cout << "Done" << endl;
 
     // cout << "Obtained value: " << fut.get(0) << endl;
     // cout << "Obtained value: " << fut.get(1) << endl;
-    cout << "Obtained value: " << fut.get(1-node_rank) << endl;
+    cout << "Obtained value: " << fut.get(1 - node_rank) << endl;
 }
