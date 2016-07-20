@@ -635,8 +635,8 @@ bool DerechoGroup<N, handlersType>::send() {
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
-                                                Args&&... args) {
+auto DerechoGroup<N, handlersType>::groupSend(const vector<node_id_t>& nodes,
+                                         Args&&... args) {
     vector<Node_id> who;
     for(auto id : nodes) {
         who.push_back(Node_id(id));
@@ -666,7 +666,33 @@ auto DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
+void DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
+                                                Args&&... args) {
+    groupSend<tag>(nodes, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+void DerechoGroup<N, handlersType>::orderedSend(Args&&... args) {
+    orderedSend<tag>(members, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::orderedQuery(const vector<node_id_t>& nodes,
+                                                Args&&... args) {
+    return groupSend<tag>(nodes, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::orderedQuery(Args&&... args) {
+    return orderedQuery<tag>(members, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::tcpSend(node_id_t dest_node,
                                             Args&&... args) {
     assert(dest_node != members[member_index]);
     vector<Node_id> who = {Node_id(dest_node)};
@@ -683,6 +709,20 @@ auto DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
         }, std::forward<Args>(args)...);
     connections.tcp_write(dest_node, p2pBuffer.get(), size);
     return futures;
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+void DerechoGroup<N, handlersType>::p2pSend(node_id_t dest_node,
+                                            Args&&... args) {
+    tcpSend<tag>(dest_node, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::p2pQuery(node_id_t dest_node,
+                                            Args&&... args) {
+    return tcpSend<tag>(dest_node, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename handlersType>

@@ -182,6 +182,10 @@ class DerechoGroup {
     void initialize_sst_row();
     void register_predicates();
     void deliver_message(msg_info& msg);
+    template <unsigned long long tag, typename... Args>
+    auto groupSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto tcpSend(node_id_t dest_node, Args&&... args);
 
 public:
     // the constructor - takes the list of members, send parameters (block size,
@@ -215,9 +219,17 @@ public:
      * there is only one message per sender in the RDMC pipeline */
     bool send();
     template <unsigned long long tag, typename... Args>
-    auto orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
     template <unsigned long long tag, typename... Args>
-    auto p2pSend(node_id_t dest_node, Args&&... args);
+    void orderedSend(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void p2pSend(node_id_t dest_node, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto p2pQuery(node_id_t dest_node, Args&&... args);
     void rpc_process_loop();
     /** Stops all sending and receiving in this group, in preparation for
        * shutting it down. */
