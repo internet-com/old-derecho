@@ -1,6 +1,7 @@
 #pragma once
 #include <SerializationSupport.hpp>
 #include <queue>
+#include <chrono>
 #include <numeric>
 #include <future>
 #include <FunctionalMap.hpp>
@@ -122,7 +123,13 @@ LocalMessager LocalMessager::init_pipe(const Node_id &source) {
 }
 std::map<Node_id, LocalMessager> LocalMessager::send_to;
 
-using recv_ret = std::tuple<Opcode, std::size_t, char *>;
+	struct recv_ret {
+		Opcode opcode;
+		std::size_t size;
+		char *payload;
+		std::exception_ptr possible_exception;
+	};
+	        
 
 using receive_fun_t = std::function<recv_ret(
     mutils::DeserializationManager *dsm, const Node_id &, const char *recv_buf,
@@ -135,29 +142,93 @@ template <typename T>
 struct QueryResults {
     using map_fut = std::future<std::unique_ptr<reply_map<T> > >;
     using map = reply_map<T>;
+	using type = T;
 
     map_fut pending_rmap;
-    map rmap;
     QueryResults(map_fut pm) : pending_rmap(std::move(pm)) {}
-
-    bool valid(const Node_id &nid) {
-        assert(rmap.size() == 0 || rmap.count(nid));
-        return (rmap.size() > 0) && rmap.at(nid).valid();
-    }
-
-    auto get(const Node_id &nid) {
-        if(rmap.size() == 0) {
-            assert(pending_rmap.valid());
-            rmap = std::move(*pending_rmap.get());
-        }
-        assert(rmap.count(nid));
-        assert(rmap.at(nid).valid());
-        return rmap.at(nid).get();
-    }
+	struct ReplyMap {
+	private:
+		QueryResults &parent;
+	public:
+		map rmap;
+		
+		ReplyMap(QueryResults& qr):parent(qr){};
+		ReplyMap(const ReplyMap&) = delete;
+		ReplyMap(ReplyMap&& rm)
+			:parent(rm.parent),rmap(std::move(rm.rmap)){}
+		
+		bool valid(const Node_id &nid){
+			assert(rmap.size() == 0 || rmap.count(nid));
+			return (rmap.size() > 0) && rmap.at(nid).valid();
+		}
+		
+		/*
+		  returns true if we sent to this node, 
+		  regardless of whether this node has replied.
+		*/
+		bool contains(const Node_id &nid){
+			return rmap.count(nid);
+		}
+		
+		auto begin(){
+			return std::begin(rmap);
+		}
+		
+		auto end(){
+			return std::end(rmap);
+		}
+		
+		auto get(const Node_id &nid){
+			if (rmap.size() == 0){
+				assert(parent.pending_rmap.valid());
+				rmap = std::move(*parent.pending_rmap.get());
+			}
+			assert(rmap.size() > 0);
+			assert(rmap.count(nid));
+			assert(rmap.at(nid).valid());
+			return rmap.at(nid).get();
+			}
+		
+	};
+private:
+	ReplyMap replies{*this};
+public:
+	QueryResults(QueryResults&& o)
+		:pending_rmap{std::move(o.pending_rmap)},replies{std::move(o.replies)}{}
+	QueryResults(const QueryResults&) = delete;
+	
+	/*
+	  Wait the specified duration; if a ReplyMap is available 
+	  after that duration, return it. Otherwise return nullptr.
+	*/
+	template<typename Time>
+	ReplyMap* wait(Time t){
+		if (replies.rmap.size() == 0){
+			if (pending_rmap.wait_for(t) == std::future_status::ready){
+				replies.rmap = std::move(*pending_rmap.get());
+				return &replies;
+			}
+			else return nullptr;
+		}
+		else return &replies;
+	}
+	
+	/*
+	  block until the map is fulfilled; then return the map.
+	*/
+	ReplyMap& get(){
+		using namespace std::chrono;
+		while (true){
+			if (auto rmap = wait(5min)){
+				return *rmap;
+			}
+		}
+	}
 };
-
+	
 template <>
 struct QueryResults<void> {
+	using type = void;
     /* This currently has no functionality; Ken suggested a "flush," which
        we might want to have in both this and the non-void variant.
     */
@@ -177,8 +248,7 @@ struct PendingResults {
     }
 
     std::promise<T> &receive_message(const Node_id &nid) {
-        assert(populated_promises.count(nid));
-        return populated_promises.at(nid);
+        return populated_promises[nid];
     }
 
     QueryResults<T> get_future() {
@@ -192,8 +262,13 @@ struct PendingResults<void> {
        we might want to have in both this and the non-void variant.
     */
 
-    void fulfill_map(const who_t &who) {}
+    void fulfill_map(const who_t &) {}
     QueryResults<void> get_future() { return QueryResults<void>{}; }
+};
+
+struct remote_exception_occurred : public std::exception{
+	Node_id who;
+	remote_exception_occurred(Node_id who):who(who){}
 };
 
 // many versions of this class will be extended by a single Hanlders context.
@@ -225,7 +300,7 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     using barray = char *;
     using cbarray = const char *;
 
-    inline auto serialize_one(barray v) { return 0; }
+    inline auto serialize_one(barray) { return 0; }
 
     template <typename A, typename... Rest>
     inline auto serialize_one(barray v, const A &a, const Rest &... rest) {
@@ -241,10 +316,10 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         std::size_t size;
         char *buf;
         QueryResults<Ret> results;
+		PendingResults<Ret> &pending;
     };
 
-    send_return Send(const who_t &destinations,
-                     const std::function<char *(int)> &out_alloc,
+    send_return Send(const std::function<char *(int)> &out_alloc,
                      const std::decay_t<Args> &... a) {
         auto invocation_id = mutils::long_rand();
         std::size_t size = mutils::bytes_size(invocation_id);
@@ -264,11 +339,8 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         lock_t l{ret_lock};
         // default-initialize the maps
         PendingResults<Ret> &pending_results = ret[invocation_id];
-
-        // DERECHO TODO: "destinations" may be discovered lazily.
-        // if that becomes the case, we must defer this until later.
-        pending_results.fulfill_map(destinations);
-        return send_return{size, serialized_args, pending_results.get_future()};
+		
+        return send_return{size, serialized_args, pending_results.get_future(),pending_results};
     }
 
     template <typename definitely_char>
@@ -276,22 +348,29 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         std::false_type *, mutils::DeserializationManager *dsm,
         const Node_id &who, const char *response,
         const std::function<definitely_char *(int)> &) {
-        long int invocation_id = ((long int *)response)[0];
+		bool is_exception = response[0];
+        long int invocation_id = ((long int *)response + 1)[0];
         assert(ret.count(invocation_id));
         lock_t l{ret_lock};
         // TODO: garbage collection for the responses.
         assert(ret.count(invocation_id));
-        ret.at(invocation_id)
-            .receive_message(who)
-            .set_value(*mutils::from_bytes<Ret>(
-                dsm, response + sizeof(invocation_id)));
-        return recv_ret{0, 0, nullptr};
+		if (is_exception){
+			ret.at(invocation_id).receive_message(who).set_exception(std::make_exception_ptr(remote_exception_occurred{who}));
+		}
+		else {
+			ret.at(invocation_id)
+				.receive_message(who)
+				.set_value(*mutils::from_bytes<Ret>(
+							   dsm, response + sizeof(invocation_id)));
+		}
+        return recv_ret{0, 0, nullptr,nullptr};
     }
 
     inline recv_ret receive_response(std::true_type *,
                                      mutils::DeserializationManager *,
                                      const Node_id &, const char *,
                                      const std::function<char *(int)> &) {
+		if (response[0]) throw remote_exception_occurred{who};
         assert(false && "was not expecting a response!");
     }
 
@@ -302,8 +381,8 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         return receive_response(choice, dsm, who, response, f);
     }
 
-    std::tuple<> _deserialize(mutils::DeserializationManager *dsm,
-                              char const *const buf) {
+    std::tuple<> _deserialize(mutils::DeserializationManager *,
+                              char const *const) {
         return std::tuple<>{};
     }
 
@@ -329,15 +408,25 @@ struct RemoteInvocable<tag, Ret(Args...)> {
                                  const std::function<char *(int)> &out_alloc) {
         long int invocation_id = ((long int *)_recv_buf)[0];
         auto recv_buf = _recv_buf + sizeof(long int);
-        const auto result = mutils::callFunc([&](const auto &... a) {
-            return f(*a...);
-        }, deserialize(dsm, recv_buf));
-        // const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
-        const auto result_size = mutils::bytes_size(result) + sizeof(long int);
-        auto out = out_alloc(result_size);
-        ((long int *)out)[0] = invocation_id;
-        mutils::to_bytes(result, out + sizeof(invocation_id));
-        return recv_ret{reply_id, result_size, out};
+		try{
+			const auto result = mutils::callFunc([&](const auto &... a) {
+					return f(*a...);
+				}, deserialize(dsm, recv_buf));
+			// const auto result = f(*deserialize<Args>(dsm, recv_buf)...);
+			const auto result_size = mutils::bytes_size(result) + sizeof(long int) + 1;
+			auto out = out_alloc(result_size);
+			out[0] = false;
+			((long int *)(out + 1))[0] = invocation_id;
+			mutils::to_bytes(result, out + sizeof(invocation_id) + 1);
+			return recv_ret{reply_id, result_size, out,nullptr};
+		}
+		catch(...){
+			//f(*deserialize<Args>(dsm,recv_buf)... );
+			char* out = out_alloc(sizeof(long int) + 1);
+			out[0]=true;
+			((long int*)(out + 1))[0] = invocation_id;
+			return recv_ret{reply_id,sizeof(long int) + 1,out,std::current_exception()};
+		}
     }
 
     inline recv_ret receive_call(std::true_type const *const,
@@ -414,106 +503,67 @@ private:
     std::unique_ptr<std::thread> receiver;
     mutils::DeserializationManager dsm{{}};
 
-    inline static char *extra_alloc(const who_t &who, int i) {
-        const auto hs = header_space(who);
+    inline static char *extra_alloc(int i) {
+        const auto hs = header_space();
         return (char *)calloc(i + hs, sizeof(char)) + hs;
     }
 
 public:
     inline static auto populate_header(char *reply_buf,
                                        const std::size_t &payload_size,
-                                       const Opcode &op, const Node_id &from,
-                                       const who_t &to) {
-        std::cout << "Populating the header:" << std::endl;
-        std::cout << payload_size << std::endl;
-        std::cout << op << std::endl;
-        std::cout << from << std::endl;
+                                       const Opcode &op, const Node_id &from) {
         ((std::size_t *)reply_buf)[0] = payload_size; // size
         ((Opcode *)(sizeof(std::size_t) + reply_buf))[0] = op;  // what
         ((Node_id *)(sizeof(std::size_t) + sizeof(Opcode) + reply_buf))[0] =
             from;  // from
-        mutils::to_bytes(to,
-                         reply_buf + sizeof(std::size_t) + sizeof(Opcode) +
-                             sizeof(Node_id));  // to
     }
 
     inline static auto retrieve_header(mutils::DeserializationManager *dsm,
                                        char const *const reply_buf,
                                        std::size_t &payload_size, Opcode &op,
-                                       Node_id &from,
-                                       std::unique_ptr<who_t> &to) {
+                                       Node_id &from) {
         payload_size = ((std::size_t const *const)reply_buf)[0];
         op = ((Opcode const *const)(sizeof(std::size_t) + reply_buf))[0];
         from = ((Node_id const *const)(sizeof(std::size_t) + sizeof(Opcode) +
                                        reply_buf))[0];
-        std::cout << "Retrieving the header:" << std::endl;
-        std::cout << payload_size << std::endl;
-        std::cout << op << std::endl;
-        std::cout << from << std::endl;
-        to = mutils::from_bytes<who_t>(
-            dsm, reply_buf + sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id));
     }
 
-    inline static auto header_space(const who_t &who) {
-      return sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id) + mutils::bytes_size(who);
-        //          size           operation           from                         to
+    inline static auto header_space() {
+		return sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id);
+        //          size           operation           from
     }
 
-  void handle_receive(char *buf, std::size_t size,
-                        const std::function<char *(int)> &out_alloc) {
-        using namespace std::placeholders;
-        assert(size);
-	std::size_t payload_size;
-        Opcode indx;
-        Node_id received_from;
-        std::unique_ptr<who_t> who_to;
-        retrieve_header(&dsm, buf, payload_size, indx, received_from, who_to);
-        buf += header_space(*who_to);
-        std::cout << "Buffer in handle_receive is: " << buf << std::endl;
-        if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
-            who_t reply_addr{received_from};
-            auto reply_header_size = header_space(reply_addr);
-            auto reply_tuple = receivers->at(indx)(
-                &dsm, received_from, buf,
-                [&out_alloc, &reply_header_size](std::size_t size) {
-                    return out_alloc(size + reply_header_size) +
-                           reply_header_size;
-                });
-            auto *reply_buf = std::get<2>(reply_tuple);
-            if(reply_buf) {
-                reply_buf -= reply_header_size;
-                const auto id = std::get<0>(reply_tuple);
-                const auto size = std::get<1>(reply_tuple);
-                populate_header(reply_buf, size, id, nid, reply_addr);
-            }
-        }
-    }
-
-    void handle_receive(const Opcode &indx, const Node_id &received_from,
-                        const std::unique_ptr<who_t> &who_to, char *buf,
-                        std::size_t payload_size,
-                        const std::function<char *(int)> &out_alloc) {
+	std::exception_ptr handle_receive(const Opcode &indx, const Node_id &received_from,
+									  char const * const buf,
+									  std::size_t payload_size,
+									  const std::function<char *(int)> &out_alloc) {
         using namespace std::placeholders;
         assert(payload_size);
-        std::cout << "Buffer in handle_receive is: " << buf << std::endl;
-        if(std::find(who_to->begin(), who_to->end(), nid) != who_to->end()) {
-            who_t reply_addr{received_from};
-            auto reply_header_size = header_space(reply_addr);
-            auto reply_tuple = receivers->at(indx)(
-                &dsm, received_from, buf,
-                [&out_alloc, &reply_header_size](std::size_t size) {
-                    return out_alloc(size + reply_header_size) +
-                           reply_header_size;
-                });
-            auto *reply_buf = std::get<2>(reply_tuple);
-            if(reply_buf) {
-                reply_buf -= reply_header_size;
-                const auto id = std::get<0>(reply_tuple);
-                const auto size = std::get<1>(reply_tuple);
-                populate_header(reply_buf, size, id, nid, reply_addr);
-            }
-        }
+		auto reply_header_size = header_space();
+		auto reply_return = receivers->at(indx)(
+			&dsm, received_from, buf,
+			[&out_alloc, &reply_header_size](std::size_t size) {
+				return out_alloc(size + reply_header_size) +
+				reply_header_size;
+			});
+		auto *reply_buf = reply_return.payload;
+		if(reply_buf) {
+			reply_buf -= reply_header_size;
+			const auto id = reply_return.opcode;
+			const auto size = reply_return.size;
+			populate_header(reply_buf, size, id, nid);
+		}
+		return reply_return.possible_exception;
     }
+
+	std::exception_ptr handle_receive(char *buf, std::size_t size,
+									  const std::function<char *(int)> &out_alloc) {
+		std::size_t payload_size;
+		Opcode indx;
+		Node_id received_from;
+		retrieve_header(&dsm, buf, payload_size, indx, received_from);
+		return handle_receive(indx,received_from,buf + header_space(),payload_size,out_alloc);
+	}
 
     // these are the functions (no names) from Fs
     template <typename... _Fs>
@@ -537,24 +587,35 @@ public:
         alive = false;
         // receiver->join();
     }
-
+	
+	/*
+	  much like previous definition, except with 
+	  two fewer fields
+	*/
+	template<typename Ret>
+	struct send_return{
+		QueryResults<Ret> results;
+		PendingResults<Ret> &pending;
+	};
+	
+	/* you *do not* need to delete the pointer in the pair this returns. */
     template <FunctionTag tag, typename... Args>
-    auto Send(const who_t &who, const std::function<char *(int)>& out_alloc,
+    auto Send(const std::function<char *(int)>& out_alloc,
               Args &&... args) {
         // this "who" is the destination of this send.
         using namespace std::placeholders;
         constexpr std::integral_constant<FunctionTag, tag> *choice{nullptr};
         auto &hndl = this->handler(choice, args...);
-        const auto header_size = header_space(who);
+        const auto header_size = header_space();
         auto sent_return =
-            hndl.Send(who, [&out_alloc, &header_size](std::size_t size) {
+            hndl.Send([&out_alloc, &header_size](std::size_t size) {
                 return out_alloc(size + header_size) + header_size;
             }, std::forward<Args>(args)...);
         std::size_t payload_size = sent_return.size;
         char *buf = sent_return.buf - header_size;
-        populate_header(buf, payload_size, hndl.invoke_id, nid, who);
-        std::cout << "Header size is: " << header_size << std::endl;
-        return std::move(sent_return.results);
+        populate_header(buf, payload_size, hndl.invoke_id, nid);
+		using Ret = typename decltype(sent_return.results)::type;
+		return send_return<Ret>{std::move(sent_return.results), sent_return.pending};
     }
 
     /*
