@@ -5,6 +5,7 @@
  *      Author: edward
  */
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <exception>
@@ -164,10 +165,15 @@ ManagedGroup<handlersType>::ManagedGroup(
     register_predicates();
     curr_view->gmsSST->start_predicate_evaluation();
 
-    view_upcalls.push_back(
-        [this](std::vector<node_id_t>, std::vector<node_id_t>) {
-            curr_view->rdmc_sending_group->create_p2p_links();
-        });
+    view_upcalls.push_back([this](std::vector<node_id_t> new_members,
+                                  std::vector<node_id_t> old_members) {
+        std::vector<node_id_t> removed_members;
+	std::set_difference(
+                old_members.begin(), old_members.end(), new_members.begin(),
+                new_members.end(),
+                std::back_inserter(removed_members));
+        curr_view->rdmc_sending_group->set_exceptions_for_removed_nodes(removed_members);
+    });
 
     lock_guard_t lock(view_mutex);
     vector<node_id_t> old_members(curr_view->members.begin(),

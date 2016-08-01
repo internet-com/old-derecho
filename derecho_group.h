@@ -38,6 +38,9 @@ public:
   virtual void fulfill_map(const std::vector<node_id_t>&) {
     assert(false);
   }
+  virtual void set_exception_for_removed_node(const node_id_t&) {
+    assert(false);
+  }
 };
 
 template <class Ret>
@@ -52,7 +55,10 @@ public:
             who.push_back(Node_id(n));
         }
         pending.fulfill_map(who);
-  }
+    }
+    void set_exception_for_removed_node(const node_id_t& removed_id) {
+        pending.set_exception_for_removed_node(removed_id);
+    }
 };
 
 template <class T>
@@ -140,6 +146,7 @@ class DerechoGroup {
     tcp::all_tcp_connections connections;
     std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
     std::list<std::unique_ptr<PendingBase>> fulfilledList;
+    std::mutex pending_results_mutex;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
     unsigned int total_message_buffers;
@@ -190,7 +197,6 @@ class DerechoGroup {
     std::atomic<bool> thread_shutdown{false};
     /** The background thread that sends messages with RDMC. */
     std::thread sender_thread;
-
     std::thread timeout_thread;
     std::thread rpc_thread;
 
@@ -247,8 +253,6 @@ public:
         uint32_t port = 12487);
     ~DerechoGroup();
 
-    void create_p2p_links();
-
     void deliver_messages_upto(
         const std::vector<long long int>& max_indices_for_senders);
     /** get a pointer into the buffer, to write data into it before sending */
@@ -273,6 +277,8 @@ public:
     template <unsigned long long tag, typename... Args>
     auto p2pQuery(node_id_t dest_node, Args&&... args);
     void rpc_process_loop();
+    void set_exceptions_for_removed_nodes(
+        std::vector<node_id_t> removed_members);
     /** Stops all sending and receiving in this group, in preparation for
        * shutting it down. */
     void wedge();

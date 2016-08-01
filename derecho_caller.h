@@ -5,6 +5,7 @@
 #include <future>
 #include <numeric>
 #include <queue>
+#include <set>
 
 namespace rpc {
 
@@ -123,6 +124,29 @@ LocalMessager LocalMessager::init_pipe(const Node_id &source) {
 }
 std::map<Node_id, LocalMessager> LocalMessager::send_to;
 
+struct remote_exception_occurred : public std::exception {
+    Node_id who;
+    remote_exception_occurred(Node_id who) : who(who) {}
+    virtual const char *what() const noexcept override {
+        std::ostringstream o_stream;
+        o_stream << "An exception occured at node with id " << who.id;
+        std::string str = o_stream.str();
+        return str.c_str();
+    }
+};
+
+struct node_removed_from_group_exception : public std::exception {
+    Node_id who;
+    node_removed_from_group_exception(Node_id who) : who(who) {}
+    virtual const char *what() const noexcept override {
+        std::ostringstream o_stream;
+        o_stream << "Node with id " << who.id
+                 << " has been removed from the group";
+        std::string str = o_stream.str();
+        return str.c_str();
+    }
+};
+
 struct recv_ret {
     Opcode opcode;
     std::size_t size;
@@ -234,16 +258,37 @@ struct PendingResults {
     std::promise<std::unique_ptr<reply_map<T> > > pending_map;
     std::map<Node_id, std::promise<T> > populated_promises;
 
-    void fulfill_map(const who_t& who) {
+    bool map_fulfilled = false;
+    std::set<Node_id> dest_nodes, set_nodes;
+
+    void fulfill_map(const who_t &who) {
+        map_fulfilled = true;
         std::unique_ptr<reply_map<T> > to_add{new reply_map<T>{}};
         for(const auto &e : who) {
             to_add->emplace(e, populated_promises[e].get_future());
         }
+        dest_nodes.insert(who.begin(), who.end());
         pending_map.set_value(std::move(to_add));
     }
 
-    std::promise<T> &receive_message(const Node_id &nid) {
-        return populated_promises[nid];
+    void set_exception_for_removed_node(const Node_id &removed_nid) {
+        assert(map_fulfilled);
+        if(dest_nodes.find(removed_nid) != dest_nodes.end() &&
+           set_nodes.find(removed_nid) == set_nodes.end()) {
+            set_exception(removed_nid,
+                          std::make_exception_ptr(
+                              node_removed_from_group_exception{removed_nid}));
+        }
+    }
+
+    void set_value(const Node_id &nid, const T &v) {
+        set_nodes.insert(nid);
+        return populated_promises[nid].set_value(v);
+    }
+
+    void set_exception(const Node_id &nid, const std::exception_ptr e) {
+        set_nodes.insert(nid);
+        return populated_promises[nid].set_exception(e);
     }
 
     QueryResults<T> get_future() {
@@ -259,11 +304,6 @@ struct PendingResults<void> {
 
     void fulfill_map(const who_t &) {}
     QueryResults<void> get_future() { return QueryResults<void>{}; }
-};
-
-struct remote_exception_occurred : public std::exception {
-    Node_id who;
-    remote_exception_occurred(Node_id who) : who(who) {}
 };
 
 // many versions of this class will be extended by a single Handlers context.
@@ -351,14 +391,12 @@ struct RemoteInvocable<tag, Ret(Args...)> {
         // TODO: garbage collection for the responses.
         if(is_exception) {
             ret.at(invocation_id)
-                .receive_message(nid)
-                .set_exception(
-                    std::make_exception_ptr(remote_exception_occurred{nid}));
+                .set_exception(nid, std::make_exception_ptr(
+                                        remote_exception_occurred{nid}));
         } else {
             ret.at(invocation_id)
-                .receive_message(nid)
-                .set_value(*mutils::from_bytes<Ret>(
-                    dsm, response + 1 + sizeof(invocation_id)));
+                .set_value(nid, *mutils::from_bytes<Ret>(
+                                    dsm, response + 1 + sizeof(invocation_id)));
         }
         return recv_ret{0, 0, nullptr, nullptr};
     }

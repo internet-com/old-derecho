@@ -70,12 +70,9 @@ void all_tcp_connections::establish_node_connections(
 }
 
 all_tcp_connections::all_tcp_connections(
-    node_id_t _my_id, const std::map<node_id_t, ip_addr_t>& _ip_addrs,
+    node_id_t my_id, const std::map<node_id_t, ip_addr_t>& ip_addrs,
     uint32_t _port)
-    : my_id(_my_id), ip_addrs(_ip_addrs), port(_port) {
-}
-
-void all_tcp_connections::create() {
+    : port(_port) {
     establish_node_connections(my_id, ip_addrs);
 }
 

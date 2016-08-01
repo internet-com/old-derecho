@@ -89,8 +89,8 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     create_rdmc_groups();
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
-
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
+    rpc_thread = std::thread(&DerechoGroup::rpc_process_loop, this);
     //    cout << "DerechoGroup: Registered predicates and started thread" <<
     //    endl;
 }
@@ -188,6 +188,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
+    rpc_thread = std::thread(&DerechoGroup::rpc_process_loop, this);
     //    cout << "DerechoGroup: Registered predicates and started thread" <<
     //    endl;
 }
@@ -381,6 +382,8 @@ void DerechoGroup<N, handlersType>::deliver_message(msg_info& msg) {
                             deliveryBuffer.get(), reply_size,
                             [](size_t size) -> char* { assert(false); });
                         if(dest_size == 0) {
+                            std::lock_guard<std::mutex> lock(
+                                pending_results_mutex);
                             toFulfillQueue.front()->fulfill_map(members);
                             fulfilledList.push_back(std::move(toFulfillQueue.front()));
                             toFulfillQueue.pop();
@@ -502,12 +505,6 @@ void DerechoGroup<N, handlersType>::register_predicates() {
     };
     sender_pred_handle = sst->predicates.insert(sender_pred, sender_trig,
                                                 sst::PredicateType::RECURRENT);
-}
-
-template <unsigned int N, typename handlersType>
-void DerechoGroup<N, handlersType>::create_p2p_links() {
-    connections.create();
-    rpc_thread = std::thread(&DerechoGroup::rpc_process_loop, this);
 }
 
 template <unsigned int N, typename handlersType>
@@ -688,7 +685,7 @@ auto DerechoGroup<N, handlersType>::derechoCallerSend(const vector<node_id_t>& n
         max_payload_size -= sizeof(node_id_t);
     }
 
-    auto futures = group_handlers->template Send<tag>(
+    auto return_pair = group_handlers->template Send<tag>(
         [&buf, &max_payload_size](size_t size) -> char* {
             if(size <= max_payload_size) {
                 return buf;
@@ -699,14 +696,16 @@ auto DerechoGroup<N, handlersType>::derechoCallerSend(const vector<node_id_t>& n
         std::forward<Args>(args)...);
     while(!send()) {
     }
-    auto P = createPending(futures.pending);
+    auto P = createPending(return_pair.pending);
+
+    std::lock_guard<std::mutex> lock(pending_results_mutex);
     if(nodes.size()) {
         P->fulfill_map(nodes);
-	fulfilledList.push_back(std::move(P));
+        fulfilledList.push_back(std::move(P));
     } else {
         toFulfillQueue.push(std::move(P));
     }
-    return std::move(futures.results);
+    return std::move(return_pair.results);
 }
 
 template <unsigned int N, typename handlersType>
@@ -742,10 +741,10 @@ auto DerechoGroup<N, handlersType>::tcpSend(node_id_t dest_node,
                                             Args&&... args) {
     assert(dest_node != members[member_index]);
     // use dest_node
-
+    
     size_t size;
     auto max_payload_size = max_msg_size - sizeof(header);
-    auto futures = group_handlers->template Send<tag>(
+    auto return_pair = group_handlers->template Send<tag>(
         [this, &max_payload_size, &size](size_t _size) -> char* {
             size = _size;
             if(size <= max_payload_size) {
@@ -756,7 +755,12 @@ auto DerechoGroup<N, handlersType>::tcpSend(node_id_t dest_node,
         },
         std::forward<Args>(args)...);
     connections.tcp_write(dest_node, p2pBuffer.get(), size);
-    return futures;
+    auto P = createPending(return_pair.pending);
+    P->fulfill_map({dest_node});
+
+    std::lock_guard<std::mutex> lock(pending_results_mutex);
+    fulfilledList.push_back(std::move(P));
+    return std::move(return_pair.results);
 }
 
 template <unsigned int N, typename handlersType>
@@ -807,6 +811,17 @@ void DerechoGroup<N, handlersType>::rpc_process_loop() {
         if(reply_size > 0) {
             connections.tcp_write(received_from.id, rpcBuffer.get(),
                                   reply_size);
+        }
+    }
+}
+
+template <unsigned int N, typename handlersType>
+void DerechoGroup<N, handlersType>::set_exceptions_for_removed_nodes(
+    std::vector<node_id_t> removed_members) {
+    std::lock_guard<std::mutex> lock(pending_results_mutex);
+    for(auto& pending : fulfilledList) {
+        for(auto removed_id : removed_members) {
+	  pending->set_exception_for_removed_node(removed_id);
         }
     }
 }

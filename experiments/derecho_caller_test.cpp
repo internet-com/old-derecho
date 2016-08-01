@@ -26,11 +26,15 @@ using derecho::DerechoRow;
 uint32_t node_rank;
 uint32_t num_nodes;
 
+int count = 0;
+
 int test1 (string str) {
   cout << str << endl;
-  // if (node_rank == 3) {
-  //   exit();
-  // }
+  count++;
+  if (node_rank == 3 && count == 2) {
+    cout << "Exiting" << endl;
+    exit(0);
+  }
   return 19954;
 }
 
@@ -92,7 +96,12 @@ int main(int argc, char *argv[]) {
     auto& rmap = fut.get();
     cout << "Obtained a reply map" << endl;
     for (auto it = rmap.begin(); it != rmap.end(); ++it) {
-      cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+      try {
+	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+      }
+      catch (const std::exception &e) {
+	cout << e.what() << endl;
+      }
     }
     
     // int a = rmap.get(0);
