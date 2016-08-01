@@ -23,30 +23,21 @@ using std::endl;
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
-int stability_callback(int sender_id, long long int index, string buf,
-                       long long int msg_size) {
-    // cout << "sender_id = " << sender_id << " index = " << index
-    //      << " buf = " << buf << " msg_size = " << msg_size << endl;
-    // if(sender_id == 0) {
-    //     cout << "here" << endl;
-    // } else {
-    //     cout << "yo" << endl;
-    // }
-    cout << "Here in stability callback" << endl;
-    cout << "sender_id = " << sender_id << endl;
-    // if(sender_id == 1) {
-    //   cout << "Exiting" << endl;
-    //   exit(0);
-    // }
-    return 17 + sender_id;
+uint32_t node_rank;
+uint32_t num_nodes;
+
+int test1 (string str) {
+  cout << str << endl;
+  // if (node_rank == 3) {
+  //   exit();
+  // }
+  return 19954;
 }
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
 
     uint32_t server_rank = 0;
-    uint32_t node_rank;
-    uint32_t num_nodes;
 
     map<uint32_t, std::string> node_addresses;
 
@@ -62,15 +53,28 @@ int main(int argc, char *argv[]) {
     long long unsigned int block_size = get_block_size(max_msg_size);
     // int num_messages = 10;
 
-    // auto stability_callback =
-    //     [](int sender_id, long long int index, char *buf,
-    //        long long int msg_size) mutable { return 0;};
+    auto stability_callback =
+        [](int sender_id, long long int index, char *buf,
+           long long int msg_size) {};
 
-    auto group_handlers = handlers(node_rank, 0, stability_callback);
+    auto group_handlers = handlers(node_rank, 0, test1);
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
-        std::move(group_handlers), block_size);
+        stability_callback, std::move(group_handlers),
+        {[](vector<derecho::node_id_t> new_members, vector<derecho::node_id_t> old_members) {
+            cout << "New members are : " << endl;
+            for(auto n : new_members) {
+                cout << n << " ";
+            }
+            cout << endl;
+            cout << "Old members were :" << endl;
+            for(auto o : old_members) {
+                cout << o << " ";
+            }
+            cout << endl;
+	  }},
+        block_size);
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
 
@@ -83,17 +87,27 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-    string buf = "Here is a message";
-    long long int index = 0;
-    long long int msg_size = buf.size();
-    // auto fut = managed_group.template orderedQuery<0>({0, 1}, node_rank, index,
-    //                                                     buf, msg_size);
-    auto fut = managed_group.template p2pQuery<0>(1 - node_rank, node_rank,
-                                                  index, buf, msg_size);
+    string str = "Here is a message";
+    auto fut = managed_group.template orderedQuery<0>({}, str);
+    auto& rmap = fut.get();
+    cout << "Obtained a reply map" << endl;
+    for (auto it = rmap.begin(); it != rmap.end(); ++it) {
+      cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+    }
+    
+    // int a = rmap.get(0);
+    // cout << "Reply from node 0: " << a << endl;
+    // int b = rmap.get(1);
+    // cout << "Reply from node 1: " << b << endl;
+    // auto fut = managed_group.template p2pQuery<0>(1 - node_rank, node_rank,
+    // index, buf, msg_size);
 
     cout << "Done" << endl;
 
+    while (true) {
+
+    }
     // cout << "Obtained value: " << fut.get(0) << endl;
     // cout << "Obtained value: " << fut.get(1) << endl;
-    cout << "Obtained value: " << fut.get(1 - node_rank) << endl;
+    // cout << "Obtained value: " << fut.get(1 - node_rank) << endl;
 }

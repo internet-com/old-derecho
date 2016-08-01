@@ -3,11 +3,16 @@
 #include "rdmc/connection.h"
 
 #include <map>
+#include <mutex>
 
 namespace tcp {
 using ip_addr_t = std::string;
 using node_id_t = uint32_t;
 class all_tcp_connections {
+    std::mutex sockets_mutex;
+
+    node_id_t my_id;
+    const std::map<node_id_t, ip_addr_t> ip_addrs;
     const uint32_t port;
     std::unique_ptr<connection_listener> conn_listener;
     std::map<node_id_t, socket> sockets;
@@ -18,9 +23,11 @@ class all_tcp_connections {
         node_id_t my_id, const std::map<node_id_t, ip_addr_t>& ip_addrs);
 
 public:
-    all_tcp_connections(node_id_t my_id,
-                        const std::map<node_id_t, ip_addr_t>& ip_addrs,
+    all_tcp_connections(node_id_t _my_id,
+                        const std::map<node_id_t, ip_addr_t>& _ip_addrs,
                         uint32_t _port);
+    void create();
+    void destroy();
     bool tcp_write(node_id_t node_id, char const* buffer, size_t size);
     bool tcp_read(node_id_t node_id, char* buffer, size_t size);
     int32_t probe_all();

@@ -1,20 +1,20 @@
 #ifndef MANAGED_GROUP_H_
 #define MANAGED_GROUP_H_
 
-#include <mutex>
+#include <chrono>
+#include <ctime>
 #include <list>
+#include <map>
+#include <mutex>
 #include <queue>
 #include <string>
 #include <utility>
-#include <map>
 #include <vector>
-#include <ctime>
-#include <chrono>
 
-#include "view.h"
-#include "view_utils.h"
 #include "logger.h"
 #include "rdmc/connection.h"
+#include "view.h"
+#include "view_utils.h"
 
 namespace derecho {
 
@@ -52,6 +52,9 @@ class ManagedGroup {
 private:
     using pred_handle =
         typename View<handlersType>::DerechoSST::Predicates::pred_handle;
+
+    using view_upcall_t = std::function<void(vector<node_id_t> new_members,
+                                             vector<node_id_t> old_members)>;
 
     /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
      * Currently, this mapping must be completely known at startup. */
@@ -142,7 +145,8 @@ private:
      * derecho_group. */
     void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers,
                             long long unsigned int _max_payload_size,
-                            handlersType handlers,
+                            message_callback global_stability_callback,
+                            handlersType group_handlers,
                             long long unsigned int _block_size,
                             unsigned int _window_size,
                             rdmc::send_algorithm _type);
@@ -164,6 +168,8 @@ private:
     std::unique_ptr<View<handlersType>>
         curr_view;  // must be a pointer so we can re-assign it
 
+    std::vector<view_upcall_t> view_upcalls;
+
 public:
     /** Constructor, starts or joins a managed Derecho group.
      * The rest of the parameters are the parameters for the derecho_group that
@@ -173,7 +179,10 @@ public:
                  const std::map<node_id_t, ip_addr>& member_ips,
                  node_id_t my_id, node_id_t leader_id,
                  long long unsigned int _max_payload_size,
-                 handlersType handlers, long long unsigned int _block_size,
+                 message_callback global_stability_callback,
+                 handlersType group_handlers,
+		 std::vector<view_upcall_t> _view_upcalls,
+                 long long unsigned int _block_size,
                  unsigned int _window_size = 3,
                  rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
     ~ManagedGroup();
@@ -222,7 +231,9 @@ public:
         util::debug_log().log_event(event_text);
     }
     void print_log(std::ostream& output_dest) const;
-      };
+    std::map<node_id_t, ip_addr> get_member_ips_map(
+        std::vector<node_id_t>& members);
+};
 
 } /* namespace derecho */
 

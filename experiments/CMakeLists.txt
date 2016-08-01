@@ -28,6 +28,10 @@ include_directories("../mutils" "../mutils-serialization")
 add_executable(derecho_caller_test derecho_caller_test.cpp block_size.cpp initialize.cpp)
 target_link_libraries(derecho_caller_test derecho mutils mutils-serialization)
 
+# raw_send_test
+add_executable(raw_send_test raw_send_test.cpp block_size.cpp initialize.cpp)
+target_link_libraries(raw_send_test derecho mutils mutils-serialization)
+
 # ssd_bw_test
 add_executable(ssd_bw_test ssd_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(ssd_bw_test derecho)

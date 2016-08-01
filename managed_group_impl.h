@@ -5,24 +5,24 @@
  *      Author: edward
  */
 
+#include <atomic>
+#include <cstring>
+#include <exception>
+#include <iostream>
+#include <iterator>
 #include <map>
-#include <vector>
 #include <memory>
 #include <mutex>
-#include <exception>
-#include <stdexcept>
-#include <iostream>
 #include <sstream>
-#include <iterator>
-#include <cstring>
-#include <atomic>
+#include <stdexcept>
+#include <vector>
 
 #include "managed_group.h"
 
 #include "derecho_group.h"
 #include "derecho_row.h"
-#include "view.h"
 #include "sst/sst.h"
+#include "view.h"
 
 namespace derecho {
 
@@ -47,15 +47,17 @@ template <typename handlersType>
 ManagedGroup<handlersType>::ManagedGroup(
     const int gms_port, const map<node_id_t, ip_addr>& member_ips,
     node_id_t my_id, node_id_t leader_id,
-    long long unsigned int _max_payload_size, handlersType handlers,
-    long long unsigned int _block_size, unsigned int _window_size,
-    rdmc::send_algorithm _type)
+    long long unsigned int _max_payload_size,
+    message_callback global_stability_callback, handlersType group_handlers,
+    std::vector<view_upcall_t> _view_upcalls, long long unsigned int _block_size,
+    unsigned int _window_size, rdmc::send_algorithm _type)
     : member_ips_by_id(member_ips),
       last_suspected(View<handlersType>::MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
-      next_view(nullptr) {
+      next_view(nullptr),
+      view_upcalls(_view_upcalls) {
     if(!rdmc_globals_initialized) {
         global_setup(member_ips, my_id);
     }
@@ -110,7 +112,8 @@ ManagedGroup<handlersType>::ManagedGroup(
     //    }
 
     log_event("Initializing SST and RDMC for the first time.");
-    setup_sst_and_rdmc(message_buffers, _max_payload_size, std::move(handlers),
+    setup_sst_and_rdmc(message_buffers, _max_payload_size,
+                       global_stability_callback, std::move(group_handlers),
                        _block_size, _window_size, _type);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
@@ -161,6 +164,17 @@ ManagedGroup<handlersType>::ManagedGroup(
     register_predicates();
     curr_view->gmsSST->start_predicate_evaluation();
 
+    view_upcalls.push_back(
+        [this](std::vector<node_id_t>, std::vector<node_id_t>) {
+            curr_view->rdmc_sending_group->create_p2p_links();
+        });
+
+    lock_guard_t lock(view_mutex);
+    vector<node_id_t> old_members(curr_view->members.begin(),
+                                  curr_view->members.end() - 1);
+    for(auto& view_upcall : view_upcalls) {
+        view_upcall(curr_view->members, old_members);
+    }
     // curr_view->rdmc_sending_group->debug_print();
 }
 
@@ -393,7 +407,8 @@ void ManagedGroup<handlersType>::register_predicates() {
             throw derecho_exception(
                 (std::stringstream()
                  << "Some other node reported that I failed.  Node " << myID
-                 << " terminating").str());
+                 << " terminating")
+                    .str());
         }
 
         if(next_view->gmsSST != nullptr) {
@@ -413,8 +428,8 @@ void ManagedGroup<handlersType>::register_predicates() {
             }
             return true;
         };
-        auto meta_wedged_continuation = [this, failed, whoFailed](
-            DerechoSST& gmsSST) {
+        auto meta_wedged_continuation = [this, failed,
+                                         whoFailed](DerechoSST& gmsSST) {
             log_event("MetaWedged is true; continuing view change");
             unique_lock_t lock(view_mutex);
             assert(next_view);
@@ -424,6 +439,9 @@ void ManagedGroup<handlersType>::register_predicates() {
                 lock_guard_t lock(view_mutex);
                 assert(next_view);
 
+                // for view upcall
+                auto old_members = curr_view->members;
+		
                 ragged_edge_cleanup(*curr_view);
                 if(curr_view->IAmLeader() && !failed) {
                     // Send the view to the newly joined client before we try to
@@ -473,6 +491,9 @@ void ManagedGroup<handlersType>::register_predicates() {
                     merge_changes(
                         *curr_view);  // Create a combined list of Changes
                 }
+                for(auto& view_upcall : view_upcalls) {
+                    view_upcall(curr_view->members, old_members);
+                }
             };
 
             if(curr_view->IAmLeader()) {
@@ -493,7 +514,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                                          sst::PredicateType::ONE_TIME);
             }
 
-        };
+            };
         gmsSST.predicates.insert(is_meta_wedged, meta_wedged_continuation,
                                  sst::PredicateType::ONE_TIME);
 
@@ -531,7 +552,8 @@ ManagedGroup<handlersType>::~ManagedGroup() {
 template <typename handlersType>
 void ManagedGroup<handlersType>::setup_sst_and_rdmc(
     vector<MessageBuffer>& message_buffers,
-    long long unsigned int max_payload_size, handlersType handlers,
+    long long unsigned int max_payload_size,
+    message_callback global_stability_callback, handlersType group_handlers,
     long long unsigned int block_size, unsigned int window_size,
     rdmc::send_algorithm type) {
     curr_view->gmsSST =
@@ -546,8 +568,9 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(
     curr_view->rdmc_sending_group = make_unique<
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
-        curr_view->gmsSST, message_buffers, max_payload_size, std::move(handlers),
-        block_size, member_ips_by_id, window_size, 1, type);
+        curr_view->gmsSST, message_buffers, max_payload_size,
+        global_stability_callback, std::move(group_handlers), block_size,
+        get_member_ips_map(curr_view->members), window_size, 1, type);
 }
 
 /**
@@ -577,7 +600,8 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(
     newView.rdmc_sending_group = make_unique<
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
-        std::move(*curr_view->rdmc_sending_group), member_ips_by_id);
+        std::move(*curr_view->rdmc_sending_group),
+        get_member_ips_map(newView.members));
     curr_view->rdmc_sending_group.reset();
 
     // Don't need to initialize every row in the SST - all the others will be
@@ -930,7 +954,7 @@ template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
-  curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
+    curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
         nodes, std::forward<Args>(args)...);
 }
 
@@ -966,7 +990,7 @@ void ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::p2pQuery(node_id_t dest_node, Args&&... args) {
-  return curr_view->rdmc_sending_group->template p2pQuery<tag, Args...>(
+    return curr_view->rdmc_sending_group->template p2pQuery<tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 
@@ -1002,6 +1026,16 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
                                   [curr_view->members[curr_view->my_rank]]
                     << endl;
     }
+}
+
+template <typename handlersType>
+std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
+    std::vector<node_id_t>& members) {
+    std::map<node_id_t, ip_addr> member_ips;
+    for(auto m : members) {
+        member_ips[m] = member_ips_by_id[m];
+    }
+    return member_ips;
 }
 
 } /* namespace derecho */

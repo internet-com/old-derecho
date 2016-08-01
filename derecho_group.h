@@ -1,20 +1,22 @@
 #ifndef DERECHO_GROUP_H
 #define DERECHO_GROUP_H
 
-#include <functional>
-#include <experimental/optional>
-#include <mutex>
+#include <assert.h>
 #include <condition_variable>
-#include <tuple>
+#include <experimental/optional>
+#include <functional>
 #include <map>
-#include <set>
-#include <queue>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <list>
+#include <set>
+#include <tuple>
+#include <vector>
 
 #include "connection_manager.h"
-#include "derecho_row.h"
 #include "derecho_caller.h"
+#include "derecho_row.h"
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
 
@@ -28,6 +30,34 @@ typedef std::function<void(int, long long int, char*, long long int)>
 struct __attribute__((__packed__)) header {
     uint32_t header_size;
     uint32_t pause_sending_turns;
+    bool cooked_send;
+};
+
+class PendingBase {
+public:
+  virtual void fulfill_map(const std::vector<node_id_t>&) {
+    assert(false);
+  }
+};
+
+template <class Ret>
+class Pending : public PendingBase {
+    PendingResults<Ret>& pending;
+
+public:
+    Pending(PendingResults<Ret>& _pending) : pending(_pending) {}
+    void fulfill_map(const std::vector<node_id_t>& nodes) {
+        who_t who;
+        for(auto n : nodes) {
+            who.push_back(Node_id(n));
+        }
+        pending.fulfill_map(who);
+  }
+};
+
+template <class T>
+auto createPending(PendingResults<T>& pending) {
+  return std::make_unique<Pending<T>>(pending);
 };
 
 struct MessageBuffer {
@@ -105,8 +135,11 @@ class DerechoGroup {
      *  Binomial pipeline by default. */
     const rdmc::send_algorithm type;
     const unsigned int window_size;
+    message_callback global_stability_callback;
     handlersType group_handlers;
     tcp::all_tcp_connections connections;
+    std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
+    std::list<std::unique_ptr<PendingBase>> fulfilledList;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
     unsigned int total_message_buffers;
@@ -181,11 +214,15 @@ class DerechoGroup {
     void create_rdmc_groups();
     void initialize_sst_row();
     void register_predicates();
+
     void deliver_message(msg_info& msg);
     template <unsigned long long tag, typename... Args>
-    auto groupSend(const vector<node_id_t>& nodes, Args&&... args);
+    auto derechoCallerSend(const vector<node_id_t>& nodes, Args&&... args);
     template <unsigned long long tag, typename... Args>
     auto tcpSend(node_id_t dest_node, Args&&... args);
+    // private get_position - used for cooked send
+    char* get_position(long long unsigned int payload_size, bool cooked_send,
+                       int pause_sending_turns = 0);
 
 public:
     // the constructor - takes the list of members, send parameters (block size,
@@ -194,9 +231,10 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         std::vector<MessageBuffer>& free_message_buffers,
-        long long unsigned int _max_payload_size, handlersType _group_handlers,
-        long long unsigned int _block_size,
-        std::map<node_id_t, std::string>& ip_addrs,
+        long long unsigned int _max_payload_size,
+        message_callback _global_stability_callback,
+        handlersType _group_handlers, long long unsigned int _block_size,
+        std::map<node_id_t, std::string> ip_addrs,
         unsigned int _window_size = 3, unsigned int timeout_ms = 1,
         rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
         uint32_t port = 12487);
@@ -205,8 +243,12 @@ public:
     DerechoGroup(
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        DerechoGroup&& old_group, std::map<node_id_t, std::string>& ip_addrs, uint32_t port=12487);
+        DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
+        uint32_t port = 12487);
     ~DerechoGroup();
+
+    void create_p2p_links();
+
     void deliver_messages_upto(
         const std::vector<long long int>& max_indices_for_senders);
     /** get a pointer into the buffer, to write data into it before sending */
@@ -239,7 +281,7 @@ public:
     static long long unsigned int compute_max_msg_size(
         const long long unsigned int max_payload_size,
         const long long unsigned int block_size);
-    };
+};
 }  // namespace derecho
 
 #include "derecho_group_impl.h"

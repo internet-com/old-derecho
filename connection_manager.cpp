@@ -70,27 +70,39 @@ void all_tcp_connections::establish_node_connections(
 }
 
 all_tcp_connections::all_tcp_connections(
-    node_id_t my_id, const std::map<node_id_t, ip_addr_t>& ip_addrs,
+    node_id_t _my_id, const std::map<node_id_t, ip_addr_t>& _ip_addrs,
     uint32_t _port)
-    : port(_port) {
+    : my_id(_my_id), ip_addrs(_ip_addrs), port(_port) {
+}
+
+void all_tcp_connections::create() {
     establish_node_connections(my_id, ip_addrs);
+}
+
+void all_tcp_connections::destroy() {
+    std::lock_guard<std::mutex> lock(sockets_mutex);
+    sockets.clear();
+    conn_listener.reset();
 }
 
 bool all_tcp_connections::tcp_write(node_id_t node_id, char const* buffer,
                                     size_t size) {
-        const auto it = sockets.find(node_id);
-        assert(it != sockets.end());
-        return it->second.write(buffer, size);
+    std::lock_guard<std::mutex> lock(sockets_mutex);
+    const auto it = sockets.find(node_id);
+    assert(it != sockets.end());
+    return it->second.write(buffer, size);
 }
 
 bool all_tcp_connections::tcp_read(node_id_t node_id, char* buffer,
                                    size_t size) {
+    std::lock_guard<std::mutex> lock(sockets_mutex);
     const auto it = sockets.find(node_id);
     assert(it != sockets.end());
     return it->second.read(buffer, size);
 }
 
 int32_t all_tcp_connections::probe_all() {
+    std::lock_guard<std::mutex> lock(sockets_mutex);
     for(auto& p : sockets) {
         bool new_data_available = p.second.probe();
         if(new_data_available == true) {
