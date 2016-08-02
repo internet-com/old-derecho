@@ -48,12 +48,12 @@ bool ManagedGroup::rdmc_globals_initialized = false;
 
 ManagedGroup::ManagedGroup(const int gms_port,
                            const map<node_id_t, ip_addr>& member_ips,
-                           node_id_t my_id, node_id_t leader_id,
+                           const node_id_t my_id, const node_id_t leader_id,
                            long long unsigned int _max_payload_size,
                            CallbackSet stability_callbacks,
-                           long long unsigned int _block_size,
-                           std::string filename, unsigned int _window_size,
-                           rdmc::send_algorithm _type)
+                           const long long unsigned int _block_size,
+                           std::string filename, const unsigned int _window_size,
+                           const rdmc::send_algorithm _type)
     : member_ips_by_id(member_ips),
       last_suspected(View::MAX_MEMBERS),
       gms_port(gms_port),
@@ -121,6 +121,66 @@ ManagedGroup::ManagedGroup(const int gms_port,
         log_event("Joining node initialized its SST row from the leader");
     }
 
+    create_threads();
+    register_predicates();
+    log_event("Starting predicate evaluation");
+    curr_view->gmsSST->start_predicate_evaluation();
+
+    // curr_view->rdmc_sending_group->debug_print();
+}
+
+ManagedGroup::ManagedGroup(const std::string& recovery_filename,
+                           const int gms_port,
+                           const long long unsigned int _max_payload_size,
+                           CallbackSet stability_callbacks,
+                           const long long unsigned int _block_size,
+                           const unsigned int _window_size,
+                           const rdmc::send_algorithm _type)
+    : last_suspected(View::MAX_MEMBERS),
+      gms_port(gms_port),
+      server_socket(gms_port),
+      thread_shutdown(false),
+      view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
+      curr_view(load_view(view_file_name)),
+      next_view(nullptr) {
+    for(std::vector<node_id_t>::size_type rank = 0; rank < curr_view->members.size(); rank++) {
+        member_ips_by_id.insert({curr_view->members[rank], curr_view->member_ips[rank]});
+    }
+    if(!rdmc_globals_initialized) {
+        global_setup(member_ips_by_id, curr_view->members[curr_view->my_rank]);
+    }
+
+    std::vector<MessageBuffer> message_buffers;
+    auto max_msg_size = DerechoGroup<View::MAX_MEMBERS>::compute_max_msg_size(_max_payload_size, _block_size);
+    while(message_buffers.size() < _window_size * View::MAX_MEMBERS) {
+        message_buffers.emplace_back(max_msg_size);
+    }
+
+    log_event("Initializing SST and RDMC for the first time.");
+    setup_sst_and_rdmc(message_buffers, _max_payload_size, stability_callbacks,
+                       _block_size, recovery_filename, _window_size, _type);
+    curr_view->gmsSST->put();
+    curr_view->gmsSST->sync_with_members();
+    log_event("Done setting up initial SST and RDMC");
+    //Initialize nChanges and nAcked in the local SST row to the saved view's VID, so the next proposed change is detected
+    gmssst::init((*curr_view->gmsSST)[curr_view->my_rank], curr_view->vid);
+
+    create_threads();
+    register_predicates();
+    log_event("Starting predicate evaluation");
+    curr_view->gmsSST->start_predicate_evaluation();
+}
+
+void ManagedGroup::global_setup(const map<node_id_t, ip_addr>& member_ips,
+                                node_id_t my_id) {
+    cout << "Doing global setup of SST and RDMC" << endl;
+    rdmc::initialize(member_ips, my_id);
+    sst::tcp::tcp_initialize(my_id, member_ips);
+    sst::verbs_initialize();
+    rdmc_globals_initialized = true;
+}
+
+void ManagedGroup::create_threads() {
     client_listener_thread = std::thread{[this]() {
         while(!thread_shutdown) {
             tcp::socket client_socket = server_socket.accept();
@@ -143,21 +203,6 @@ ManagedGroup::ManagedGroup(const int gms_port,
         }
         cout << "Old View cleanup thread shutting down." << endl;
     });
-
-    register_predicates();
-    log_event("Starting predicate evaluation");
-    curr_view->gmsSST->start_predicate_evaluation();
-
-    // curr_view->rdmc_sending_group->debug_print();
-}
-
-void ManagedGroup::global_setup(const map<node_id_t, ip_addr>& member_ips,
-                                node_id_t my_id) {
-    cout << "Doing global setup of SST and RDMC" << endl;
-    rdmc::initialize(member_ips, my_id);
-    sst::tcp::tcp_initialize(my_id, member_ips);
-    sst::verbs_initialize();
-    rdmc_globals_initialized = true;
 }
 
 void ManagedGroup::register_predicates() {

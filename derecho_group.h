@@ -107,6 +107,7 @@ struct CallbackSet {
  * row-struct */
 template <unsigned int N>
 class DerechoGroup {
+private:
     /** vector of member id's */
     std::vector<node_id_t> members;
     /**  number of members */

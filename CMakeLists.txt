@@ -19,12 +19,24 @@ add_custom_target(
 include_directories(serialization)
 find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./serialization)
 
-add_library(derecho SHARED managed_group.cpp view.cpp view_utils.cpp derecho_row.cpp logger.cpp filewriter.cpp)
+add_library(derecho SHARED managed_group.cpp view.cpp derecho_row.cpp logger.cpp filewriter.cpp)
 target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst ${SERIALIZATION_LIBRARY})
 add_dependencies(derecho mutils_serialization)
 
 add_executable(main main.cpp)
 target_link_libraries(main derecho)
+
+add_executable(parse_state_file parse_state_file.cpp)
+target_link_libraries(parse_state_file derecho)
+
+add_executable(create_state_file create_state_file.cpp)
+target_link_libraries(create_state_file derecho)
+
+add_executable(latest_logged_message latest_logged_message.cpp)
+target_link_libraries(latest_logged_message derecho)
+
+add_executable(log_tail_length log_tail_length.cpp)
+target_link_libraries(log_tail_length derecho)
 
 add_executable(conntest connection_test.cpp)
 target_link_libraries(conntest rdmc sst)

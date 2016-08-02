@@ -47,8 +47,8 @@ void FileWriter::set_message_written_upcall(
 }
 
 void FileWriter::perform_writes(std::string filename) {
-    ofstream data_file(filename);
-    ofstream metadata_file(filename + METADATA_EXTENSION);
+    ofstream data_file(filename, std::ios::app);
+    ofstream metadata_file(filename + METADATA_EXTENSION, std::ios::app);
 
     unique_lock<mutex> writes_lock(pending_writes_mutex);
 

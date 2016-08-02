@@ -129,4 +129,10 @@ std::unique_ptr<View> load_view(const std::string& view_file_name);
  * @return The output stream
  */
 std::ostream& operator<<(std::ostream& stream, const View& view);
+
+/**
+ * Parses the plaintext representation created by operator<< and modifies the View
+ * argument to contain the view it represents.
+ */
+std::istream& operator>>(std::istream& stream, View& view);
 }

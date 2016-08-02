@@ -40,8 +40,7 @@ size_t index_of(T container, U elem) {
  * @param my_node_id The rank (ID) of this node in the group
  * @param _sst The SST this group will use; created by the GMS (membership
  * service) for this group.
- * @param _free_message_buffers Message buffers to use for RDMC
- *sending/receiving
+ * @param _free_message_buffers Message buffers to use for RDMC sending/receiving
  * (there must be one for each sender in the group)
  * @param _max_payload_size The size of the largest possible message that will
  * be sent in this group, in bytes
@@ -52,8 +51,7 @@ size_t index_of(T container, U elem) {
  * be in progress at once before blocking sends) to use when sending a stream
  * of messages to the group; default is 3
  * @param timeout_ms The time that this node will wait for a sender in the group
- * to send its message before concluding that the sender has failed; default is
- *1ms
+ * to send its message before concluding that the sender has failed; default is 1ms
  * @param _type The type of RDMC algorithm to use; default is BINOMIAL_SEND
  * @param filename If provided, the name of the file in which to save persistent
  * copies of all messages received. If an empty filename is given (the default),
@@ -184,9 +182,7 @@ DerechoGroup<N>::DerechoGroup(
         next_send = convert_msg_info(*old_group.next_send);
     }
 
-    // If the old group was using persistence, we should transfer its state to
-    // the
-    // new group
+    // If the old group was using persistence, we should transfer its state to the new group
     file_writer = std::move(old_group.file_writer);
     if(file_writer) {
         file_writer->set_message_written_upcall(make_file_written_callback());
@@ -241,10 +237,8 @@ void DerechoGroup<N>::create_rdmc_groups() {
     // create num_members groups one at a time
     for(int groupnum = 0; groupnum < num_members; ++groupnum) {
         /* members[groupnum] is the sender for group `groupnum`
-         * for now, we simply rotate the members vector to supply to
-         * create_group
-         * even though any arrangement of receivers in the members vector is
-         * possible
+         * for now, we simply rotate the members vector to supply to create_group
+         * even though any arrangement of receivers in the members vector is possible
          */
         // allocate buffer for the group
         // std::unique_ptr<char[]> buffer(new char[max_msg_size*window_size]);
@@ -286,8 +280,7 @@ void DerechoGroup<N>::create_rdmc_groups() {
                                                 std::move(msginfo));
                 current_receives.erase(it);
             }
-            // Add empty messages to locally_stable_messages for each turn that
-            // the
+            // Add empty messages to locally_stable_messages for each turn that the
             // sender is skipping.
             for(unsigned int j = 0; j < h->pause_sending_turns; ++j) {
                 index++;
@@ -308,21 +301,12 @@ void DerechoGroup<N>::create_rdmc_groups() {
                                             << "Updating seq_num to "
                                             << new_seq_num);
                 (*sst)[member_index].seq_num = new_seq_num;
-                //                        sst->put (offsetof (DerechoRow<N>,
-                //                        seq_num),
-                //                        sizeof (new_seq_num));
                 sst->put();
             } else {
-                //                        size_t size_nReceived =
-                //                        sizeof((*sst)[member_index].nReceived[i]);
-                //                        sst->put(offsetof(DerechoRow<N>,
-                //                        nReceived) +
-                //                        i * size_nReceived, size_nReceived);
                 sst->put();
             }
         };
-        // Capture rdmc_receive_handler by copy! The reference to it won't be
-        // valid
+        // Capture rdmc_receive_handler by copy! The reference to it won't be valid
         // after this constructor ends!
         auto receive_handler_plus_notify =
             [this, rdmc_receive_handler](char *data, size_t size) {
@@ -331,13 +315,10 @@ void DerechoGroup<N>::create_rdmc_groups() {
                 sender_cv.notify_all();
             };
         // groupnum is the group number
-        // receive destination checks if the message will exceed the buffer
-        // length
+        // receive destination checks if the message will exceed the buffer length
         // at current position in which case it returns the beginning position
         if(groupnum == member_index) {
-            // In the group in which this node is the sender, we need to signal
-            // the
-            // writer thread
+            // In the group in which this node is the sender, we need to signal the writer thread
             // to continue when we see that one of our messages was delivered.
             rdmc::create_group(
                 groupnum + rdmc_group_num_offset, rotated_members, block_size,
@@ -451,9 +432,6 @@ void DerechoGroup<N>::register_predicates() {
                                             << "Updating stable_num to "
                                             << min_seq_num);
                 sst[member_index].stable_num = min_seq_num;
-                //            sst.put (offsetof (DerechoRow<N>, stable_num),
-                //            sizeof
-                //            (min_seq_num));
                 sst.put();
             }
         };
@@ -485,9 +463,6 @@ void DerechoGroup<N>::register_predicates() {
                 Message &msg = locally_stable_messages.begin()->second;
                 deliver_message(msg);
                 sst[member_index].delivered_num = least_undelivered_seq_num;
-                //                sst.put (offsetof (DerechoRow<N>,
-                //                delivered_num),
-                //                sizeof (least_undelivered_seq_num));
                 sst.put();
                 locally_stable_messages.erase(locally_stable_messages.begin());
             }

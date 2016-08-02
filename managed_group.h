@@ -100,6 +100,9 @@ private:
     pred_handle leader_proposed_handle;
     pred_handle leader_committed_handle;
 
+    /** Name of the file to use to persist the current view (and other parameters) to disk. */
+    std::string view_file_name;
+
     /** Lock this before accessing curr_view, since it's shared by multiple threads */
     std::mutex view_mutex;
     /** Notified when curr_view changes (i.e. we are finished with a pending view change).*/
@@ -111,9 +114,6 @@ private:
     /** May hold a pointer to the partially-constructed next view, if we are
      *  in the process of transitioning to a new view. */
     std::unique_ptr<View> next_view;
-
-    /** Name of the file to use to persist the current view (and other parameters) to disk. */
-    std::string view_file_name;
 
     /** Sends a joining node the new view that has been constructed to include it.*/
     void commit_join(const View& new_view, tcp::socket& client_socket);
@@ -141,6 +141,8 @@ private:
     static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
     static int min_acked(const View::DerechoSST& gmsSST, const std::vector<char>& failed);
 
+    /** Constructor helper method to encapsulate spawning the background threads. */
+    void create_threads();
     /** Constructor helper method to encapsulate creating all the predicates. */
     void register_predicates();
 
@@ -169,7 +171,7 @@ public:
      */
     ManagedGroup(const int gms_port,
                  const std::map<node_id_t, ip_addr>& member_ips,
-                 node_id_t my_id, node_id_t leader_id,
+                 const node_id_t my_id, const node_id_t leader_id,
                  const long long unsigned int _max_payload_size,
                  CallbackSet stability_callbacks,
                  const long long unsigned int _block_size,
@@ -177,6 +179,35 @@ public:
                  const unsigned int _window_size = 3,
                  const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
     ~ManagedGroup();
+
+    /**
+     * Constructor that re-starts a failed Derecho group from log files.
+     * It assumes the local ".paxosstate" file already contains the last known
+     * view, obtained from a quorum of members, and that any messages missing
+     * from the local log have already been appended from the longest log of a
+     * member of the last known view. (This can be accomplished by running the
+     * script log_recovery_helper.sh). Does NOT currently attempt to replay
+     * completion events for missing messages that were transferred over from
+     * another member's log.
+     * The last 5 parameters are the callbacks and DerechoGroup parameters
+     * to use for sending messages once recovery is complete.
+     * @param recovery_filename The base name of the set of recovery files to
+     * use (extensions will be added automatically)
+     * @param gms_port The port to contact other group members on when sending
+     * group-management messages
+     * @param _max_payload_size
+     * @param stability_callbacks
+     * @param _block_size
+     * @param _window_size
+     * @param _type
+     */
+    ManagedGroup(const std::string& recovery_filename,
+                 const int gms_port,
+                 const long long unsigned int _max_payload_size,
+                 CallbackSet stability_callbacks,
+                 const long long unsigned int _block_size,
+                 const unsigned int _window_size = 3,
+                 const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
 
     static void global_setup(const std::map<node_id_t, ip_addr>& member_ips,
                              node_id_t my_id);

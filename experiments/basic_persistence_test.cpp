@@ -38,20 +38,17 @@ const int num_messages = 1000;
 bool done = false;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
-void stability_callback(int sender_id, long long int index, char *data,
-                        long long int size) {
-    derecho::util::debug_log().log_event(
-        stringstream() << "Global stability for message " << index
-                       << " from sender " << sender_id);
+void stability_callback(int sender_id, long long int index, char *data, long long int size) {
+    using namespace derecho;
+    util::debug_log().log_event(stringstream() << "Global stability for message "
+            << index << " from sender " << sender_id);
 }
 
-void persistence_callback(int sender_id, long long int index, char *data,
-                          long long int size) {
-    cout << "Persistence complete for message " << index << " from sender "
-         << sender_id << endl;
-    derecho::util::debug_log().log_event(
-        stringstream() << "Persistence complete for message " << index
-                       << " from sender " << sender_id);
+void persistence_callback(int sender_id, long long int index, char *data, long long int size) {
+    using namespace derecho;
+    cout << "Persistence complete for message " << index << " from sender " << sender_id << endl;
+    util::debug_log().log_event(stringstream() << "Persistence complete for message "
+            << index << " from sender " << sender_id);
     if(index == num_messages - 1 && sender_id == (int)num_nodes - 1) {
         cout << "Done" << endl;
         done = true;
@@ -65,15 +62,13 @@ void send_messages(int count) {
             buffer = managed_group->get_sendbuffer_ptr(message_size);
         }
         memset(buffer, rand() % 256, message_size);
-        //        cout << "Send function call succeeded at the client side" <<
-        //        endl;
         managed_group->send();
     }
 }
 
 /*
- * This test runs a group of nodes for 30 seconds of continuous sending with no
- * failures. It tests the bandwidth of a ManagedGroup in the "steady state."
+ * This test sends a fixed number of messages in a group with persistence enabled,
+ * to ensure that the persistence-to-disk features work.
  */
 int main(int argc, char *argv[]) {
     srand(time(nullptr));
@@ -101,13 +96,10 @@ int main(int argc, char *argv[]) {
         duration<double, std::micro>(t3 - t1).count(),
         duration<double, std::micro>(max((t2 - t1), (t3 - t2))).count());
     fflush(stdout);
-    cout << endl
-         << endl;
+    cout << endl << endl;
 
-    string log_filename =
-        (std::stringstream() << "events_node" << node_rank << ".csv").str();
-    string message_filename =
-        (std::stringstream() << "data" << node_rank << ".dat").str();
+    string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
     managed_group = make_shared<derecho::ManagedGroup>(
         GMS_PORT, node_addresses, node_rank, 0, message_size,

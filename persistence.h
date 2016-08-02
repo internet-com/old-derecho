@@ -42,6 +42,5 @@ static const std::string METADATA_EXTENSION = ".metadata";
 static const std::string PAXOS_STATE_EXTENSION = ".paxosstate";
 static const std::string SWAP_FILE_EXTENSION = ".swp";
 
-
 }  // namespace persistence
 }  // namespace derecho

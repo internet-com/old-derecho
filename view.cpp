@@ -254,4 +254,42 @@ std::ostream& operator<<(std::ostream& stream, const View& view) {
     stream << view.my_rank << endl;
     return stream;
 }
+
+std::istream& operator>>(std::istream& stream, View& view) {
+    std::string line;
+    if(std::getline(stream, line)) {
+        view.vid = std::stoi(line);
+    }
+    //"List of member IDs" line
+    if(std::getline(stream, line)) {
+        std::istringstream linestream(line);
+        std::copy(std::istream_iterator<node_id_t>(linestream), std::istream_iterator<node_id_t>(),
+                  std::back_inserter(view.members));
+    }
+    //"List of member IPs" line
+    if(std::getline(stream, line)) {
+        std::istringstream linestream(line);
+        std::copy(std::istream_iterator<ip_addr>(linestream), std::istream_iterator<ip_addr>(),
+                  std::back_inserter(view.member_ips));
+    }
+    //Failures array line, which was printed as "T" or "F" strings
+    if(std::getline(stream, line)) {
+        std::istringstream linestream(line);
+        std::string fail_str;
+        while(linestream >> fail_str) {
+            view.failed.emplace_back(fail_str == "T" ? true : false);
+        }
+    }
+    //The last three lines each contain a single number
+    if(std::getline(stream, line)) {
+        view.nFailed = std::stoi(line);
+    }
+    if(std::getline(stream, line)) {
+        view.num_members = std::stoi(line);
+    }
+    if(std::getline(stream, line)) {
+        view.my_rank = std::stoi(line);
+    }
+    return stream;
+}
 }
