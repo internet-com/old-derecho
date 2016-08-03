@@ -224,7 +224,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                 log_event(std::string("Marking ") +
                           std::to_string(Vc.members[q]) +
                           std::string(" failed"));
-                if(Vc.nFailed + 1 >= Vc.num_members / 2) {
+                if(Vc.nFailed >= (Vc.num_members + 1) / 2) {
                     throw derecho_exception(
                         "Majority of a Derecho group simultaneously failed ... "
                         "shutting down");
@@ -242,9 +242,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                 Vc.failed[q] = true;
                 Vc.nFailed++;
 
-                if(Vc.nFailed > Vc.num_members / 2 ||
-                   (Vc.nFailed == Vc.num_members / 2 &&
-                    Vc.num_members % 2 == 0)) {
+                if(Vc.nFailed >= (Vc.num_members + 1) / 2) {
                     throw derecho_exception(
                         "Potential partitioning event: this node is no longer "
                         "in the majority and must shut down!");
@@ -920,7 +918,7 @@ void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
     //	cout << "Count is " << cnt << ", my row is " <<
     // gmssst::to_string((*curr_view->gmsSST)[curr_view->my_rank]) << endl;
 
-    if(cnt >= curr_view->num_members / 2) {
+    if(cnt >= (curr_view->num_members + 1) / 2) {
         throw derecho_exception(
             "Potential partitioning event: this node is no longer in the "
             "majority and must shut down!");
