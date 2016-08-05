@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <signal.h>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -225,6 +226,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                           std::to_string(Vc.members[q]) +
                           std::string(" failed"));
                 if(Vc.nFailed >= (Vc.num_members + 1) / 2) {
+                    std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
                     throw derecho_exception(
                         "Majority of a Derecho group simultaneously failed ... "
                         "shutting down");
@@ -234,6 +236,8 @@ void ManagedGroup<handlersType>::register_predicates() {
                 s << "GMS telling SST to freeze row " << q << " which is node "
                   << Vc.members[q];
                 log_event(s);
+		std::cout << "GMS telling SST to freeze row " << q << " which is node "
+		<< Vc.members[q] << std::endl;
                 gmsSST.freeze(q);  // Cease to accept new updates from q
                 Vc.rdmc_sending_group->wedge();
                 gmssst::set(
@@ -243,6 +247,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                 Vc.nFailed++;
 
                 if(Vc.nFailed >= (Vc.num_members + 1) / 2) {
+                    std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
                     throw derecho_exception(
                         "Potential partitioning event: this node is no longer "
                         "in the majority and must shut down!");
@@ -255,6 +260,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                 {
                     if((gmsSST[myRank].nChanges - gmsSST[myRank].nCommitted) ==
                        View<handlersType>::MAX_MEMBERS) {
+                        std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
                         throw derecho_exception(
                             "Ran out of room in the pending changes list");
                     }
@@ -408,14 +414,15 @@ void ManagedGroup<handlersType>::register_predicates() {
 
         next_view->who = std::make_shared<node_id_t>(currChangeID);
         if((next_view->my_rank = next_view->rank_of(myID)) == -1) {
+            std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
             throw derecho_exception(
                 (std::stringstream()
                  << "Some other node reported that I failed.  Node " << myID
-                 << " terminating")
-                    .str());
+                 << " terminating").str());
         }
 
         if(next_view->gmsSST != nullptr) {
+            std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
             throw derecho_exception("Overwriting the SST");
         }
 
@@ -563,7 +570,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(
     curr_view->gmsSST =
         make_shared<sst::SST<DerechoRow<View<handlersType>::MAX_MEMBERS>>>(
             curr_view->members, curr_view->members[curr_view->my_rank],
-            [this](const uint32_t node_id) { report_failure(node_id); });
+            [this](const uint32_t node_id) { report_failure(node_id); }, curr_view->failed);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
@@ -600,7 +607,8 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(
     newView.gmsSST =
         make_shared<sst::SST<DerechoRow<View<handlersType>::MAX_MEMBERS>>>(
             newView.members, newView.members[newView.my_rank],
-            [this](const uint32_t node_id) { report_failure(node_id); });
+            [this](const uint32_t node_id) { report_failure(node_id); },
+            newView.failed);
     newView.rdmc_sending_group = make_unique<
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
@@ -707,6 +715,7 @@ void ManagedGroup<handlersType>::receive_join(tcp::socket& client_socket) {
     if((gmsSST[curr_view->my_rank].nChanges -
         gmsSST[curr_view->my_rank].nCommitted) ==
        View<handlersType>::MAX_MEMBERS / 2) {
+        std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
         throw derecho_exception("Too many changes to allow a Join right now");
     }
 
@@ -766,7 +775,7 @@ bool ManagedGroup<handlersType>::suspected_not_equal(
     const typename View<handlersType>::DerechoSST& gmsSST,
     const vector<bool>& old) {
     for(int r = 0; r < gmsSST.get_num_rows(); r++) {
-        for(int who = 0; who < View<handlersType>::MAX_MEMBERS; who++) {
+        for(int who = 0; who < curr_view->num_members; who++) {
             if(gmsSST[r].suspected[who] && !old[who]) {
                 return true;
             }
@@ -909,7 +918,7 @@ void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
          << "]" << endl;
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[r] = true;
     int cnt = 0;
-    for(r = 0; r < View<handlersType>::MAX_MEMBERS; r++) {
+    for(r = 0; r < curr_view->num_members; r++) {
         if((*curr_view->gmsSST)[curr_view->my_rank].suspected[r]) {
             ++cnt;
         }
@@ -919,11 +928,13 @@ void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
     // gmssst::to_string((*curr_view->gmsSST)[curr_view->my_rank]) << endl;
 
     if(cnt >= (curr_view->num_members + 1) / 2) {
+        std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
         throw derecho_exception(
             "Potential partitioning event: this node is no longer in the "
             "majority and must shut down!");
     }
     curr_view->gmsSST->put();
+    std::cout << "Exiting from remote_failure" << std::endl;
 }
 
 template <typename handlersType>

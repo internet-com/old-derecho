@@ -124,7 +124,7 @@ private:
     void leader_ragged_edge_cleanup(View<handlersType>& Vc);
     void follower_ragged_edge_cleanup(View<handlersType>& Vc);
 
-    static bool suspected_not_equal(
+    bool suspected_not_equal(
         const typename View<handlersType>::DerechoSST& gmsSST,
         const std::vector<bool>& old);
     static void copy_suspected(
