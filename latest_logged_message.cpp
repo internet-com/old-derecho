@@ -2,9 +2,9 @@
  * @file latest_logged_message.cpp
  * Prints out the message number of the last message in a Derecho logfile.
  * Since "sequence numbers" depend on the number of members in a group, the
- * least confusing way to print the message number is the pair (sender, index).
- * This is printed without the parentheses or comma for ease of parsing by
- * bash scripts.
+ * least confusing way to print the message number is the tuple (view_id,
+ * sender, index). This is printed without the parentheses or comma for ease
+ * of parsing by bash scripts.
  * @date Jul 11, 2016
  * @author edward
  */
@@ -35,6 +35,6 @@ int main(int argc, char* argv[]) {
     char buffer[size_of_metadata];
     metadata_file.read(buffer, size_of_metadata);
     std::unique_ptr<message_metadata> metadata = mutils::from_bytes<message_metadata>(nullptr, buffer);
-    std::cout << metadata->sender << " " << metadata->index << std::endl;
+    std::cout << metadata->view_id << " " << metadata->sender << " " << metadata->index << std::endl;
     return 0;
 }

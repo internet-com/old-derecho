@@ -28,8 +28,7 @@ FileWriter::FileWriter(const std::function<void(message)>& _message_written_upca
 
 FileWriter::~FileWriter() {
     {
-        // must hold both mutexes to change exit, since either thread could be
-        // about
+        // must hold both mutexes to change exit, since either thread could be about
         // to read it before calling wait()
         unique_lock<mutex> writes_lock(pending_writes_mutex);
         unique_lock<mutex> callbacks_lock(pending_callbacks_mutex);
@@ -69,6 +68,7 @@ void FileWriter::perform_writes(std::string filename) {
             pending_writes.pop();
 
             message_metadata metadata;
+            metadata.view_id = m.view_id;
             metadata.sender = m.sender;
             metadata.index = m.index;
             metadata.offset = current_offset;

@@ -61,6 +61,9 @@ target_link_libraries(viewchange_timeline derecho)
 add_executable(basic_persistence_test basic_persistence_test.cpp)
 target_link_libraries(basic_persistence_test derecho)
 
+add_executable(log_recovery_crash log_recovery_crash.cpp)
+target_link_libraries(log_recovery_crash derecho)
+
 add_executable(local_filewriter_test local_filewriter_test.cpp)
 target_link_libraries(local_filewriter_test derecho)
 

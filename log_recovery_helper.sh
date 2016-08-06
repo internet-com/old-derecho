@@ -10,13 +10,16 @@ main () {
 	local_id=$2
 	logfile_suffix=$3
 	viewfile_suffix="paxosstate"
+	metadata_suffix="metadata"
 	derecho_wd=$(pwd)
 
 	declare -a view
 	view_file=${file_prefix}${local_id}.${logfile_suffix}.${viewfile_suffix}
 	mapfile -t view < <(./parse_state_file $view_file) 
-	#save this before synchronizing views
+	#save my_rank and local_ip before synchronizing views
 	my_rank=${view[6]}
+	member_ids=(${view[1]})
+	local_ip=${member_ips[$my_rank]}
 
 	echo "Synchronizing saved views with other members..."
 	until fetch_and_scan_views; do
@@ -28,7 +31,7 @@ main () {
 	num_members=${view[5]}
 	if [ -e latest_view.${viewfile_suffix} ]; then
 		#Replace the node's local view file with latest view, so Derecho can read it when it starts up
-		printf '%s\n' "${view[@]}" | ./create_state_file $view_vile 
+		printf '%s\n' "${view[@]}" | ./create_state_file $view_file 
 		echo "$view_file has been updated to the last known view."
 	else 
 		echo "$view_file already contains the latest view."
@@ -45,20 +48,21 @@ main () {
 		fi
 	done
 
-	#The local log's latest message number
-	msg_num_pair=($(./latest_logged_message ${file_prefix}${local_id}.${logfile_suffix}))
-	latest_message_pair=("${msg_num_pair[@]}")
-	latest_message_num=$((msg_num_pair[0] + num_members * msg_num_pair[1]))
+	echo "Live members: ${live_members[@]}"
+
+	#Message numbers are tuples (vid, sender, index)
+	#Start with the local log's latest message number
+	local_message_tuple=($(./latest_logged_message ${file_prefix}${local_id}.${logfile_suffix}))
+	latest_message_tuple=("${local_message_tuple[@]}")
 	longest_log_rank=$my_rank	#rank of the local node
 	
 	#Ask each live member what its latest message number is
 	for rank in ${live_members[@]}; do
 		#This only works if we have public-key access to all the other nodes! Otherwise SSH will prompt for username and password, which breaks everything
-		msg_num_pair=($(ssh -q ${member_ips[$rank]} "${derecho_wd}/latest_logged_message ${derecho_wd}/${file_prefix}${member_ids[$rank]}.${logfile_suffix}"))
-		sequence_num=$((msg_num_pair[0] + num_members * msg_num_pair[1]))
-		if (( sequence_num > latest_message_num )); then
-			latest_message_pair=("${msg_num_pair[@]}")
-			latest_message_num=$sequence_num
+		msg_num_tuple=($(ssh -q ${member_ips[$rank]} "${derecho_wd}/latest_logged_message ${derecho_wd}/${file_prefix}${member_ids[$rank]}.${logfile_suffix}"))
+		if (( $(compare_message_nums ${msg_num_tuple[@]} ${latest_message_tuple[@]}) > 0 )); then
+			echo "(${msg_num_tuple[@]}) > (${latest_message_tuple[@]})"
+			latest_message_tuple=("${msg_num_tuple[@]}")
 			longest_log_rank=$rank
 		fi
 	done
@@ -69,11 +73,18 @@ main () {
 	else 
 		echo "Longest log is at node with rank $longest_log_rank, which has ID ${member_ids[$longest_log_rank]} and IP address ${member_ips[$longest_log_rank]}"
 		echo "Appending its tail to the local log..."
-		local_ip=${member_ips[$my_rank]}
+		echo "Local IP is $local_ip"
 		longest_log_filename="${derecho_wd}/${file_prefix}${member_ids[$longest_log_rank]}.${logfile_suffix}"
-		log_tail_bytes=$(ssh -q ${member_ips[$longest_log_rank]} "${derecho_wd}/log_tail_length $longest_log_filename ${latest_message_pair[@]}")
-		nc -ld 6789 >> ${file_prefix}${local_id}.${logfile_suffix} &
-		ssh -q ${member_ips[$longest_log_rank]} "tail -c $log_tail_bytes $longest_log_filename | nc $local_ip 6789"  
+		log_tail_bytes=$(ssh -q ${member_ips[$longest_log_rank]} "${derecho_wd}/log_tail_length $longest_log_filename ${local_message_tuple[@]}")
+		metadata_tail_bytes=$(ssh -q ${member_ips[$longest_log_rank]} "${derecho_wd}/log_tail_length -m $longest_log_filename ${local_message_tuple[@]}")
+		#Append bytes from the end of the remote log to the local log
+		echo "Copying $log_tail_bytes from $longest_log_filename on ${member_ips[$longest_log_rank]}"
+		nc -ld 6666 >> ${file_prefix}${local_id}.${logfile_suffix} &
+		ssh -q ${member_ips[$longest_log_rank]} "tail -c $log_tail_bytes $longest_log_filename | nc $local_ip 6666"  
+		#Repeat with the metadata file
+		echo "Copying $metadata_tail_bytes from $longest_log_filename.${metadata_suffix} on ${member_ips[$longest_log_rank]}"
+		nc -ld 6667 >> ${file_prefix}${local_id}.${logfile_suffix}.${metadata_suffix} &
+		ssh -q ${member_ips[$longest_log_rank]} "tail -c $metadata_tail_bytes $longest_log_filename.${metadata_suffix} | nc $local_ip 6667"  
 	fi
 }
 
@@ -108,7 +119,7 @@ fetch_and_scan_views () {
 			(( num_responses++ ))
 			declare -a other_view
 			mapfile -t other_view < <(./parse_state_file ${receive_dir}/$received_file_name)
-			if [[ ${other_view[0]} > $vid ]]; then
+			if (( ${other_view[0]} > $vid )); then
 				mv ${receive_dir}/$received_file_name ./latest_view.${viewfile_suffix}
 				view=("${other_view[@]}") #reassign view to other_view
 				rm -rf ${receive_dir} 
@@ -127,6 +138,40 @@ fetch_and_scan_views () {
 	#a quorum of members are alive and we have the latest view!
 	rm -rf ${receive_dir}
 	return 0
+}
+
+compare_message_nums() {
+	local msg_num_1=("$1" "$2" "$3")
+	local msg_num_2=("$4" "$5" "$6")
+	#Just swap sender and index, then call lexical_compare_triple
+	lexical_compare_triple "${msg_num_1[0]}" "${msg_num_1[2]}" "${msg_num_1[1]}" "${msg_num_2[0]}" "${msg_num_2[2]}" "${msg_num_2[1]}"
+}
+
+lexical_compare_triple() {
+	local triple1=("$1" "$2" "$3")
+	local triple2=("$4" "$5" "$6")
+	if (( ${triple1[0]} > ${triple2[0]} )); then
+		echo "1"
+		return
+	fi
+	if (( ${triple1[0]} == ${triple2[0]} )); then
+		if (( ${triple1[1]} > ${triple2[1]} )); then
+			echo "1"
+			return
+		fi
+		if (( ${triple1[1]} == ${triple2[1]} )); then
+			if (( ${triple1[2]} > ${triple2[2]} )); then
+				echo "1"
+				return
+			fi
+			if (( ${triple1[2]} == ${triple2[2]} )); then
+				echo "0"
+				return
+			fi
+		fi
+	fi
+	echo "-1"
+	return 
 }
 
 #Execution actually starts here, and passes all parameters to main()

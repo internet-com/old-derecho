@@ -18,7 +18,7 @@ namespace persistence {
 struct message {
     char *data;
     uint64_t length;
-
+    uint32_t view_id;
     uint32_t sender;
     uint64_t index;
 };
@@ -29,9 +29,10 @@ struct __attribute__((__packed__)) header {
 };
 
 struct __attribute__((__packed__)) message_metadata {
+    uint32_t view_id;
+    uint32_t padding1;
     uint32_t sender;
-    uint32_t padding;
-
+    uint32_t padding2;
     uint64_t index;
 
     uint64_t offset;

@@ -164,14 +164,15 @@ public:
      * all messages to disk.
      * @param gms_port The port to contact other group members on when sending
      * group-management messages
-     * @param member_ips A map specifying all of the potential members in the
+     * @param global_ip_map A map specifying all of the potential members in the
      * group, mapping their node IDs to their IP addresses
      * @param my_id The node ID of the node executing this code
      * @param leader_id The node ID of the GMS leader
      */
     ManagedGroup(const int gms_port,
-                 const std::map<node_id_t, ip_addr>& member_ips,
-                 const node_id_t my_id, const node_id_t leader_id,
+                 const std::map<node_id_t, ip_addr>& global_ip_map,
+                 const node_id_t my_id,
+                 const node_id_t leader_id,
                  const long long unsigned int _max_payload_size,
                  CallbackSet stability_callbacks,
                  const long long unsigned int _block_size,
@@ -181,7 +182,7 @@ public:
     ~ManagedGroup();
 
     /**
-     * Constructor that re-starts a failed Derecho group from log files.
+     * Constructor that re-starts a failed group member from log files.
      * It assumes the local ".paxosstate" file already contains the last known
      * view, obtained from a quorum of members, and that any messages missing
      * from the local log have already been appended from the longest log of a
@@ -195,6 +196,7 @@ public:
      * use (extensions will be added automatically)
      * @param gms_port The port to contact other group members on when sending
      * group-management messages
+     * @param my_id The node ID of the node executing this code
      * @param _max_payload_size
      * @param stability_callbacks
      * @param _block_size
@@ -203,6 +205,8 @@ public:
      */
     ManagedGroup(const std::string& recovery_filename,
                  const int gms_port,
+                 const std::map<node_id_t, ip_addr>& global_ip_map,
+                 const node_id_t my_id,
                  const long long unsigned int _max_payload_size,
                  CallbackSet stability_callbacks,
                  const long long unsigned int _block_size,

@@ -47,21 +47,21 @@ using unique_lock_t = std::unique_lock<std::mutex>;
 bool ManagedGroup::rdmc_globals_initialized = false;
 
 ManagedGroup::ManagedGroup(const int gms_port,
-                           const map<node_id_t, ip_addr>& member_ips,
+                           const map<node_id_t, ip_addr>& global_ip_map,
                            const node_id_t my_id, const node_id_t leader_id,
                            long long unsigned int _max_payload_size,
                            CallbackSet stability_callbacks,
                            const long long unsigned int _block_size,
                            std::string filename, const unsigned int _window_size,
                            const rdmc::send_algorithm _type)
-    : member_ips_by_id(member_ips),
+    : member_ips_by_id(global_ip_map),
       last_suspected(View::MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
       next_view(nullptr) {
     if(!rdmc_globals_initialized) {
-        global_setup(member_ips, my_id);
+        global_setup(global_ip_map, my_id);
     }
     std::vector<MessageBuffer> message_buffers;
     auto max_msg_size = DerechoGroup<View::MAX_MEMBERS>::compute_max_msg_size(_max_payload_size, _block_size);
@@ -73,7 +73,6 @@ ManagedGroup::ManagedGroup(const int gms_port,
     } else {
         curr_view = start_group(my_id);
         //Wait for the second member to join, then send him the initial view
-        //        tcp::connection_listener serversocket(gms_port);
         tcp::socket client_socket = server_socket.accept();
         ip_addr& joiner_ip = client_socket.remote_ip;
         curr_view->num_members++;
@@ -131,23 +130,25 @@ ManagedGroup::ManagedGroup(const int gms_port,
 
 ManagedGroup::ManagedGroup(const std::string& recovery_filename,
                            const int gms_port,
+                           const map<node_id_t, ip_addr>& global_ip_map,
+                           const node_id_t my_id,
                            const long long unsigned int _max_payload_size,
                            CallbackSet stability_callbacks,
                            const long long unsigned int _block_size,
                            const unsigned int _window_size,
                            const rdmc::send_algorithm _type)
-    : last_suspected(View::MAX_MEMBERS),
+    : member_ips_by_id(global_ip_map),
+      last_suspected(View::MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
-      view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
-      curr_view(load_view(view_file_name)),
-      next_view(nullptr) {
-    for(std::vector<node_id_t>::size_type rank = 0; rank < curr_view->members.size(); rank++) {
-        member_ips_by_id.insert({curr_view->members[rank], curr_view->member_ips[rank]});
-    }
+      view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION) {
+    auto last_view = load_view(view_file_name);
+//    for(std::vector<node_id_t>::size_type rank = 0; rank < last_view->members.size(); rank++) {
+//        member_ips_by_id.insert({last_view->members[rank], last_view->member_ips[rank]});
+//    }
     if(!rdmc_globals_initialized) {
-        global_setup(member_ips_by_id, curr_view->members[curr_view->my_rank]);
+        global_setup(member_ips_by_id, my_id);
     }
 
     std::vector<MessageBuffer> message_buffers;
@@ -155,6 +156,37 @@ ManagedGroup::ManagedGroup(const std::string& recovery_filename,
     while(message_buffers.size() < _window_size * View::MAX_MEMBERS) {
         message_buffers.emplace_back(max_msg_size);
     }
+
+    if(my_id != last_view->members[last_view->rank_of_leader()]) {
+        curr_view = join_existing(last_view->member_ips[last_view->rank_of_leader()], gms_port);
+    } else {
+        /* This should only happen if an entire group failed and the leader is restarting;
+         * otherwise the view obtained from the recovery script will have a leader that is
+         * not me. So reset to an empty view and wait for the first non-leader member to
+         * restart and join. */
+        curr_view = start_group(my_id);
+        curr_view->vid = last_view->vid+1;
+        tcp::socket client_socket = server_socket.accept();
+        ip_addr& joiner_ip = client_socket.remote_ip;
+        curr_view->num_members++;
+        curr_view->member_ips.push_back(joiner_ip);
+        for(const auto& entry : member_ips_by_id) {
+            if(entry.second == joiner_ip) {
+                curr_view->members.push_back(entry.first);
+                break;
+            }
+        }
+        curr_view->failed.push_back(false);
+
+        auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
+            bool success = client_socket.write(bytes, size);
+            assert(success);
+        };
+        std::size_t size_of_view = mutils::bytes_size(*curr_view);
+        mutils::post_object(bind_socket_write, size_of_view);
+        mutils::post_object(bind_socket_write, *curr_view);
+    }
+    curr_view->my_rank = curr_view->rank_of(my_id);
 
     log_event("Initializing SST and RDMC for the first time.");
     setup_sst_and_rdmc(message_buffers, _max_payload_size, stability_callbacks,
@@ -319,7 +351,7 @@ void ManagedGroup::register_predicates() {
         gmsSST.predicates.remove(change_commit_ready_handle);
         gmsSST.predicates.remove(leader_proposed_handle);
 
-        View &Vc = *curr_view;
+        View& Vc = *curr_view;
         int myRank = curr_view->my_rank;
         // These fields had better be synchronized.
         assert(gmsSST.get_local_index() == curr_view->my_rank);
@@ -344,7 +376,7 @@ void ManagedGroup::register_predicates() {
             int new_member_rank = next_view->num_members++;
             next_view->init_vectors();
             next_view->members[new_member_rank] = currChangeID;
-            next_view->member_ips[new_member_rank] = std::string(const_cast<cstring &>(gmsSST[myRank].joiner_ip));
+            next_view->member_ips[new_member_rank] = std::string(const_cast<cstring&>(gmsSST[myRank].joiner_ip));
             member_ips_by_id[currChangeID] = next_view->member_ips[new_member_rank];
         }
 
@@ -378,13 +410,12 @@ void ManagedGroup::register_predicates() {
             }
             return true;
         };
-        auto meta_wedged_continuation = [this, failed, whoFailed](DerechoSST &gmsSST) {
+        auto meta_wedged_continuation = [this, failed, whoFailed](DerechoSST& gmsSST) {
             log_event("MetaWedged is true; continuing view change");
             unique_lock_t lock(view_mutex);
             assert(next_view);
 
-            auto globalMin_ready_continuation = [this, failed, whoFailed](
-                DerechoSST &gmsSST) {
+            auto globalMin_ready_continuation = [this, failed, whoFailed](DerechoSST& gmsSST) {
                 lock_guard_t lock(view_mutex);
                 assert(next_view);
 
@@ -438,7 +469,7 @@ void ManagedGroup::register_predicates() {
                 globalMin_ready_continuation(gmsSST);
             } else {
                 // Non-leaders need another level of continuation to wait for GlobalMinReady
-                auto leader_globalMin_is_ready = [this](const DerechoSST &gmsSST) {
+                auto leader_globalMin_is_ready = [this](const DerechoSST& gmsSST) {
                     assert(next_view);
                     return gmsSST[curr_view->rank_of_leader()].globalMinReady;
                 };
@@ -520,8 +551,7 @@ void ManagedGroup::transition_sst_and_rdmc(View& newView, int whichFailed) {
 }
 
 unique_ptr<View> ManagedGroup::start_group(const node_id_t my_id) {
-    log_event(
-        "Starting new empty group with myself as leader");
+    log_event("Starting new empty group with myself as leader");
     unique_ptr<View> newView = std::make_unique<View>(1);
     newView->members[0] = my_id;
     newView->member_ips[0] = member_ips_by_id[my_id];
