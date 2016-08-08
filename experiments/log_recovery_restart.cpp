@@ -29,7 +29,7 @@ const size_t block_size = 1000;
 uint32_t num_nodes, node_rank;
 map<uint32_t, std::string> node_addresses;
 
-const int num_messages = 1000;
+const int num_messages = 250;
 bool done = false;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
@@ -64,8 +64,21 @@ int main(int argc, char* argv[]) {
     srand(time(nullptr));
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
-    derecho::ManagedGroup::global_setup(node_addresses, node_rank);
+    //This won't work! We need to support starting up a member without doing global setup
+//    derecho::ManagedGroup::global_setup(node_addresses, node_rank);
+    string debug_log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_log_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
+    managed_group = make_shared<derecho::ManagedGroup>(
+        message_log_filename, GMS_PORT, node_addresses, node_rank,
+        message_size, derecho::CallbackSet{stability_callback, persistence_callback},
+        block_size);
+
+    send_messages(num_messages);
+    while(!done) {
+    }
+    ofstream log_stream(debug_log_filename);
+    managed_group->print_log(log_stream);
 }
 
 

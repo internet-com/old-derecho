@@ -73,13 +73,13 @@ int main(int argc, char* argv[]) {
     num_nodes = node_addresses.size();
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
 
-    string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
-    string message_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
+    string debug_log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_log_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
     managed_group = make_shared<derecho::ManagedGroup>(
         GMS_PORT, node_addresses, node_rank, 0, message_size,
         derecho::CallbackSet{stability_callback, persistence_callback},
-        block_size, message_filename);
+        block_size, message_log_filename);
     cout << "Created group, waiting for others to join." << endl;
     while(managed_group->get_members().size() < (num_nodes - 1)) {
         std::this_thread::sleep_for(1ms);
@@ -89,10 +89,14 @@ int main(int argc, char* argv[]) {
     if(node_rank == num_nodes - 1) {
         send_messages(num_messages-250);
         managed_group->log_event("About to exit");
+        ofstream log_stream(debug_log_filename);
+        managed_group->print_log(log_stream);
         return 0;
     } else {
         send_messages(num_messages);
         while(!done) {
         }
+        ofstream log_stream(debug_log_filename);
+        managed_group->print_log(log_stream);
     }
 }

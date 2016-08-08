@@ -381,8 +381,8 @@ void DerechoGroup<N>::deliver_message(Message &msg) {
             // msg.sender_rank is the 0-indexed rank within this group, but
             // persistence::message needs the sender's globally unique ID
             persistence::message msg_for_filewriter{buf + h->header_size,
-                msg.size, (uint32_t) (*sst)[member_index].vid,
-                members[msg.sender_rank], (uint64_t) msg.index};
+                                                    msg.size, (uint32_t)(*sst)[member_index].vid,
+                                                    members[msg.sender_rank], (uint64_t)msg.index};
             auto sequence_number = msg.index * num_members + msg.sender_rank;
             non_persistent_messages.emplace(sequence_number, std::move(msg));
             file_writer->write_message(msg_for_filewriter);

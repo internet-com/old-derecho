@@ -47,8 +47,7 @@ int main(int argc, char* argv[]) {
     //Scan through the metadata blocks until we find the one with the right sequence number
     uint32_t vid = 0, sender = 0;
     uint64_t index = 0;
-    while(!(vid == target_vid && sender == target_sender && index == target_index)
-            && metadata_file) {
+    while(!(vid == target_vid && sender == target_sender && index == target_index) && metadata_file) {
         metadata_file.read(buffer, size_of_metadata);
         auto metadata = mutils::from_bytes<message_metadata>(nullptr, buffer);
         vid = metadata->view_id;

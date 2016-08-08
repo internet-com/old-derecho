@@ -144,9 +144,9 @@ ManagedGroup::ManagedGroup(const std::string& recovery_filename,
       thread_shutdown(false),
       view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION) {
     auto last_view = load_view(view_file_name);
-//    for(std::vector<node_id_t>::size_type rank = 0; rank < last_view->members.size(); rank++) {
-//        member_ips_by_id.insert({last_view->members[rank], last_view->member_ips[rank]});
-//    }
+    //    for(std::vector<node_id_t>::size_type rank = 0; rank < last_view->members.size(); rank++) {
+    //        member_ips_by_id.insert({last_view->members[rank], last_view->member_ips[rank]});
+    //    }
     if(!rdmc_globals_initialized) {
         global_setup(member_ips_by_id, my_id);
     }
@@ -165,7 +165,7 @@ ManagedGroup::ManagedGroup(const std::string& recovery_filename,
          * not me. So reset to an empty view and wait for the first non-leader member to
          * restart and join. */
         curr_view = start_group(my_id);
-        curr_view->vid = last_view->vid+1;
+        curr_view->vid = last_view->vid + 1;
         tcp::socket client_socket = server_socket.accept();
         ip_addr& joiner_ip = client_socket.remote_ip;
         curr_view->num_members++;
