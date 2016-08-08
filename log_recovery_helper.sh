@@ -48,8 +48,6 @@ main () {
 		fi
 	done
 
-	echo "Live members: ${live_members[@]}"
-
 	#Message numbers are tuples (vid, sender, index)
 	#Start with the local log's latest message number
 	local_message_tuple=($(./latest_logged_message ${file_prefix}${local_id}.${logfile_suffix}))
@@ -61,7 +59,6 @@ main () {
 		#This only works if we have public-key access to all the other nodes! Otherwise SSH will prompt for username and password, which breaks everything
 		msg_num_tuple=($(ssh -q ${member_ips[$rank]} "${derecho_wd}/latest_logged_message ${derecho_wd}/${file_prefix}${member_ids[$rank]}.${logfile_suffix}"))
 		if (( $(compare_message_nums ${msg_num_tuple[@]} ${latest_message_tuple[@]}) > 0 )); then
-			echo "(${msg_num_tuple[@]}) > (${latest_message_tuple[@]})"
 			latest_message_tuple=("${msg_num_tuple[@]}")
 			longest_log_rank=$rank
 		fi
@@ -73,16 +70,13 @@ main () {
 	else 
 		echo "Longest log is at node with rank $longest_log_rank, which has ID ${member_ids[$longest_log_rank]} and IP address ${member_ips[$longest_log_rank]}"
 		echo "Appending its tail to the local log..."
-		echo "Local IP is $local_ip"
 		longest_log_filename="${derecho_wd}/${file_prefix}${member_ids[$longest_log_rank]}.${logfile_suffix}"
 		log_tail_bytes=$(ssh -q ${member_ips[$longest_log_rank]} "${derecho_wd}/log_tail_length $longest_log_filename ${local_message_tuple[@]}")
 		metadata_tail_bytes=$(ssh -q ${member_ips[$longest_log_rank]} "${derecho_wd}/log_tail_length -m $longest_log_filename ${local_message_tuple[@]}")
 		#Append bytes from the end of the remote log to the local log
-		echo "Copying $log_tail_bytes from $longest_log_filename on ${member_ips[$longest_log_rank]}"
 		nc -ld 6666 >> ${file_prefix}${local_id}.${logfile_suffix} &
 		ssh -q ${member_ips[$longest_log_rank]} "tail -c $log_tail_bytes $longest_log_filename | nc $local_ip 6666"  
 		#Repeat with the metadata file
-		echo "Copying $metadata_tail_bytes from $longest_log_filename.${metadata_suffix} on ${member_ips[$longest_log_rank]}"
 		nc -ld 6667 >> ${file_prefix}${local_id}.${logfile_suffix}.${metadata_suffix} &
 		ssh -q ${member_ips[$longest_log_rank]} "tail -c $metadata_tail_bytes $longest_log_filename.${metadata_suffix} | nc $local_ip 6667"  
 	fi
