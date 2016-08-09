@@ -241,7 +241,8 @@ public:
         message_callback _global_stability_callback,
         handlersType _group_handlers, long long unsigned int _block_size,
         std::map<node_id_t, std::string> ip_addrs,
-        unsigned int _window_size = 3, unsigned int timeout_ms = 1,
+        std::vector<bool> already_failed = {}, unsigned int _window_size = 3,
+        unsigned int timeout_ms = 1,
         rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
         uint32_t port = 12487);
     /** Constructor to initialize a new derecho_group from an old one,
@@ -250,7 +251,7 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-        uint32_t port = 12487);
+        std::vector<bool> already_failed = {}, uint32_t port = 12487);
     ~DerechoGroup();
 
     void deliver_messages_upto(

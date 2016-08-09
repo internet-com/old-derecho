@@ -232,7 +232,7 @@ public:
     }
     void print_log(std::ostream& output_dest) const;
     std::map<node_id_t, ip_addr> get_member_ips_map(
-        std::vector<node_id_t>& members);
+        std::vector<node_id_t>& members, std::vector<bool> failed);
 };
 
 } /* namespace derecho */

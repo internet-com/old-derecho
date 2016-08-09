@@ -57,7 +57,8 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     long long unsigned int _max_payload_size,
     message_callback _global_stability_callback, handlersType _group_handlers,
     long long unsigned int _block_size,
-    std::map<node_id_t, std::string> ip_addrs, unsigned int _window_size,
+    std::map<node_id_t, std::string> ip_addrs,
+    std::vector<bool> already_failed, unsigned int _window_size,
     unsigned int timeout_ms, rdmc::send_algorithm _type, uint32_t port)
     : members(_members),
       num_members(members.size()),
@@ -100,7 +101,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     std::vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-    uint32_t port)
+    std::vector<bool> already_failed, uint32_t port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
@@ -118,7 +119,6 @@ DerechoGroup<N, handlersType>::DerechoGroup(
       total_message_buffers(old_group.total_message_buffers),
       sender_timeout(old_group.sender_timeout),
       sst(_sst) {
-
   // Make sure rdmc_group_num_offset didn't overflow.
     assert(old_group.rdmc_group_num_offset <=
            std::numeric_limits<uint16_t>::max() - old_group.num_members -

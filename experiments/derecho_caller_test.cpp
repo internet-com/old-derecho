@@ -91,18 +91,18 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-    string str = "Here is a message";
-    auto fut = managed_group.template orderedQuery<0>({}, str);
-    auto& rmap = fut.get();
-    cout << "Obtained a reply map" << endl;
-    for (auto it = rmap.begin(); it != rmap.end(); ++it) {
-      try {
-	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
-      }
-      catch (const std::exception &e) {
-	cout << e.what() << endl;
-      }
-    }
+    // string str = "Here is a message";
+    // auto fut = managed_group.template orderedQuery<0>({}, str);
+    // auto& rmap = fut.get();
+    // cout << "Obtained a reply map" << endl;
+    // for (auto it = rmap.begin(); it != rmap.end(); ++it) {
+    //   try {
+    // 	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+    //   }
+    //   catch (const std::exception &e) {
+    // 	cout << e.what() << endl;
+    //   }
+    // }
     
     // int a = rmap.get(0);
     // cout << "Reply from node 0: " << a << endl;

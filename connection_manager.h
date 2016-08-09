@@ -14,9 +14,8 @@ class all_tcp_connections {
     const uint32_t port;
     std::unique_ptr<connection_listener> conn_listener;
     std::map<node_id_t, socket> sockets;
-    bool add_connection(const node_id_t my_id,
-                                             const node_id_t other_id,
-                                             const ip_addr_t& other_ip);
+    bool add_connection(const node_id_t my_id, const node_id_t other_id,
+                        const ip_addr_t& other_ip);
     void establish_node_connections(
         node_id_t my_id, const std::map<node_id_t, ip_addr_t>& ip_addrs);
 

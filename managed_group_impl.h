@@ -581,7 +581,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(
         curr_view->members, curr_view->members[curr_view->my_rank],
         curr_view->gmsSST, message_buffers, max_payload_size,
         global_stability_callback, std::move(group_handlers), block_size,
-        get_member_ips_map(curr_view->members), window_size, 1, type);
+        get_member_ips_map(curr_view->members, curr_view->failed), curr_view->failed, window_size, 1, type);
 }
 
 /**
@@ -613,7 +613,7 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(
         DerechoGroup<View<handlersType>::MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
         std::move(*curr_view->rdmc_sending_group),
-        get_member_ips_map(newView.members));
+        get_member_ips_map(newView.members, newView.failed), newView.failed);
     curr_view->rdmc_sending_group.reset();
 
     // Don't need to initialize every row in the SST - all the others will be
@@ -1045,10 +1045,13 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
 
 template <typename handlersType>
 std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
-    std::vector<node_id_t>& members) {
+    std::vector<node_id_t>& members, std::vector<bool> failed) {
     std::map<node_id_t, ip_addr> member_ips;
-    for(auto m : members) {
-        member_ips[m] = member_ips_by_id[m];
+    size_t num_members = members.size();
+    for(uint i = 0; i < num_members; ++i) {
+        if(!failed[i]) {
+            member_ips[members[i]] = member_ips_by_id[members[i]];
+        }
     }
     return member_ips;
 }
