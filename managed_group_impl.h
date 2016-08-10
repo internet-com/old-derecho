@@ -189,7 +189,11 @@ template <typename handlersType>
 void ManagedGroup<handlersType>::global_setup(
     const map<node_id_t, ip_addr>& member_ips, node_id_t my_id) {
     cout << "Doing global setup of SST and RDMC" << endl;
-    rdmc::initialize(member_ips, my_id);
+    // this global setup has to be depricated anyway
+    if (!rdmc::initialize(member_ips, my_id)) {
+      cout << "Global setup failed" << endl;
+      exit(0);
+    }
     sst::tcp::tcp_initialize(my_id, member_ips);
     sst::verbs_initialize();
     rdmc_globals_initialized = true;

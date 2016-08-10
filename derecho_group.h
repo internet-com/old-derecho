@@ -149,6 +149,8 @@ class DerechoGroup {
     std::mutex pending_results_mutex;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
+    /** false if RDMC groups haven't been created successfully */
+    bool rdmc_groups_created = false;
     unsigned int total_message_buffers;
     /** Stores message buffers not currently in use. Protected by
      * msg_state_mtx */
@@ -217,7 +219,7 @@ class DerechoGroup {
      * implements the timeout thread. */
     void check_failures_loop();
 
-    void create_rdmc_groups();
+    bool create_rdmc_groups();
     void initialize_sst_row();
     void register_predicates();
 

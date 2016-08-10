@@ -87,7 +87,11 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     deliveryBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
 
     initialize_sst_row();
-    create_rdmc_groups();
+    if(!already_failed.size()) {
+        // if groups are created successfully, rdmc_groups_created will be set
+        // to true
+        rdmc_groups_created = create_rdmc_groups();
+    }
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
@@ -184,7 +188,11 @@ DerechoGroup<N, handlersType>::DerechoGroup(
     }
 
     initialize_sst_row();
-    create_rdmc_groups();
+    if(!already_failed.size()) {
+        // if groups are created successfully, rdmc_groups_created will be set
+        // to true
+        rdmc_groups_created = create_rdmc_groups();
+    }
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
     timeout_thread = std::thread(&DerechoGroup::check_failures_loop, this);
@@ -194,7 +202,7 @@ DerechoGroup<N, handlersType>::DerechoGroup(
 }
 
 template <unsigned int N, typename handlersType>
-void DerechoGroup<N, handlersType>::create_rdmc_groups() {
+bool DerechoGroup<N, handlersType>::create_rdmc_groups() {
     // rotated list of members - used for creating n internal RDMC groups
     vector<uint32_t> rotated_members(num_members);
 
@@ -293,37 +301,44 @@ void DerechoGroup<N, handlersType>::create_rdmc_groups() {
             // In the group in which this node is the sender, we need to signal
             // the writer thread
             // to continue when we see that one of our messages was delivered.
-            rdmc::create_group(
-                i + rdmc_group_num_offset, rotated_members, block_size, type,
-                [this, i](size_t length) -> rdmc::receive_destination {
-                    assert(false);
-                    return {nullptr, 0};
-                },
-                receive_handler_plus_notify, [](boost::optional<uint32_t>) {});
+            if(!rdmc::create_group(
+                   i + rdmc_group_num_offset, rotated_members, block_size, type,
+                   [this, i](size_t length) -> rdmc::receive_destination {
+                       assert(false);
+                       return {nullptr, 0};
+                   },
+                   receive_handler_plus_notify,
+                   [](boost::optional<uint32_t>) {})) {
+                return false;
+            }
         } else {
-            rdmc::create_group(
-                i + rdmc_group_num_offset, rotated_members, block_size, type,
-                [this, i](size_t length) -> rdmc::receive_destination {
-                    lock_guard<mutex> lock(msg_state_mtx);
-                    assert(!free_message_buffers.empty());
+            if(!rdmc::create_group(
+                   i + rdmc_group_num_offset, rotated_members, block_size, type,
+                   [this, i](size_t length) -> rdmc::receive_destination {
+                       lock_guard<mutex> lock(msg_state_mtx);
+                       assert(!free_message_buffers.empty());
 
-                    msg_info msg;
-                    msg.sender_rank = i;
-                    msg.index = (*sst)[member_index].nReceived[i] + 1;
-                    msg.size = length;
-                    msg.message_buffer = std::move(free_message_buffers.back());
-                    free_message_buffers.pop_back();
+                       msg_info msg;
+                       msg.sender_rank = i;
+                       msg.index = (*sst)[member_index].nReceived[i] + 1;
+                       msg.size = length;
+                       msg.message_buffer =
+                           std::move(free_message_buffers.back());
+                       free_message_buffers.pop_back();
 
-                    rdmc::receive_destination ret{msg.message_buffer.mr, 0};
-                    auto sequence_number = msg.index * num_members + i;
-                    current_receives[sequence_number] = std::move(msg);
+                       rdmc::receive_destination ret{msg.message_buffer.mr, 0};
+                       auto sequence_number = msg.index * num_members + i;
+                       current_receives[sequence_number] = std::move(msg);
 
-                    assert(ret.mr->buffer != nullptr);
-                    return ret;
-                },
-                rdmc_receive_handler, [](boost::optional<uint32_t>) {});
+                       assert(ret.mr->buffer != nullptr);
+                       return ret;
+                   },
+                   rdmc_receive_handler, [](boost::optional<uint32_t>) {})) {
+                return false;
+            }
         }
     }
+    return true;
 }
 
 template <unsigned int N, typename handlersType>
@@ -558,6 +573,9 @@ void DerechoGroup<N, handlersType>::wedge() {
 template <unsigned int N, typename handlersType>
 void DerechoGroup<N, handlersType>::send_loop() {
     auto should_send = [&]() {
+        if(!rdmc_groups_created) {
+            return false;
+        }
         if(pending_sends.empty()) {
             return false;
         }
@@ -585,9 +603,11 @@ void DerechoGroup<N, handlersType>::send_loop() {
                     std::stringstream()
                     << "Calling send on message " << current_send->index
                     << " from sender " << current_send->sender_rank);
-                rdmc::send(member_index + rdmc_group_num_offset,
-                           current_send->message_buffer.mr, 0,
-                           current_send->size);
+                if(!rdmc::send(member_index + rdmc_group_num_offset,
+                               current_send->message_buffer.mr, 0,
+                               current_send->size)) {
+                    throw "rdmc::send returned false";
+                }
                 pending_sends.pop();
             }
         }
@@ -610,7 +630,15 @@ template <unsigned int N, typename handlersType>
 char* DerechoGroup<N, handlersType>::get_position(
     long long unsigned int payload_size, bool cooked_send,
     int pause_sending_turns) {
+    // if rdmc groups were not created because of failures, return NULL
+    if(!rdmc_groups_created) {
+        return NULL;
+    }
     long long unsigned int msg_size = payload_size + sizeof(header);
+    // payload_size is 0 when max_msg_size is desired, useful for ordered send/query
+    if (!payload_size) {
+      msg_size = max_msg_size;
+    }
     if(msg_size > max_msg_size) {
         cout << "Can't send messages of size larger than the maximum message "
                 "size which is equal to "
@@ -657,7 +685,7 @@ char* DerechoGroup<N, handlersType>::get_position(
 template <unsigned int N, typename handlersType>
 bool DerechoGroup<N, handlersType>::send() {
     lock_guard<mutex> lock(msg_state_mtx);
-    if(thread_shutdown) {
+    if(thread_shutdown || !rdmc_groups_created) {
         return false;
     }
     assert(next_send);
