@@ -973,13 +973,23 @@ template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
     curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
-        nodes, std::forward<Args>(args)...);
+        nodes, buf, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::orderedSend(Args&&... args) {
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
     curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
         std::forward<Args>(args)...);
 }
@@ -988,6 +998,11 @@ template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::orderedQuery(const vector<node_id_t>& nodes,
                                               Args&&... args) {
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
     return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
         nodes, std::forward<Args>(args)...);
 }
@@ -995,6 +1010,11 @@ auto ManagedGroup<handlersType>::orderedQuery(const vector<node_id_t>& nodes,
 template <typename handlersType>
 template <unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::orderedQuery(Args&&... args) {
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
     return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
         std::forward<Args>(args)...);
 }

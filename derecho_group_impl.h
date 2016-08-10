@@ -697,12 +697,9 @@ bool DerechoGroup<N, handlersType>::send() {
 
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
-auto DerechoGroup<N, handlersType>::derechoCallerSend(const vector<node_id_t>& nodes,
-                                              Args&&... args) {
-    char* buf;
+auto DerechoGroup<N, handlersType>::derechoCallerSend(
+    const vector<node_id_t>& nodes, char* buf, Args&&... args) {
     auto max_payload_size = max_msg_size - sizeof(header);
-    while((buf = get_position(max_payload_size, true)) == nullptr) {
-    }
     // use nodes
     ((size_t*)buf)[0] = nodes.size();
     buf += sizeof(size_t);
@@ -736,13 +733,35 @@ auto DerechoGroup<N, handlersType>::derechoCallerSend(const vector<node_id_t>& n
     return std::move(return_pair.results);
 }
 
+// this should be called from the GMS, as this takes care of locks on mutexes
+// view_change_mutex and msg_state_mutex
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+void DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
+                                                char* buf, Args&&... args) {
+    derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+}
+
+// this should be called by the client directly using DerechoGroup without a GMS
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
 void DerechoGroup<N, handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                                 Args&&... args) {
-    derechoCallerSend<tag>(nodes, std::forward<Args>(args)...);
+    char* buf;
+    // 0 means max_msg_size
+    while((buf = get_position(0, true)) == nullptr) {
+    }
+    derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+void DerechoGroup<N, handlersType>::orderedSend(char* buf, Args&&... args) {
+    // empty nodes means that the destination is the entire group
+    orderedSend<tag>({}, buf, std::forward<Args>(args)...);
+}
+
+// this should be called by the client directly using DerechoGroup without a GMS
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
 void DerechoGroup<N, handlersType>::orderedSend(Args&&... args) {
@@ -753,8 +772,25 @@ void DerechoGroup<N, handlersType>::orderedSend(Args&&... args) {
 template <unsigned int N, typename handlersType>
 template <unsigned long long tag, typename... Args>
 auto DerechoGroup<N, handlersType>::orderedQuery(const vector<node_id_t>& nodes,
+                                                 char* buf, Args&&... args) {
+    return derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::orderedQuery(const vector<node_id_t>& nodes,
                                                  Args&&... args) {
-    return derechoCallerSend<tag>(nodes, std::forward<Args>(args)...);
+    char* buf;
+    // 0 means max_msg_size
+    while((buf = get_position(0, true)) == nullptr) {
+    }
+    return derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename handlersType>
+template <unsigned long long tag, typename... Args>
+auto DerechoGroup<N, handlersType>::orderedQuery(char* buf, Args&&... args) {
+    return orderedQuery<tag>({}, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename handlersType>

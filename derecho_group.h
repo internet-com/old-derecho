@@ -225,7 +225,7 @@ class DerechoGroup {
 
     void deliver_message(msg_info& msg);
     template <unsigned long long tag, typename... Args>
-    auto derechoCallerSend(const vector<node_id_t>& nodes, Args&&... args);
+    auto derechoCallerSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <unsigned long long tag, typename... Args>
     auto tcpSend(node_id_t dest_node, Args&&... args);
     // private get_position - used for cooked send
@@ -268,11 +268,19 @@ public:
      * there is only one message per sender in the RDMC pipeline */
     bool send();
     template <unsigned long long tag, typename... Args>
+    void orderedSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
+    template <unsigned long long tag, typename... Args>
     void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void orderedSend(char* buf, Args&&... args);
     template <unsigned long long tag, typename... Args>
     void orderedSend(Args&&... args);
     template <unsigned long long tag, typename... Args>
+    auto orderedQuery(const vector<node_id_t>& nodes, char* buf, Args&&... args);
+    template <unsigned long long tag, typename... Args>
     auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(char* buf, Args&&... args);
     template <unsigned long long tag, typename... Args>
     auto orderedQuery(Args&&... args);
     template <unsigned long long tag, typename... Args>
