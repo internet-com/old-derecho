@@ -26,7 +26,6 @@
 #include "sst/sst.h"
 #include "serialization/SerializationSupport.hpp"
 #include "persistence.h"
-#include "recovery_manager.h"
 
 namespace derecho {
 
