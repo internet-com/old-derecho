@@ -28,15 +28,23 @@ uint32_t num_nodes;
 
 int count = 0;
 
-int test1 (string str) {
-  cout << str << endl;
-  count++;
-  if (node_rank == 3 && count == 2) {
-    cout << "Exiting" << endl;
-    exit(0);
-  }
-  return 19954;
-}
+struct test1_str{
+	int test1 (string str) {
+		cout << str << endl;
+		count++;
+		if (node_rank == 3 && count == 2) {
+			cout << "Exiting" << endl;
+			exit(0);
+		}
+		return 19954;
+	}
+	
+	template<typename Dispatcher>
+	auto register_functions(Dispatcher &d){
+		return d.register_functions(
+			this, &test1_str::test1);
+	}
+};
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
@@ -60,8 +68,8 @@ int main(int argc, char *argv[]) {
     auto stability_callback =
         [](int sender_id, long long int index, char *buf,
            long long int msg_size) {};
-
-    auto group_handlers = handlers(node_rank, 0, test1);
+	
+	Dispatcher<test1_str> group_handlers(node_rank,std::make_tuple());
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,

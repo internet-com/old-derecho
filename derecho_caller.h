@@ -6,6 +6,8 @@
 #include <numeric>
 #include <queue>
 #include <set>
+#include <tuple_extras.hpp>
+
 
 namespace rpc {
 
@@ -301,8 +303,8 @@ struct PendingResults<void> {
 // remote sites.
 
 template <FunctionTag tag, typename Ret, typename... Args>
-struct RemoteInvocable<tag, Ret(Args...)> {
-    using f_t = Ret (*)(Args...);
+struct RemoteInvocable<tag, std::function<Ret (Args...)> > {
+    using f_t = std::function<Ret (Args...)>;
     const f_t f;
     static const Opcode invoke_id;
     static const Opcode reply_id;
@@ -476,7 +478,7 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     }
 
     RemoteInvocable(std::map<Opcode, receive_fun_t> &receivers,
-                    Ret (*f)(Args...))
+                    std::function<Ret (Args...)> f)
         : f(f) {
         receivers[invoke_id] = [this](auto... a) {
             return this->receive_call(a...);
@@ -487,17 +489,58 @@ struct RemoteInvocable<tag, Ret(Args...)> {
     }
 };
 
-template <FunctionTag tag, typename Ret, typename... Args>
-const Opcode RemoteInvocable<tag, Ret(Args...)>::invoke_id{mutils::gensym()};
+	/*
+template <FunctionTag tag, typename F>
+const Opcode RemoteInvocable<tag, F>::invoke_id{mutils::gensym()};
 
-template <FunctionTag tag, typename Ret, typename... Args>
-const Opcode RemoteInvocable<tag, Ret(Args...)>::reply_id{mutils::gensym()};
+template <FunctionTag tag, typename F>
+const Opcode RemoteInvocable<tag, F>::reply_id{mutils::gensym()};
+	*/
 
+	template<FunctionTag Opcode, typename Fun> struct wrapped;
+
+	template<FunctionTag Opcode, typename Ret, typename... Arguments>
+	struct wrapped<Opcode, std::function<Ret (Arguments...)> >{
+		using fun_t = std::function<Ret (Arguments...)>;
+		fun_t fun;
+	};
+
+	template<FunctionTag Opcode, typename Ret, typename Class, typename... Arguments>
+	struct partial_wrapped{
+		using fun_t = Ret (Class::*) (Arguments...);
+		fun_t fun;
+	};
+	
+	template<typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
+	auto wrap(NewClass*, const wrapped<opcode,std::function<Ret(Args...)> > &passthrough){
+		return passthrough;
+	}
+
+	template<typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
+	auto wrap(const partial_wrapped<opcode,Ret,NewClass,Args...> &partial){
+		return partial;
+	}
+
+	template<typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
+	auto wrap(NewClass* _this, const partial_wrapped<opcode,Ret,NewClass,Args...> &partial){
+		return wrapped<opcode,std::function<Ret (Args...)> >{[_this,fun = partial.fun](Args... a){return (_this->*fun)(a...);}};
+	}
+	
+	template<typename NewClass, typename Ret, typename... Args>
+	auto wrap(Ret (NewClass::*fun)(Args...)) {
+		return partial_wrapped<0,Ret,NewClass,Args...>{fun};
+	}
+	
+	template<FunctionTag Opcode, typename NewClass, typename Ret, typename... Args>
+	auto wrap(Ret (NewClass::*fun)(Args...)) {
+		return partial_wrapped<Opcode,Ret,NewClass,Args...>{fun};
+	}//*/
+	
 template <typename...>
 struct RemoteInvocablePairs;
 
 template <FunctionTag id, typename Q>
-struct RemoteInvocablePairs<std::integral_constant<FunctionTag, id>, Q>
+struct RemoteInvocablePairs<wrapped<id, Q> >
     : public RemoteInvocable<id, Q> {
     RemoteInvocablePairs(std::map<Opcode, receive_fun_t> &receivers, Q q)
         : RemoteInvocable<id, Q>(receivers, q) {}
@@ -507,7 +550,7 @@ struct RemoteInvocablePairs<std::integral_constant<FunctionTag, id>, Q>
 
 // id better be an integral constant of Opcode
 template <FunctionTag id, typename Q, typename... rest>
-struct RemoteInvocablePairs<std::integral_constant<FunctionTag, id>, Q, rest...>
+struct RemoteInvocablePairs<wrapped<id, Q>, rest...>
     : public RemoteInvocable<id, Q>, public RemoteInvocablePairs<rest...> {
 public:
     template <typename... T>
@@ -552,72 +595,14 @@ public:
 		}
 	}
 
-template <typename... Fs>
-struct Handlers : private RemoteInvocablePairs<Fs...> {
-private:
+	template <class IdentifyingClass, typename... Fs>
+struct RemoteInvocableClass : private RemoteInvocablePairs<Fs...> {
     const Node_id nid;
-    // listen here
-    // constructed *before* initialization
-    std::unique_ptr<std::map<Opcode, receive_fun_t> > receivers;
-    // constructed *after* initialization
-    std::unique_ptr<std::thread> receiver;
-    mutils::DeserializationManager dsm{{}};
 
-public:
-    std::exception_ptr handle_receive(
-        const Opcode &indx, const Node_id &received_from, char const *const buf,
-        std::size_t payload_size, const std::function<char *(int)> &out_alloc) {
-        using namespace std::placeholders;
-		using namespace remote_invocation_utilities;
-        assert(payload_size);
-        auto reply_header_size = header_space();
-        auto reply_return = receivers->at(indx)(
-            &dsm, received_from, buf,
-            [&out_alloc, &reply_header_size](std::size_t size) {
-                return out_alloc(size + reply_header_size) + reply_header_size;
-            });
-        auto *reply_buf = reply_return.payload;
-        if(reply_buf) {
-            reply_buf -= reply_header_size;
-            const auto id = reply_return.opcode;
-            const auto size = reply_return.size;
-            populate_header(reply_buf, size, id, nid);
-        }
-        return reply_return.possible_exception;
-    }
-
-    std::exception_ptr handle_receive(
-        char *buf, std::size_t size,
-        const std::function<char *(int)> &out_alloc) {
-		using namespace remote_invocation_utilities;
-        std::size_t payload_size;
-        Opcode indx;
-        Node_id received_from;
-        retrieve_header(&dsm, buf, payload_size, indx, received_from);
-        return handle_receive(indx, received_from, buf + header_space(),
-                              payload_size, out_alloc);
-    }
-	
-private:
-
-  // these are the functions (no names) from Fs
-    template <typename... _Fs>
-    Handlers(decltype(receivers) rvrs, Node_id nid, _Fs... fs)
-        : RemoteInvocablePairs<Fs...>(*rvrs, fs...),
-          nid(nid),
-          // my_lm(LocalMessager::init_pipe(nid)),
-          receivers(std::move(rvrs)) {
-        // receiver.reset(new std::thread{[&]() { receive_call_loop(); }});
-    }
-
-public:
     // these are the functions (no names) from Fs
     // delegation so receivers exists during superclass construction
-    template <typename... _Fs>
-    Handlers(Node_id nid, _Fs... fs)
-        : Handlers(
-              std::make_unique<typename decltype(receivers)::element_type>(),
-              nid, fs...) {}
+    RemoteInvocableClass(Node_id nid, std::map<Opcode,receive_fun_t> &rvrs, const Fs&... fs)
+        : RemoteInvocablePairs<Fs...>(rvrs,fs.fun...),nid(nid){}
 
     /* you *do not* need to delete the pointer in the pair this returns. */
     template <FunctionTag tag, typename... Args>
@@ -648,45 +633,128 @@ public:
         return send_return{std::move(sent_return.results),
 				sent_return.pending};
     }
+
+		using specialized_to = IdentifyingClass;
+		RemoteInvocableClass& for_class(IdentifyingClass*){
+			return *this;
+		}
 };
+
+	template<class IdentifyingClass, typename... Fs>
+	auto build_remoteinvocableclass(const Node_id nid, std::map<Opcode,receive_fun_t> &rvrs, const Fs&... fs){
+		return std::make_unique<RemoteInvocableClass<IdentifyingClass,Fs...> >(nid,rvrs,fs...);
+	}
+
+#include "contains_remote_invocable.hpp"
+
+	struct DefaultInvocationTarget{};
+	
+	template<typename... T>
+	struct Dispatcher;
+	
+	template<typename T>
+	using RemoteInvocableOf = std::decay_t<decltype(*std::declval<T>().register_functions(std::declval<Dispatcher<>& >()))>;
+	
+	template<typename... T>
+	struct Dispatcher {
+		using impl_t = ContainsRemoteInvocableClass<RemoteInvocableOf<T>...>;
+	private:
+		const Node_id nid;
+		// listen here
+    // constructed *before* initialization
+    std::unique_ptr<std::map<Opcode, receive_fun_t> > receivers;
+    // constructed *after* initialization
+    std::unique_ptr<std::thread> receiver;
+		std::tuple<std::unique_ptr<T>...> objects;
+    mutils::DeserializationManager dsm{{}};
+		std::unique_ptr<impl_t> impl;
+
+public:
+    std::exception_ptr handle_receive(
+        const Opcode &indx, const Node_id &received_from, char const *const buf,
+        std::size_t payload_size, const std::function<char *(int)> &out_alloc) {
+        using namespace std::placeholders;
+		using namespace remote_invocation_utilities;
+        assert(payload_size);
+        auto reply_header_size = header_space();
+        auto reply_return = receivers->at(indx)(
+            &dsm, received_from, buf,
+            [&out_alloc, &reply_header_size](std::size_t size) {
+                return out_alloc(size + reply_header_size) + reply_header_size;
+            });
+        auto *reply_buf = reply_return.payload;
+        if(reply_buf) {
+            reply_buf -= reply_header_size;
+            const auto id = reply_return.opcode;
+            const auto size = reply_return.size;
+            populate_header(reply_buf, size, id, nid);
+        }
+        return reply_return.possible_exception;
+    }
+
+    std::exception_ptr handle_receive(
+        char *buf, std::size_t size,
+        const std::function<char *(int)> &out_alloc) {
+		using namespace remote_invocation_utilities;
+        std::size_t payload_size = size;
+        Opcode indx;
+        Node_id received_from;
+        retrieve_header(&dsm, buf, payload_size, indx, received_from);
+        return handle_receive(indx, received_from, buf + header_space(),
+                              payload_size, out_alloc);
+    }
+
+		/* you *do not* need to delete the pointer in the pair this returns. */
+		template<class ImplClass, FunctionTag tag, typename... Args>
+		auto Send(Args && ... args){
+			return impl->for_class((ImplClass*)nullptr).
+				template Send<tag,Args...>(std::forward<Args>(args)...);
+		}
+
+		template<class ImplClass, typename... Args>
+		auto Send(Args && ... args){
+			return Send<ImplClass,0>(std::forward<Args>(args)...);
+		}
+	
+private:
+		template<typename... ClientClasses>
+		auto register_all(const std::unique_ptr<ClientClasses>&... cc){
+			return std::make_unique<impl_t>(cc->register_functions(*this)...);
+		}
+
+		template<typename>
+		auto construct_objects(...){
+			return std::tuple<>{};
+		}
+		
+		template<typename TL, typename FirstType, typename... EverythingElse>
+		auto construct_objects(const TL &tl){
+			return std::tuple_cat(std::make_tuple(mutils::make_unique_tupleargs<FirstType>(tl.first)),
+								  construct_objects<typename TL::Rest,EverythingElse...>(tl.rest));
+		}
+	public:
+
+		template<typename... CtrTuples>
+		Dispatcher(Node_id nid, CtrTuples... a):
+			nid(nid),
+			receivers(new std::decay_t<decltype(*receivers)>()),
+			objects(construct_objects<mutils::TupleList<CtrTuples...>, T...>(mutils::TupleList<CtrTuples...>{a...})),
+			impl(mutils::callFunc([&](const auto&... a){return this->register_all(a...);},objects)){}
+		
+		Dispatcher(Dispatcher&& other)
+			:nid(other.nid),
+			 receivers(std::move(other.receivers)),
+			 objects(std::move(other.objects)),
+			 impl(std::move(other.impl)){}
+		
+		template<class NewClass, typename... NewFuns>
+		auto register_functions(NewClass* cls, NewFuns... f){
+			//NewFuns must be of type Ret (NewClass::*) (Args...)
+			//or of type wrapped<opcode,Ret,Args...>
+			return build_remoteinvocableclass<NewClass>(nid,*receivers,wrap(cls,wrap(f))...);
+		}
+	};
 }
 
 using namespace rpc;
 
-// handles up to 5 args
-#define HANDLERS_TYPE_ARGS2(a, b) \
-    std::integral_constant<rpc::FunctionTag, a>, decltype(b)
-#define HANDLERS_TYPE_ARGS4(a, b, c...)                       \
-    std::integral_constant<rpc::FunctionTag, a>, decltype(b), \
-        HANDLERS_TYPE_ARGS2(c)
-#define HANDLERS_TYPE_ARGS6(a, b, c...)                       \
-    std::integral_constant<rpc::FunctionTag, a>, decltype(b), \
-        HANDLERS_TYPE_ARGS4(c)
-#define HANDLERS_TYPE_ARGS8(a, b, c...)                       \
-    std::integral_constant<rpc::FunctionTag, a>, decltype(b), \
-        HANDLERS_TYPE_ARGS6(c)
-#define HANDLERS_TYPE_ARGS10(a, b, c...)                      \
-    std::integral_constant<rpc::FunctionTag, a>, decltype(b), \
-        HANDLERS_TYPE_ARGS8(c)
-#define HANDLERS_TYPE_ARGS_IMPL2(count, ...) \
-    HANDLERS_TYPE_ARGS##count(__VA_ARGS__)
-#define HANDLERS_TYPE_ARGS_IMPL(count, ...) \
-    HANDLERS_TYPE_ARGS_IMPL2(count, __VA_ARGS__)
-#define HANDLERS_TYPE_ARGS(...) \
-    HANDLERS_TYPE_ARGS_IMPL(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
-
-// handles up to 5 args
-#define HANDLERS_ONLY_FUNS2(a, b) b
-#define HANDLERS_ONLY_FUNS4(a, b, c...) b, HANDLERS_ONLY_FUNS2(c)
-#define HANDLERS_ONLY_FUNS6(a, b, c...) b, HANDLERS_ONLY_FUNS4(c)
-#define HANDLERS_ONLY_FUNS8(a, b, c...) b, HANDLERS_ONLY_FUNS6(c)
-#define HANDLERS_ONLY_FUNS10(a, b, c...) b, HANDLERS_ONLY_FUNS8(c)
-#define HANDLERS_ONLY_FUNS_IMPL2(count, ...) \
-    HANDLERS_ONLY_FUNS##count(__VA_ARGS__)
-#define HANDLERS_ONLY_FUNS_IMPL(count, ...) \
-    HANDLERS_ONLY_FUNS_IMPL2(count, __VA_ARGS__)
-#define HANDLERS_ONLY_FUNS(...) \
-    HANDLERS_ONLY_FUNS_IMPL(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
-
-#define handlers(m, a...) \
-    std::make_unique<Handlers<HANDLERS_TYPE_ARGS(a)> >(m, HANDLERS_ONLY_FUNS(a))

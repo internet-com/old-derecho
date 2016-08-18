@@ -123,7 +123,7 @@ struct MessageTrackingRow {
  * template parameter is the maximum possible group size - used for the GMS SST
  * row-struct */
 
-template <unsigned int N, typename handlersType>
+template <unsigned int N, typename dispatcherType>
 class DerechoGroup {
     /** vector of member id's */
     std::vector<node_id_t> members;
@@ -142,7 +142,7 @@ class DerechoGroup {
     const rdmc::send_algorithm type;
     const unsigned int window_size;
     message_callback global_stability_callback;
-    handlersType group_handlers;
+    dispatcherType dispatchers;
     tcp::all_tcp_connections connections;
     std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
     std::list<std::unique_ptr<PendingBase>> fulfilledList;
@@ -241,7 +241,7 @@ public:
         std::vector<MessageBuffer>& free_message_buffers,
         long long unsigned int _max_payload_size,
         message_callback _global_stability_callback,
-        handlersType _group_handlers, long long unsigned int _block_size,
+        dispatcherType _dispatchers, long long unsigned int _block_size,
         std::map<node_id_t, std::string> ip_addrs,
         std::vector<bool> already_failed = {}, unsigned int _window_size = 3,
         unsigned int timeout_ms = 1,
