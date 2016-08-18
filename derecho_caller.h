@@ -489,13 +489,11 @@ struct RemoteInvocable<tag, std::function<Ret (Args...)> > {
     }
 };
 
-	/*
-template <FunctionTag tag, typename F>
-const Opcode RemoteInvocable<tag, F>::invoke_id{mutils::gensym()};
+template <FunctionTag tag, typename Ret, typename... Args>
+const Opcode RemoteInvocable<tag, std::function<Ret (Args...)> >::invoke_id{mutils::gensym()};
 
-template <FunctionTag tag, typename F>
-const Opcode RemoteInvocable<tag, F>::reply_id{mutils::gensym()};
-	*/
+template <FunctionTag tag, typename Ret, typename... Args>
+const Opcode RemoteInvocable<tag, std::function<Ret (Args...)> >::reply_id{mutils::gensym()};
 
 	template<FunctionTag Opcode, typename Fun> struct wrapped;
 
