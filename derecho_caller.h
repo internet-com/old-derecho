@@ -19,17 +19,6 @@ auto &operator<<(std::ostream &out, const std::vector<t> &v) {
     return out;
 }
 
-/*
-template<typename T>
-auto& print_all(T& t){
-    return t;
-}
-
-template<typename T, typename A, typename... B>
-auto& print_all(T& t, const A &a, const B&... b){
-    return print_all(t << a,b...);
-}//*/
-
 struct Opcode {
     using t = unsigned long long;
     t id;
@@ -460,7 +449,6 @@ struct RemoteInvocable<tag, Ret(Args...)> {
             mutils::to_bytes(result, out + sizeof(invocation_id) + 1);
             return recv_ret{reply_id, result_size, out, nullptr};
         } catch(...) {
-            // f(*deserialize<Args>(dsm,recv_buf)... );
             char *out = out_alloc(sizeof(long int) + 1);
             out[0] = true;
             ((long int *)(out + 1))[0] = invocation_id;
@@ -532,53 +520,55 @@ public:
     using RemoteInvocablePairs<rest...>::handler;
 };
 
+	namespace remote_invocation_utilities{
+
+		inline auto header_space() {
+			return sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id);
+			//          size           operation           from
+		}
+		
+		inline char *extra_alloc(int i) {
+			const auto hs = header_space();
+			return (char *)calloc(i + hs, sizeof(char)) + hs;
+		}
+		
+		inline auto populate_header(char *reply_buf,
+										   const std::size_t &payload_size,
+										   const Opcode &op, const Node_id &from) {
+			((std::size_t *)reply_buf)[0] = payload_size;           // size
+			((Opcode *)(sizeof(std::size_t) + reply_buf))[0] = op;  // what
+			((Node_id *)(sizeof(std::size_t) + sizeof(Opcode) + reply_buf))[0] =
+				from;  // from
+		}
+		
+		inline auto retrieve_header(mutils::DeserializationManager *dsm,
+										   char const *const reply_buf,
+										   std::size_t &payload_size, Opcode &op,
+										   Node_id &from) {
+			payload_size = ((std::size_t const *const)reply_buf)[0];
+			op = ((Opcode const *const)(sizeof(std::size_t) + reply_buf))[0];
+			from = ((Node_id const *const)(sizeof(std::size_t) + sizeof(Opcode) +
+										   reply_buf))[0];
+		}
+	}
+
 template <typename... Fs>
 struct Handlers : private RemoteInvocablePairs<Fs...> {
 private:
     const Node_id nid;
     // listen here
-    // LocalMessager my_lm;
-    bool alive{true};
     // constructed *before* initialization
     std::unique_ptr<std::map<Opcode, receive_fun_t> > receivers;
     // constructed *after* initialization
     std::unique_ptr<std::thread> receiver;
     mutils::DeserializationManager dsm{{}};
 
-    inline static char *extra_alloc(int i) {
-        const auto hs = header_space();
-        return (char *)calloc(i + hs, sizeof(char)) + hs;
-    }
-
 public:
-    inline static auto populate_header(char *reply_buf,
-                                       const std::size_t &payload_size,
-                                       const Opcode &op, const Node_id &from) {
-        ((std::size_t *)reply_buf)[0] = payload_size;           // size
-        ((Opcode *)(sizeof(std::size_t) + reply_buf))[0] = op;  // what
-        ((Node_id *)(sizeof(std::size_t) + sizeof(Opcode) + reply_buf))[0] =
-            from;  // from
-    }
-
-    inline static auto retrieve_header(mutils::DeserializationManager *dsm,
-                                       char const *const reply_buf,
-                                       std::size_t &payload_size, Opcode &op,
-                                       Node_id &from) {
-        payload_size = ((std::size_t const *const)reply_buf)[0];
-        op = ((Opcode const *const)(sizeof(std::size_t) + reply_buf))[0];
-        from = ((Node_id const *const)(sizeof(std::size_t) + sizeof(Opcode) +
-                                       reply_buf))[0];
-    }
-
-    inline static auto header_space() {
-        return sizeof(std::size_t) + sizeof(Opcode) + sizeof(Node_id);
-        //          size           operation           from
-    }
-
     std::exception_ptr handle_receive(
         const Opcode &indx, const Node_id &received_from, char const *const buf,
         std::size_t payload_size, const std::function<char *(int)> &out_alloc) {
         using namespace std::placeholders;
+		using namespace remote_invocation_utilities;
         assert(payload_size);
         auto reply_header_size = header_space();
         auto reply_return = receivers->at(indx)(
@@ -599,6 +589,7 @@ public:
     std::exception_ptr handle_receive(
         char *buf, std::size_t size,
         const std::function<char *(int)> &out_alloc) {
+		using namespace remote_invocation_utilities;
         std::size_t payload_size;
         Opcode indx;
         Node_id received_from;
@@ -606,6 +597,8 @@ public:
         return handle_receive(indx, received_from, buf + header_space(),
                               payload_size, out_alloc);
     }
+	
+private:
 
   // these are the functions (no names) from Fs
     template <typename... _Fs>
@@ -617,6 +610,7 @@ public:
         // receiver.reset(new std::thread{[&]() { receive_call_loop(); }});
     }
 
+public:
     // these are the functions (no names) from Fs
     // delegation so receivers exists during superclass construction
     template <typename... _Fs>
@@ -625,24 +619,10 @@ public:
               std::make_unique<typename decltype(receivers)::element_type>(),
               nid, fs...) {}
 
-    ~Handlers() {
-        alive = false;
-        // receiver->join();
-    }
-
-    /*
-      much like previous definition, except with
-      two fewer fields
-    */
-    template <typename Ret>
-    struct send_return {
-        QueryResults<Ret> results;
-        PendingResults<Ret> &pending;
-    };
-
     /* you *do not* need to delete the pointer in the pair this returns. */
     template <FunctionTag tag, typename... Args>
     auto Send(const std::function<char *(int)> &out_alloc, Args &&... args) {
+		using namespace remote_invocation_utilities;
         using namespace std::placeholders;
         constexpr std::integral_constant<FunctionTag, tag> *choice{nullptr};
         auto &hndl = this->handler(choice, args...);
@@ -656,29 +636,18 @@ public:
         char *buf = sent_return.buf - header_size;
         populate_header(buf, payload_size, hndl.invoke_id, nid);
         using Ret = typename decltype(sent_return.results)::type;
-        return send_return<Ret>{std::move(sent_return.results),
-                                sent_return.pending};
+
+		/*
+		  much like previous definition, except with
+		  two fewer fields
+		*/
+		struct send_return {
+			QueryResults<Ret> results;
+			PendingResults<Ret> &pending;
+		};
+        return send_return{std::move(sent_return.results),
+				sent_return.pending};
     }
-
-    /*
-    template <typename... Args>
-    void OrderedSend(Opcode opcode, const Args &... arg);
-
-template <typename... Args>
-void PaxosSend(Opcode opcode, const Args &... arg);
-
-template <typename... Args>
-void P2PSend(NodeId who, Opcode opcode, const Args &... arg);
-
-template <typename Q, typename... Args>
-const QueryReplies<Q>& OrderedQuery(Opcode opcode, const Args &... arg);
-
-template <typename Q, typename... Args>
-const QueryReplies<Q>& PaxosQuery(Opcode opcode, const Args &... arg);
-
-template <typename Q, typename... Args>
-const QueryReplies<Q>& P2PQuery(NodeId who, Opcode opcode, const Args &... arg);
-    */
 };
 }
 

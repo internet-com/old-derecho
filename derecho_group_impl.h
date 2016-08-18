@@ -843,7 +843,8 @@ auto DerechoGroup<N, handlersType>::p2pQuery(node_id_t dest_node,
 
 template <unsigned int N, typename handlersType>
 void DerechoGroup<N, handlersType>::rpc_process_loop() {
-    const auto header_size = group_handlers->header_space();
+	using namespace ::rpc::remote_invocation_utilities;
+    const auto header_size = header_space();
     auto max_payload_size = max_msg_size - sizeof(header);
     std::unique_ptr<char[]> rpcBuffer =
         std::unique_ptr<char[]>(new char[max_payload_size]);
@@ -856,7 +857,7 @@ void DerechoGroup<N, handlersType>::rpc_process_loop() {
         std::size_t payload_size;
         Opcode indx;
         Node_id received_from;
-        group_handlers->retrieve_header(nullptr, rpcBuffer.get(), payload_size,
+        retrieve_header(nullptr, rpcBuffer.get(), payload_size,
                                         indx, received_from);
         connections.tcp_read(other_id, rpcBuffer.get() + header_size,
                              payload_size);
