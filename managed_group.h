@@ -207,17 +207,17 @@ public:
      * returns immediately;
      * the send is scheduled to happen some time in the future. */
     void send();
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void p2pSend(node_id_t dest_node, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto p2pQuery(node_id_t dest_node, Args&&... args);
     /** Reports to the GMS that the given node has failed. */
     void report_failure(const node_id_t who);

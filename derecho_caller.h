@@ -706,14 +706,14 @@ public:
 
 		/* you *do not* need to delete the pointer in the pair this returns. */
 		template<class ImplClass, FunctionTag tag, typename... Args>
-		auto Send(Args && ... args){
+		auto Send(const std::function<char *(int)> &out_alloc, Args && ... args){
 			return impl->for_class((ImplClass*)nullptr).
-				template Send<tag,Args...>(std::forward<Args>(args)...);
+				template Send<tag,Args...>(out_alloc,std::forward<Args>(args)...);
 		}
 
 		template<class ImplClass, typename... Args>
-		auto Send(Args && ... args){
-			return Send<ImplClass,0>(std::forward<Args>(args)...);
+		auto Send(const std::function<char *(int)> &out_alloc, Args && ... args){
+			return Send<ImplClass,0>(out_alloc,std::forward<Args>(args)...);
 		}
 	
 private:

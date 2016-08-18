@@ -696,7 +696,7 @@ bool DerechoGroup<N, dispatchersType>::send() {
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::derechoCallerSend(
     const vector<node_id_t>& nodes, char* buf, Args&&... args) {
     auto max_payload_size = max_msg_size - sizeof(header);
@@ -710,7 +710,7 @@ auto DerechoGroup<N, dispatchersType>::derechoCallerSend(
         max_payload_size -= sizeof(node_id_t);
     }
 
-    auto return_pair = dispatchers.template Send<tag>(
+    auto return_pair = dispatchers.template Send<IdClass, tag>(
         [&buf, &max_payload_size](size_t size) -> char* {
             if(size <= max_payload_size) {
                 return buf;
@@ -736,71 +736,71 @@ auto DerechoGroup<N, dispatchersType>::derechoCallerSend(
 // this should be called from the GMS, as this takes care of locks on mutexes
 // view_change_mutex and msg_state_mutex
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IDClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(const vector<node_id_t>& nodes,
                                                 char* buf, Args&&... args) {
-    derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+    derechoCallerSend<IDClass,tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 // this should be called by the client directly using DerechoGroup without a GMS
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(const vector<node_id_t>& nodes,
                                                 Args&&... args) {
     char* buf;
     // 0 means max_msg_size
     while((buf = get_position(0, true)) == nullptr) {
     }
-    derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+    derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(char* buf, Args&&... args) {
     // empty nodes means that the destination is the entire group
-    orderedSend<tag>({}, buf, std::forward<Args>(args)...);
+    orderedSend<IdClass,tag>({}, buf, std::forward<Args>(args)...);
 }
 
 // this should be called by the client directly using DerechoGroup without a GMS
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(Args&&... args) {
     // empty nodes means that the destination is the entire group
-    orderedSend<tag>({}, std::forward<Args>(args)...);
+    orderedSend<IdClass,tag>({}, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(const vector<node_id_t>& nodes,
                                                  char* buf, Args&&... args) {
-    return derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+    return derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(const vector<node_id_t>& nodes,
                                                  Args&&... args) {
     char* buf;
     // 0 means max_msg_size
     while((buf = get_position(0, true)) == nullptr) {
     }
-    return derechoCallerSend<tag>(nodes, buf, std::forward<Args>(args)...);
+    return derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(char* buf, Args&&... args) {
-    return orderedQuery<tag>({}, buf, std::forward<Args>(args)...);
+    return orderedQuery<IdClass,tag>({}, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(Args&&... args) {
-    return orderedQuery<tag>({}, std::forward<Args>(args)...);
+    return orderedQuery<IdClass,tag>({}, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
                                             Args&&... args) {
     assert(dest_node != members[member_index]);
@@ -808,7 +808,7 @@ auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
     
     size_t size;
     auto max_payload_size = max_msg_size - sizeof(header);
-    auto return_pair = dispatchers.template Send<tag>(
+    auto return_pair = dispatchers.template Send<IdClass,tag>(
         [this, &max_payload_size, &size](size_t _size) -> char* {
             size = _size;
             if(size <= max_payload_size) {
@@ -828,17 +828,17 @@ auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::p2pSend(node_id_t dest_node,
                                             Args&&... args) {
-    tcpSend<tag>(dest_node, std::forward<Args>(args)...);
+    tcpSend<IdClass,tag>(dest_node, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::p2pQuery(node_id_t dest_node,
                                              Args&&... args) {
-    return tcpSend<tag>(dest_node, std::forward<Args>(args)...);
+    return tcpSend<IdClass,tag>(dest_node, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>

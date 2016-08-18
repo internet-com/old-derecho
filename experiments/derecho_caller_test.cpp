@@ -99,32 +99,23 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-    // string str = "Here is a message";
-    // auto fut = managed_group.template orderedQuery<0>({}, str);
-    // auto& rmap = fut.get();
-    // cout << "Obtained a reply map" << endl;
-    // for (auto it = rmap.begin(); it != rmap.end(); ++it) {
-    //   try {
-    // 	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
-    //   }
-    //   catch (const std::exception &e) {
-    // 	cout << e.what() << endl;
-    //   }
-    // }
-    
-    // int a = rmap.get(0);
-    // cout << "Reply from node 0: " << a << endl;
-    // int b = rmap.get(1);
-    // cout << "Reply from node 1: " << b << endl;
-    // auto fut = managed_group.template p2pQuery<0>(1 - node_rank, node_rank,
-    // index, buf, msg_size);
-
-    cout << "Done" << endl;
-
-    while (true) {
-
+    string str = "Here is a message";
+    auto fut = managed_group.template orderedQuery<test1_str,0>({}, str);
+    auto& rmap = fut.get();
+    cout << "Obtained a reply map" << endl;
+    for (auto it = rmap.begin(); it != rmap.end(); ++it) {
+      try {
+    	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+      }
+      catch (const std::exception &e) {
+    	cout << e.what() << endl;
+      }
     }
-    // cout << "Obtained value: " << fut.get(0) << endl;
-    // cout << "Obtained value: " << fut.get(1) << endl;
-    // cout << "Obtained value: " << fut.get(1 - node_rank) << endl;
+    
+    int a = rmap.get(0);
+    cout << "Reply from node 0: " << a << endl;
+    int b = rmap.get(1);
+    cout << "Reply from node 1: " << b << endl;
+	
+    cout << "Done" << endl;
 }
