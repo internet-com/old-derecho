@@ -22,9 +22,11 @@
 
 namespace derecho {
 
-class View : public mutils::ByteRepresentable {
+template <typename handlersType>
+class View : public mutils::ByteRepresentable{
 public:
-    /** Upper bound on the number of members that will ever be in any one view. */
+    /** Upper bound on the number of members that will ever be in any one view.
+     */
     static constexpr int MAX_MEMBERS = ::MAX_MEMBERS;
 
     using DerechoSST = sst::SST<DerechoRow<MAX_MEMBERS>>;
@@ -49,7 +51,8 @@ public:
     /** For member p, returns rankOf(p) */
     int32_t my_rank;
     /** RDMC manager object containing one RDMC group for each sender */
-    std::unique_ptr<DerechoGroup<MAX_MEMBERS>> rdmc_sending_group;
+    std::unique_ptr<DerechoGroup<MAX_MEMBERS, handlersType>> rdmc_sending_group;
+
     std::shared_ptr<DerechoSST> gmsSST;
 
     /** Creates a completely empty new View. Vectors such as members will
@@ -107,7 +110,8 @@ public:
  * @param view The View to serialize
  * @param view_file_name The name of the file to create and write the View into
  */
-void persist_view(const View& view, const std::string& view_file_name);
+template <typename handlersType>
+void persist_view(const View<handlersType>& view, const std::string& view_file_name);
 
 /**
  * Inverse of persist_view; constructs a new View using the serialized data in
@@ -118,7 +122,8 @@ void persist_view(const View& view, const std::string& view_file_name);
  * @param view_file_name The name of the file to read for a serialized View
  * @return A new View constructed with the data in the file
  */
-std::unique_ptr<View> load_view(const std::string& view_file_name);
+template <typename handlersType>
+std::unique_ptr<View<handlersType>> load_view(const std::string& view_file_name);
 
 /**
  * Prints a plaintext representation of the View to an output stream. This is
@@ -128,11 +133,15 @@ std::unique_ptr<View> load_view(const std::string& view_file_name);
  * @param view The View to print
  * @return The output stream
  */
-std::ostream& operator<<(std::ostream& stream, const View& view);
+template <typename handlersType>
+std::ostream& operator<<(std::ostream& stream, const View<handlersType>& view);
 
 /**
  * Parses the plaintext representation created by operator<< and modifies the View
  * argument to contain the view it represents.
  */
-std::istream& operator>>(std::istream& stream, View& view);
+template <typename handlersType>
+std::istream& operator>>(std::istream& stream, View<handlersType>& view);
 }
+
+#include "view_impl.h"

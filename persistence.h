@@ -21,6 +21,7 @@ struct message {
     uint32_t view_id;
     uint32_t sender;
     uint64_t index;
+    bool cooked;
 };
 
 struct __attribute__((__packed__)) header {
@@ -30,7 +31,9 @@ struct __attribute__((__packed__)) header {
 
 struct __attribute__((__packed__)) message_metadata {
     uint32_t view_id;
-    uint32_t padding1;
+    uint8_t is_cooked;
+    uint8_t padding0;
+    uint16_t padding1;
     uint32_t sender;
     uint32_t padding2;
     uint64_t index;

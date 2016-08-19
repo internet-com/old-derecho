@@ -1,19 +1,19 @@
 #ifndef MANAGED_GROUP_H_
 #define MANAGED_GROUP_H_
 
-#include <mutex>
+#include <chrono>
+#include <ctime>
 #include <list>
+#include <map>
+#include <mutex>
 #include <queue>
 #include <string>
 #include <utility>
-#include <map>
 #include <vector>
-#include <ctime>
-#include <chrono>
 
-#include "view.h"
 #include "logger.h"
 #include "rdmc/connection.h"
+#include "view.h"
 
 namespace derecho {
 
@@ -58,9 +58,15 @@ public:
  * features. All members of a group should create instances of ManagedGroup
  * (instead of creating DerechoGroup directly) in order to enable the GMS.
  */
+template <typename handlersType>
 class ManagedGroup {
 private:
-    using pred_handle = View::DerechoSST::Predicates::pred_handle;
+    using pred_handle =
+        typename View<handlersType>::DerechoSST::Predicates::pred_handle;
+
+    using view_upcall_t = std::function<void(vector<node_id_t> new_members,
+                                             vector<node_id_t> old_members)>;
+    using View<handlersType>::MAX_MEMBERS;
 
     /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
      * Currently, this mapping must be completely known at startup. */
@@ -71,7 +77,7 @@ private:
     LockedQueue<tcp::socket> pending_joins;
 
     /** Contains old Views that need to be cleaned up*/
-    std::queue<std::unique_ptr<View>> old_views;
+    std::queue<std::unique_ptr<View<handlersType>>> old_views;
     std::mutex old_views_mutex;
     std::condition_variable old_views_cv;
 
@@ -110,36 +116,37 @@ private:
 
     /** The current View, containing the state of the managed group.
      *  Must be a pointer so we can re-assign it.*/
-    std::unique_ptr<View> curr_view;
+    std::unique_ptr<View<handlersType>> curr_view;
     /** May hold a pointer to the partially-constructed next view, if we are
      *  in the process of transitioning to a new view. */
-    std::unique_ptr<View> next_view;
+    std::unique_ptr<View<handlersType>> next_view;
+
+    std::vector<view_upcall_t> view_upcalls;
 
     /** Sends a joining node the new view that has been constructed to include it.*/
-    void commit_join(const View& new_view, tcp::socket& client_socket);
+    void commit_join(const View<handlersType>& new_view,
+                     tcp::socket& client_socket);
 
-    bool has_pending_join() {
-        return pending_joins.locked().access.size() > 0;
-    }
+    bool has_pending_join() { return pending_joins.locked().access.size() > 0; }
 
     /** Assuming this node is the leader, handles a join request from a client.*/
     void receive_join(tcp::socket& client_socket);
 
     /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
-    std::unique_ptr<View> start_group(const node_id_t my_id);
+    std::unique_ptr<View<handlersType>> start_group(const node_id_t my_id);
     /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-    std::unique_ptr<View> join_existing(const ip_addr& leader_ip, const int leader_port);
+    std::unique_ptr<View<handlersType>> join_existing(const ip_addr& leader_ip, const int leader_port);
 
-    //Ken's helper methods
-    void deliver_in_order(const View& Vc, int Leader);
-    void ragged_edge_cleanup(View& Vc);
-    void leader_ragged_edge_cleanup(View& Vc);
-    void follower_ragged_edge_cleanup(View& Vc);
+    // Ken's helper methods
+    void deliver_in_order(const View<handlersType>& Vc, int Leader);
+    void ragged_edge_cleanup(View<handlersType>& Vc);
+    void leader_ragged_edge_cleanup(View<handlersType>& Vc);
+    void follower_ragged_edge_cleanup(View<handlersType>& Vc);
 
-    static bool suspected_not_equal(const View::DerechoSST& gmsSST, const std::vector<bool>& old);
-    static void copy_suspected(const View::DerechoSST& gmsSST, std::vector<bool>& old);
-    static bool changes_contains(const View::DerechoSST& gmsSST, const node_id_t q);
-    static int min_acked(const View::DerechoSST& gmsSST, const std::vector<char>& failed);
+    static bool suspected_not_equal(const typename View<handlersType>::DerechoSST& gmsSST, const std::vector<bool>& old);
+    static void copy_suspected(const typename View<handlersType>::DerechoSST& gmsSST, std::vector<bool>& old);
+    static bool changes_contains(const typename View<handlersType>::DerechoSST& gmsSST, const node_id_t q);
+    static int min_acked(const typename View<handlersType>::DerechoSST& gmsSST, const std::vector<char>& failed);
 
     /** Constructor helper method to encapsulate spawning the background threads. */
     void create_threads();
@@ -147,13 +154,18 @@ private:
     void register_predicates();
 
     /** Creates the SST and derecho_group for the current view, using the current view's member list.
-     *  The parameters are all the possible parameters for constructing derecho_group. */
-    void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers, long long unsigned int _max_payload_size,
-                            const CallbackSet& stability_callbacks, long long unsigned int _block_size, const std::string& filename,
-                            unsigned int _window_size, const rdmc::send_algorithm& _type);
+     * The parameters are all the possible parameters for constructing derecho_group. */
+    void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers,
+                            const long long unsigned int _max_payload_size,
+                            const CallbackSet& stability_callbacks,
+                            handlersType group_handlers,
+                            const long long unsigned int _block_size,
+                            const std::string& filename,
+                            const unsigned int _window_size,
+                            const rdmc::send_algorithm& _type);
     /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
-     *  (and copying over the SST data from the current view). */
-    void transition_sst_and_rdmc(View& newView, int whichFailed);
+     * (and copying over the SST data from the current view). */
+    void transition_sst_and_rdmc(View<handlersType>& newView, int whichFailed);
 
 public:
     /**
@@ -174,7 +186,9 @@ public:
                  const node_id_t my_id,
                  const node_id_t leader_id,
                  const long long unsigned int _max_payload_size,
-                 CallbackSet stability_callbacks,
+                 const CallbackSet stability_callbacks,
+                 handlersType group_handlers,
+                 std::vector<view_upcall_t> _view_upcalls,
                  const long long unsigned int _block_size,
                  std::string filename = std::string(),
                  const unsigned int _window_size = 3,
@@ -208,14 +222,16 @@ public:
                  const std::map<node_id_t, ip_addr>& global_ip_map,
                  const node_id_t my_id,
                  const long long unsigned int _max_payload_size,
-                 CallbackSet stability_callbacks,
+                 const CallbackSet stability_callbacks,
+                 handlersType group_handlers,
+                 std::vector<view_upcall_t> _view_upcalls,
                  const long long unsigned int _block_size,
                  const unsigned int _window_size = 3,
                  const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
 
     static void global_setup(const std::map<node_id_t, ip_addr>& member_ips,
                              node_id_t my_id);
-    /** Causes this node to cleanly leave the group by setting itself to "failed."  */
+    /** Causes this node to cleanly leave the group by setting itself to "failed." */
     void leave();
     /** Creates and returns a vector listing the nodes that are currently members of the group. */
     std::vector<node_id_t> get_members();
@@ -226,9 +242,21 @@ public:
     char* get_sendbuffer_ptr(long long unsigned int payload_size,
                              int pause_sending_turns = 0);
     /** Instructs the managed DerechoGroup to send the next message. This
-     * returns immediately; the send is scheduled to happen some time in the
-     * future. */
+     * returns immediately; the send is scheduled to happen some time in the future. */
     void send();
+
+    template <unsigned long long tag, typename... Args>
+    void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void orderedSend(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void p2pSend(node_id_t dest_node, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto p2pQuery(node_id_t dest_node, Args&&... args);
     /** Reports to the GMS that the given node has failed. */
     void report_failure(const node_id_t who);
     /** Waits until all members of the group have called this function. */
@@ -241,8 +269,12 @@ public:
         util::debug_log().log_event(event_text);
     }
     void print_log(std::ostream& output_dest) const;
+
+    std::map<node_id_t, ip_addr> get_member_ips_map(std::vector<node_id_t>& members);
 };
 
 } /* namespace derecho */
+
+#include "managed_group_impl.h"
 
 #endif /* MANAGED_GROUP_H_ */

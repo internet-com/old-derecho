@@ -14,12 +14,12 @@ include_directories(mutils)
 add_custom_target(
 	mutils_serialization
 	COMMAND make
-	WORKING_DIRECTORY ./serialization
+	WORKING_DIRECTORY ./mutils-serialization
 )
-include_directories(serialization)
-find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./serialization)
+include_directories(mutils-serialization)
+find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./mutils-serialization)
 
-add_library(derecho SHARED managed_group.cpp view.cpp derecho_row.cpp logger.cpp filewriter.cpp)
+add_library(derecho SHARED derecho_row.cpp logger.cpp filewriter.cpp)
 target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst ${SERIALIZATION_LIBRARY})
 add_dependencies(derecho mutils_serialization)
 
@@ -48,3 +48,5 @@ add_executable(gms_test2 gms_test2.cpp experiments/block_size.cpp)
 target_link_libraries(gms_test2 derecho)
 
 add_custom_target(format_derecho clang-format-3.6 -i *.cpp *.h)
+add_executable(test_inheritance_plan test_inheritance_plan.cpp)
+target_link_libraries(test_inheritance_plan mutils-serialization)

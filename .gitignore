@@ -1,3 +1,4 @@
+*~
 libderecho.so
 CMakeCache.txt
 Makefile
@@ -13,7 +14,6 @@ scripts/
 /experiments/script_copy.sh
 /experiments/test_group_interface
 /script_copy.sh
-/experiments/*~
 /experiments/make_at_fractus_nodes.sh
 /experiments/single_sender_multiple_messages
 /experiments/single_sender_one_message
@@ -51,9 +51,12 @@ scripts/
 conntest
 gms_test
 timeline_test
-/gms_test2.cpp~
 /gms_test2
 /experiments/message_status
 /experiments/message_timeline_test
 /experiments/rdmc_bw_test1
 /experiments/rdmc_bw_test2
+/experiments/derecho_caller_test
+/test_inheritance_plan
+/TAGS
+/experiments/raw_send_test

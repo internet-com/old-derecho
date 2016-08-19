@@ -1,6 +1,7 @@
 #ifndef DERECHO_GROUP_H
 #define DERECHO_GROUP_H
 
+#include <assert.h>
 #include <condition_variable>
 #include <experimental/optional>
 #include <functional>
@@ -8,11 +9,14 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <ostream>
+#include <list>
 #include <set>
 #include <tuple>
 #include <vector>
-#include <ostream>
 
+#include "connection_manager.h"
+#include "derecho_caller.h"
 #include "derecho_row.h"
 #include "filewriter.h"
 #include "rdmc/rdmc.h"
@@ -20,9 +24,58 @@
 
 namespace derecho {
 
+using std::vector;
+
+/** Alias for the type of std::function that is used for message delivery event callbacks. */
+using message_callback = std::function<void(int, long long int, char*, long long int)>;
+
+/**
+ * Bundles together a set of callback functions for message delivery events.
+ * These will be invoked by DerechoGroup to hand control back to the client
+ * when it needs to handle message delivery.
+ */
+struct CallbackSet {
+    message_callback global_stability_callback;
+    message_callback local_persistence_callback;
+};
+
 struct __attribute__((__packed__)) header {
     uint32_t header_size;
     uint32_t pause_sending_turns;
+    bool cooked_send;
+};
+
+class PendingBase {
+public:
+  virtual void fulfill_map(const std::vector<node_id_t>&) {
+    assert(false);
+  }
+  virtual void set_exception_for_removed_node(const node_id_t&) {
+    assert(false);
+  }
+};
+
+template <class Ret>
+class Pending : public PendingBase {
+    PendingResults<Ret>& pending;
+
+public:
+    Pending(PendingResults<Ret>& _pending) : pending(_pending) {}
+    void fulfill_map(const std::vector<node_id_t>& nodes) {
+        who_t who;
+        for(auto n : nodes) {
+            who.push_back(Node_id(n));
+        }
+        pending.fulfill_map(who);
+    }
+    void set_exception_for_removed_node(const node_id_t& removed_id) {
+        pending.set_exception_for_removed_node(removed_id);
+    }
+};
+
+template <class T>
+auto createPending(PendingResults<T>& pending) {
+  return std::make_unique<Pending<T>>(pending);
 };
 
 /**
@@ -86,26 +139,12 @@ struct MessageTrackingRow {
     long long int delivered_num;
 };
 
-/** Alias for the type of std::function that is used for message delivery event
- * callbacks. */
-using message_callback = std::function<void(
-    int sender_rank, long long int index, char *data, long long int size)>;
-
-/**
- * Bundles together a set of callback functions for message delivery events.
- * These will be invoked by DerechoGroup to hand control back to the client
- * when it needs to handle message delivery.
- */
-struct CallbackSet {
-    message_callback global_stability_callback;
-    message_callback local_persistence_callback;
-};
 
 /** combines sst and rdmc to give an abstraction of a group where anyone can
  * send
  * template parameter is the maximum possible group size - used for the GMS SST
  * row-struct */
-template <unsigned int N>
+template <unsigned int N, typename handlersType>
 class DerechoGroup {
 private:
     /** vector of member id's */
@@ -123,14 +162,20 @@ private:
      *  Binomial pipeline by default. */
     const rdmc::send_algorithm type;
     const unsigned int window_size;
-    /** callback for when a message is globally stable */
     const CallbackSet callbacks;
+    handlersType group_handlers;
+    tcp::all_tcp_connections connections;
+    std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
+    std::list<std::unique_ptr<PendingBase>> fulfilledList;
+    std::mutex pending_results_mutex;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
     unsigned int total_message_buffers;
     /** Stores message buffers not currently in use. Protected by
      * msg_state_mtx */
     std::vector<MessageBuffer> free_message_buffers;
+    std::unique_ptr<char[]> p2pBuffer;
+    std::unique_ptr<char[]> deliveryBuffer;
 
     // int send_slot;
     // vector<int> recv_slots;
@@ -172,6 +217,7 @@ private:
     std::thread sender_thread;
 
     std::thread timeout_thread;
+    std::thread rpc_thread;
 
     /** The SST, shared between this group and its GMS. */
     std::shared_ptr<sst::SST<DerechoRow<N>>> sst;
@@ -183,48 +229,81 @@ private:
 
     std::unique_ptr<FileWriter> file_writer;
 
-    /** Continuously waits for a new pending send, then sends it. This function implements the sender thread. */
+    /** Continuously waits for a new pending send, then sends it. This function
+     * implements the sender thread. */
     void send_loop();
 
-    /** Checks for failures when a sender reaches its timeout. This function implements the timeout thread. */
+    /** Checks for failures when a sender reaches its timeout. This function
+     * implements the timeout thread. */
     void check_failures_loop();
 
     std::function<void(persistence::message)> make_file_written_callback();
     void create_rdmc_groups();
     void initialize_sst_row();
     void register_predicates();
+
     void deliver_message(Message &msg);
+    template <unsigned long long tag, typename... Args>
+    auto derechoCallerSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto tcpSend(node_id_t dest_node, Args&&... args);
+    // private get_position - used for cooked send
+    char* get_position(long long unsigned int payload_size, bool cooked_send,
+                       int pause_sending_turns = 0);
 
 public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
     DerechoGroup(
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        std::vector<MessageBuffer> &free_message_buffers,
-        long long unsigned int _max_payload_size, CallbackSet _callbacks,
-        long long unsigned int _block_size,
-        std::string filename = std::string(), unsigned int _window_size = 3,
-        unsigned int timeout_ms = 1,
-        rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
-    /** Constructor to initialize a new derecho_group from an old one, preserving the same settings but providing a new list of members. */
+        std::vector<MessageBuffer>& free_message_buffers,
+        long long unsigned int _max_payload_size,
+        CallbackSet _callbacks,
+        handlersType _group_handlers, long long unsigned int _block_size,
+        std::map<node_id_t, std::string> ip_addrs,
+        std::string filename = std::string(),
+        unsigned int _window_size = 3, unsigned int timeout_ms = 1,
+        rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
+        uint32_t port = 12487);
+    /** Constructor to initialize a new derecho_group from an old one,
+     * preserving the same settings but providing a new list of members. */
     DerechoGroup(
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
-        DerechoGroup &&old_group);
+        DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
+        uint32_t port = 12487);
     ~DerechoGroup();
-    void deliver_messages_upto(const std::vector<long long int> &max_indices_for_senders);
+
+    void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);
     /** get a pointer into the buffer, to write data into it before sending */
-    char *get_position(long long unsigned int payload_size, int pause_sending_turns = 0);
+    char* get_position(long long unsigned int payload_size,
+                       int pause_sending_turns = 0);
     /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
      * This still allows making multiple send calls without acknowledgement; at a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
     bool send();
+    template <unsigned long long tag, typename... Args>
+    void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void orderedSend(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto orderedQuery(Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    void p2pSend(node_id_t dest_node, Args&&... args);
+    template <unsigned long long tag, typename... Args>
+    auto p2pQuery(node_id_t dest_node, Args&&... args);
+    void rpc_process_loop();
+    void set_exceptions_for_removed_nodes(
+        std::vector<node_id_t> removed_members);
     /** Stops all sending and receiving in this group, in preparation for shutting it down. */
     void wedge();
     /** Debugging function; prints the current state of the SST to stdout. */
     void debug_print();
-    static long long unsigned int compute_max_msg_size(const long long unsigned int max_payload_size,
-                                                       const long long unsigned int block_size);
+    static long long unsigned int compute_max_msg_size(
+        const long long unsigned int max_payload_size,
+        const long long unsigned int block_size);
 };
 }  // namespace derecho
 

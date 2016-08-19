@@ -9,20 +9,20 @@
 #include <string>
 #include <iostream>
 #include <sstream>
-#include <fstream>
-#include <iterator>
 
 #include "view.h"
-#include "persistence.h"
 
 namespace derecho {
 
 using std::string;
 using std::shared_ptr;
 
-View::View() : View(0) {}
+template <typename handlersType>
+View<handlersType>::View()
+    : View(0) {}
 
-View::View(int num_members)
+template <typename handlersType>
+View<handlersType>::View(int num_members)
     : vid(0),
       members(num_members),
       member_ips(num_members),
@@ -34,13 +34,15 @@ View::View(int num_members)
       rdmc_sending_group(nullptr),
       gmsSST(nullptr) {}
 
-void View::init_vectors() {
+template <typename handlersType>
+void View<handlersType>::init_vectors() {
     members.resize(num_members);
     member_ips.resize(num_members);
     failed.resize(num_members);
 }
 
-int View::rank_of_leader() const {
+template <typename handlersType>
+int View<handlersType>::rank_of_leader() const {
     for(int r = 0; r < num_members; ++r) {
         if(!failed[r]) {
             return r;
@@ -49,7 +51,8 @@ int View::rank_of_leader() const {
     return -1;
 }
 
-int View::rank_of(const ip_addr& who) const {
+template <typename handlersType>
+int View<handlersType>::rank_of(const ip_addr& who) const {
     for(int rank = 0; rank < num_members; ++rank) {
         if(member_ips[rank] == who) {
             return rank;
@@ -58,7 +61,8 @@ int View::rank_of(const ip_addr& who) const {
     return -1;
 }
 
-int View::rank_of(const node_id_t& who) const {
+template <typename handlersType>
+int View<handlersType>::rank_of(const node_id_t& who) const {
     for(int rank = 0; rank < num_members; ++rank) {
         if(members[rank] == who) {
             return rank;
@@ -67,18 +71,21 @@ int View::rank_of(const node_id_t& who) const {
     return -1;
 }
 
-void View::newView(const View& Vc) {
-    // I don't know what this is supposed to do in real life. In the C# simulation
-    // it just prints to stdout.
+template <typename handlersType>
+void View<handlersType>::newView(const View& Vc) {
+    // I don't know what this is supposed to do in real life. In the C#
+    // simulation it just prints to stdout.
     //    std::cout <<"Process " << Vc.members[Vc.my_rank] << " New view: " <<
     //    Vc.ToString() << std::endl;
 }
 
-bool View::IAmLeader() const {
+template <typename handlersType>
+bool View<handlersType>::IAmLeader() const {
     return (rank_of_leader() == my_rank);  // True if I know myself to be the leader
 }
 
-bool View::IAmTheNewLeader() {
+template <typename handlersType>
+bool View<handlersType>::IAmTheNewLeader() {
     if(IKnowIAmLeader) {
         return false;  // I am the OLD leader
     }
@@ -94,7 +101,8 @@ bool View::IAmTheNewLeader() {
     return true;
 }
 
-void View::merge_changes() {
+template<typename handlersType>
+void View<handlersType>::merge_changes() {
     int myRank = my_rank;
     // Merge the change lists
     for(int n = 0; n < num_members; n++) {
@@ -113,7 +121,7 @@ void View::merge_changes() {
         if(failed[n]) {
             // Make sure that the failed process is listed in the Changes vector as a proposed change
             for(int c = (*gmsSST)[myRank].nCommitted; c < (*gmsSST)[myRank].nChanges && !found; c++) {
-                if((*gmsSST)[myRank].changes[c % View::MAX_MEMBERS] == members[n]) {
+                if((*gmsSST)[myRank].changes[c % MAX_MEMBERS] == members[n]) {
                     // Already listed
                     found = true;
                 }
@@ -124,7 +132,7 @@ void View::merge_changes() {
         }
 
         if(!found) {
-            gmssst::set((*gmsSST)[myRank].changes[(*gmsSST)[myRank].nChanges % View::MAX_MEMBERS],
+            gmssst::set((*gmsSST)[myRank].changes[(*gmsSST)[myRank].nChanges % MAX_MEMBERS],
                         members[n]);
             gmssst::increment((*gmsSST)[myRank].nChanges);
         }
@@ -132,13 +140,15 @@ void View::merge_changes() {
     gmsSST->put();
 }
 
-void View::wedge() {
+template<typename handlersType>
+void View<handlersType>::wedge() {
     rdmc_sending_group->wedge();  // RDMC finishes sending, stops new sends or receives in Vc
     gmssst::set((*gmsSST)[my_rank].wedged, true);
     gmsSST->put();
 }
 
-shared_ptr<node_id_t> View::Joined() const {
+template <typename handlersType>
+shared_ptr<node_id_t> View<handlersType>::Joined() const {
     if(who == nullptr) {
         return shared_ptr<node_id_t>();
     }
@@ -150,7 +160,8 @@ shared_ptr<node_id_t> View::Joined() const {
     return shared_ptr<node_id_t>();
 }
 
-shared_ptr<node_id_t> View::Departed() const {
+template <typename handlersType>
+shared_ptr<node_id_t> View<handlersType>::Departed() const {
     if(who == nullptr) {
         return shared_ptr<node_id_t>();
     }
@@ -162,32 +173,38 @@ shared_ptr<node_id_t> View::Departed() const {
     return who;
 }
 
-std::string View::ToString() const {
+template <typename handlersType>
+std::string View<handlersType>::ToString() const {
     std::stringstream s;
-    s << "View " << vid << ": MyRank=" << my_rank << ". "
-      << "Members={";
+    s << "View " << vid << ": MyRank=" << my_rank << ". ";
+    string ms = " ";
     for(int m = 0; m < num_members; m++) {
-        s << members[m] << "  ";
+        ms += std::to_string(members[m]) + string("  ");
     }
-    s << "}, "
-      << "Failed={";
+
+    s << "Members={" << ms << "}, ";
+    string fs = (" ");
     for(int m = 0; m < num_members; m++) {
-        s << (failed[m] ? " T " : " F ");
+        fs += failed[m] ? string(" T ") : string(" F ");
     }
-    s << " }, nFailed=" << nFailed;
+
+    s << "Failed={" << fs << " }, nFailed=" << nFailed;
     shared_ptr<node_id_t> dep = Departed();
     if(dep != nullptr) {
         s << ", Departed: " << *dep;
     }
+
     shared_ptr<node_id_t> join = Joined();
     if(join != nullptr) {
         s << ", Joined: " << *join;
     }
 
+    //    s += string("\n") + gmsSST->ToString();
     return s.str();
 }
 
-void persist_view(const View& view, const std::string& view_file_name) {
+template <typename handlersType>
+void persist_view(const View<handlersType>& view, const std::string& view_file_name) {
     using namespace std::placeholders;
     //Use the "safe save" paradigm to ensure a crash won't corrupt our saved View file
     std::ofstream view_file_swap(view_file_name + persistence::SWAP_FILE_EXTENSION);
@@ -203,11 +220,12 @@ void persist_view(const View& view, const std::string& view_file_name) {
     }
 }
 
-std::unique_ptr<View> load_view(const std::string& view_file_name) {
+template <typename handlersType>
+std::unique_ptr<View<handlersType>> load_view(const std::string& view_file_name) {
     std::ifstream view_file(view_file_name);
     std::ifstream view_file_swap(view_file_name + persistence::SWAP_FILE_EXTENSION);
-    std::unique_ptr<View> view;
-    std::unique_ptr<View> swap_view;
+    std::unique_ptr<View<handlersType>> view;
+    std::unique_ptr<View<handlersType>> swap_view;
     //The expected view file might not exist, in which case we'll fall back to the swap file
     if(view_file.good()) {
         //Each file contains the size of the view (an int copied as bytes),
@@ -219,7 +237,7 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
         //If the view file doesn't contain a complete view (due to a crash
         //during writing), the read() call will set failbit
         if(!view_file.fail()) {
-            view = mutils::from_bytes<View>(nullptr, buffer);
+            view = mutils::from_bytes<View<handlersType>>(nullptr, buffer);
         }
     }
     if(view_file_swap.good()) {
@@ -228,7 +246,7 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
         char buffer[size_of_view];
         view_file_swap.read(buffer, size_of_view);
         if(!view_file_swap.fail()) {
-            swap_view = mutils::from_bytes<View>(nullptr, buffer);
+            swap_view = mutils::from_bytes<View<handlersType>>(nullptr, buffer);
         }
     }
     if(swap_view == nullptr ||
@@ -239,7 +257,8 @@ std::unique_ptr<View> load_view(const std::string& view_file_name) {
     }
 }
 
-std::ostream& operator<<(std::ostream& stream, const View& view) {
+template <typename handlersType>
+std::ostream& operator<<(std::ostream& stream, const View<handlersType>& view) {
     stream << view.vid << std::endl;
     std::copy(view.members.begin(), view.members.end(), std::ostream_iterator<node_id_t>(stream, " "));
     stream << std::endl;
@@ -255,7 +274,8 @@ std::ostream& operator<<(std::ostream& stream, const View& view) {
     return stream;
 }
 
-std::istream& operator>>(std::istream& stream, View& view) {
+template <typename handlersType>
+std::istream& operator>>(std::istream& stream, View<handlersType>& view) {
     std::string line;
     if(std::getline(stream, line)) {
         view.vid = std::stoi(line);
@@ -292,4 +312,6 @@ std::istream& operator>>(std::istream& stream, View& view) {
     }
     return stream;
 }
+
+
 }

@@ -73,6 +73,7 @@ void FileWriter::perform_writes(std::string filename) {
             metadata.index = m.index;
             metadata.offset = current_offset;
             metadata.length = m.length;
+            metadata.is_cooked = m.cooked;
 
             data_file.write(m.data, m.length);
             mutils::post_object(std::bind(&std::ofstream::write, &metadata_file, _1, _2), metadata);
