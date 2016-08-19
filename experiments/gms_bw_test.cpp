@@ -32,12 +32,11 @@ unsigned int message_number = 0;
 vector<uint64_t> message_times;
 shared_ptr<derecho::ManagedGroup> managed_group;
 
-void stability_callback(int sender_id, long long int index, char *data,
-                        long long int size) {
+void stability_callback(int sender_id, long long int index, char *data, long long int size) {
+    using namespace derecho;
     message_times.push_back(get_time());
 
-    derecho::util::debug_log().log_event(
-        stringstream() << "Global stability for message " << index
+    util::debug_log().log_event(stringstream() << "Global stability for message " << index
                        << " from sender " << sender_id);
 
     while(!managed_group) {

@@ -20,8 +20,7 @@ using std::map;
 using std::cout;
 using std::endl;
 
-using derecho::DerechoGroup;
-using derecho::DerechoRow;
+using namespace derecho;
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));

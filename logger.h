@@ -1,12 +1,11 @@
-/*
- * logger.h
+/**
+ * @file logger.h
  *
- *  Created on: May 3, 2016
- *      Author: edward
+ * @date May 3, 2016
+ * @author edward
  */
 
-#ifndef LOGGER_H_
-#define LOGGER_H_
+#pragma once
 
 #include <chrono>
 #include <vector>
@@ -15,6 +14,8 @@
 #include <sstream>
 #include <type_traits>
 #include <utility>
+
+namespace derecho {
 
 /**
  * General-purpose operator<< overload for ostringstreams that forces them to
@@ -25,20 +26,14 @@
  * @return An rvalue reference to the ostringstream (basically, "return *this"
  * but correctly typed).
  */
-template <
-    typename S, typename T,
-    class = typename std::enable_if<std::is_base_of<
-        std::basic_ostream<typename S::char_type, typename S::traits_type>,
-        S>::value>::type>
-S &&operator<<(S &&out, const T &t) {
-    static_cast<
-        std::basic_ostream<typename S::char_type, typename S::traits_type> &>(
-        out)
-        << t;
+template <typename S, typename T,
+          class = typename std::enable_if<std::is_base_of<
+              std::basic_ostream<typename S::char_type, typename S::traits_type>,
+              S>::value>::type>
+S&& operator<<(S&& out, const T& t) {
+    static_cast<std::basic_ostream<typename S::char_type, typename S::traits_type>&>(out) << t;
     return std::move(out);
 }
-
-namespace derecho {
 
 /** The start time of the program, to be used for timestamps in Logger entries.
  * main() should set this after synchronizing clocks. */
@@ -58,13 +53,15 @@ public:
     Logger() : events(10000000), times(10000000), curr_event(0){};
 
     void log_event(std::string event_text);
-    void log_event(const std::stringstream &event_text);
+    void log_event(const std::stringstream& event_text);
 };
 
 /** Gets a single global Logger instance to use for debugging. */
-Logger &debug_log();
+Logger& debug_log();
 
 } /* namespace util */
 } /* namespace derecho */
 
-#endif /* LOGGER_H_ */
+//Lift the generic operator<< into the global namespace
+//so it's always in scope when logger.h is included
+using derecho::operator<<;

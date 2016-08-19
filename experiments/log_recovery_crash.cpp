@@ -1,30 +1,33 @@
 /**
- * @file basic_persistence_test.cpp
+ * @file log_recovery_crash.cpp
+ * A test that runs a Derecho group in persistence mode for a while, then has
+ * one member exit prematurely while the others keep sending. The "crashed"
+ * member should then run log_recovery_restart after running the recovery
+ * helper script.
  *
- * @date Jun 7, 2016
- * @author: edward
+ * @date Aug 2, 2016
+ * @author edward
  */
-#include "../derecho_group.h"
-#include "../managed_group.h"
-#include "../rdmc/util.h"
-#include "../view.h"
-#include "../logger.h"
 
+#include <stddef.h>
 #include <chrono>
-#include <ratio>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-#include <fstream>
+
+#include "../logger.h"
+#include "../managed_group.h"
+#include "../rdmc/util.h"
 
 using namespace std;
-using namespace std::chrono_literals;
-using std::chrono::high_resolution_clock;
-using std::chrono::duration;
-using std::chrono::microseconds;
 
 const int GMS_PORT = 12345;
 const size_t message_size = 1000;
@@ -64,36 +67,36 @@ void send_messages(int count) {
     }
 }
 
-/*
- * This test sends a fixed number of messages in a group with persistence enabled,
- * to ensure that the persistence-to-disk features work.
- */
 int main(int argc, char* argv[]) {
     srand(time(nullptr));
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
     derecho::ManagedGroup::global_setup(node_addresses, node_rank);
 
-    string log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
-    string message_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
+    string debug_log_filename = (std::stringstream() << "events_node" << node_rank << ".csv").str();
+    string message_log_filename = (std::stringstream() << "data" << node_rank << ".dat").str();
 
     managed_group = make_shared<derecho::ManagedGroup>(
         GMS_PORT, node_addresses, node_rank, 0, message_size,
         derecho::CallbackSet{stability_callback, persistence_callback},
-        block_size, message_filename);
+        block_size, message_log_filename);
     cout << "Created group, waiting for others to join." << endl;
     while(managed_group->get_members().size() < (num_nodes - 1)) {
         std::this_thread::sleep_for(1ms);
     }
     cout << "Starting to send messages." << endl;
-    send_messages(num_messages);
-    while(!done) {
+    //Node n-1 will "crash" before sending all the messages
+    if(node_rank == num_nodes - 1) {
+        send_messages(num_messages-250);
+        managed_group->log_event("About to exit");
+        ofstream log_stream(debug_log_filename);
+        managed_group->print_log(log_stream);
+        return 0;
+    } else {
+        send_messages(num_messages);
+        while(!done) {
+        }
+        ofstream log_stream(debug_log_filename);
+        managed_group->print_log(log_stream);
     }
-    // managed_group->barrier_sync();
-    ofstream logfile(log_filename);
-    managed_group->print_log(logfile);
-
-    // Give log time to print before exiting
-    std::this_thread::sleep_for(5s);
-    managed_group->leave();
 }

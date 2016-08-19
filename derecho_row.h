@@ -92,7 +92,7 @@ namespace gmssst {
  * @param value The value to set that reference to.
  */
 template <typename Elem>
-void set(volatile Elem &e, const Elem &value) {
+void set(volatile Elem& e, const Elem& value) {
     e = value;
     std::atomic_signal_fence(std::memory_order_acq_rel);
 }
@@ -104,7 +104,7 @@ void set(volatile Elem &e, const Elem &value) {
  * @param value The value to set that reference to.
  */
 template <typename Elem>
-void set(volatile Elem &e, volatile const Elem &value) {
+void set(volatile Elem& e, volatile const Elem& value) {
     e = value;
     std::atomic_signal_fence(std::memory_order_acq_rel);
 }
@@ -144,7 +144,7 @@ void set(volatile Arr(&e)[Len], const volatile Arr(&value)[Len]) {
  */
 template <size_t L1, size_t L2, typename Arr>
 void set(volatile Arr(&dst)[L1], const volatile Arr(&src)[L2],
-         const size_t &num) {
+         const size_t& num) {
     static thread_local std::mutex set_mutex;
     {
         std::lock_guard<std::mutex> lock(set_mutex);
@@ -155,15 +155,17 @@ void set(volatile Arr(&dst)[L1], const volatile Arr(&src)[L2],
 }
 
 /**
- * Pseudo-constructor for DerechoRow, to work around the fact that POD can't
- * have constructors. Ensures that all members are initialized to a safe initial
- * value (i.e. suspected[] is all false), including setting changes[] to empty
- * C-strings.
- * @param newRow The instance of DerechoRow to initialize.
+ * Constructs a DerechoRow for a system that does not start at View ID 0 (which
+ * is the case when recovering from logs). Initializes the "committed" and
+ * "acked" counters to the given VID so that all views up to that ID are
+ * considered already stable.
+ *
+ * @param newRow The instance of DerechoRow to initialize
+ * @param vid The VID of the current View upon initialization
  */
 template <unsigned int N>
-void init(volatile DerechoRow<N> &newRow) {
-    newRow.vid = 0;
+void init(volatile DerechoRow<N>& newRow, const int vid) {
+    newRow.vid = vid;
     for(size_t i = 0; i < N; ++i) {
         newRow.suspected[i] = false;
         newRow.globalMin[i] = 0;
@@ -171,11 +173,23 @@ void init(volatile DerechoRow<N> &newRow) {
         //        newRow.nReceived[i] = -1;
         newRow.changes[i] = 0;
     }
-    newRow.nChanges = 0;
-    newRow.nCommitted = 0;
-    newRow.nAcked = 0;
+    newRow.nChanges = vid;
+    newRow.nCommitted = vid;
+    newRow.nAcked = vid;
     newRow.wedged = false;
     newRow.globalMinReady = false;
+}
+
+/**
+ * Pseudo-constructor for DerechoRow, to work around the fact that POD can't
+ * have constructors. Ensures that all members are initialized to a safe initial
+ * value (i.e. suspected[] is all false), including setting changes[] to empty
+ * C-strings.
+ * @param newRow The instance of DerechoRow to initialize.
+ */
+template <unsigned int N>
+void init(volatile DerechoRow<N>& newRow) {
+    init(newRow, 0);
 }
 
 /**
@@ -185,12 +199,12 @@ void init(volatile DerechoRow<N> &newRow) {
  * @param existingRow The instance to copy data from.
  */
 template <unsigned int N>
-void init_from_existing(volatile GMSTableRow<N> &newRow,
-                        const volatile GMSTableRow<N> &existingRow) {
+void init_from_existing(volatile GMSTableRow<N>& newRow,
+                        const volatile GMSTableRow<N>& existingRow) {
     static thread_local std::mutex copy_mutex;
     std::unique_lock<std::mutex> lock(copy_mutex);
-    memcpy(const_cast<node_id_t *>(newRow.changes),
-           const_cast<const node_id_t *>(existingRow.changes),
+    memcpy(const_cast<node_id_t*>(newRow.changes),
+           const_cast<const node_id_t*>(existingRow.changes),
            N * sizeof(node_id_t));
     for(size_t i = 0; i < N; ++i) {
         newRow.suspected[i] = false;
@@ -206,7 +220,7 @@ void init_from_existing(volatile GMSTableRow<N> &newRow,
 }
 
 template <unsigned int N>
-std::string to_string(volatile const DerechoRow<N> &row) {
+std::string to_string(volatile const DerechoRow<N>& row) {
     std::stringstream s;
     s << "Vid=" << row.vid << " ";
     s << "Suspected={ ";
@@ -234,11 +248,11 @@ std::string to_string(volatile const DerechoRow<N> &row) {
     return s.str();
 }
 
-void set(volatile cstring &element, const std::string &value);
+void set(volatile cstring& element, const std::string& value);
 
-void increment(volatile int &member);
+void increment(volatile int& member);
 
-bool equals(const volatile cstring &element, const std::string &value);
+bool equals(const volatile cstring& element, const std::string& value);
 
 }  // namespace gmssst
 

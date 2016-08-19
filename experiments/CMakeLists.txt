@@ -23,6 +23,15 @@ target_link_libraries(multiple_senders_multiple_messages derecho)
 add_executable(derecho_bw_test derecho_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(derecho_bw_test derecho)
 
+include_directories("../mutils" "../mutils-serialization")
+# derecho_caller_test
+add_executable(derecho_caller_test derecho_caller_test.cpp block_size.cpp initialize.cpp)
+target_link_libraries(derecho_caller_test derecho mutils mutils-serialization)
+
+# raw_send_test
+add_executable(raw_send_test raw_send_test.cpp block_size.cpp initialize.cpp)
+target_link_libraries(raw_send_test derecho mutils mutils-serialization)
+
 # ssd_bw_test
 add_executable(ssd_bw_test ssd_bw_test.cpp block_size.cpp aggregate_bandwidth.cpp initialize.cpp )
 target_link_libraries(ssd_bw_test derecho)
@@ -60,6 +69,9 @@ target_link_libraries(viewchange_timeline derecho)
 
 add_executable(basic_persistence_test basic_persistence_test.cpp)
 target_link_libraries(basic_persistence_test derecho)
+
+add_executable(log_recovery_crash log_recovery_crash.cpp)
+target_link_libraries(log_recovery_crash derecho)
 
 add_executable(local_filewriter_test local_filewriter_test.cpp)
 target_link_libraries(local_filewriter_test derecho)
