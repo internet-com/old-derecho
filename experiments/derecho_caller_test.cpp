@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
-        stability_callback, std::move(group_handlers),
+        {stability_callback, {}}, std::move(group_handlers),
         {[](vector<derecho::node_id_t> new_members, vector<derecho::node_id_t> old_members) {
             cout << "New members are : " << endl;
             for(auto n : new_members) {

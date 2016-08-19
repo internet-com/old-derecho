@@ -969,7 +969,7 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
 
 template <typename handlersType>
 std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
-    std::vector<node_id_t>& members, std::vector<bool> failed) {
+    std::vector<node_id_t>& members, std::vector<char> failed) {
     std::map<node_id_t, ip_addr> member_ips;
     size_t num_members = members.size();
     for(uint i = 0; i < num_members; ++i) {

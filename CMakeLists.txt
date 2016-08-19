@@ -17,10 +17,11 @@ add_custom_target(
 	WORKING_DIRECTORY ./mutils-serialization
 )
 include_directories(mutils-serialization)
+find_library(MUTILS_LIBRARY mutils PATHS ./mutils)
 find_library(SERIALIZATION_LIBRARY mutils-serialization PATHS ./mutils-serialization)
 
-add_library(derecho SHARED derecho_row.cpp logger.cpp filewriter.cpp)
-target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst ${SERIALIZATION_LIBRARY})
+add_library(derecho SHARED derecho_row.cpp logger.cpp filewriter.cpp connection_manager.cpp)
+target_link_libraries(derecho rdmacm ibverbs rt pthread atomic rdmc sst ${MUTILS_LIBRARY} ${SERIALIZATION_LIBRARY})
 add_dependencies(derecho mutils_serialization)
 
 add_executable(main main.cpp)

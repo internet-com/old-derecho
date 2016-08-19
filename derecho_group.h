@@ -263,7 +263,7 @@ public:
         CallbackSet _callbacks,
         dispatcherType _dispatchers, long long unsigned int _block_size,
         std::map<node_id_t, std::string> ip_addrs,
-        std::vector<bool> already_failed = {},
+        std::vector<char> already_failed = {},
         std::string filename = std::string(),
         unsigned int _window_size = 3, unsigned int timeout_ms = 1,
         rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
@@ -274,7 +274,7 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-        std::vector<bool> already_failed = {}, uint32_t port = 12487);
+        std::vector<char> already_failed = {}, uint32_t port = 12487);
     ~DerechoGroup();
 
     void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);

@@ -68,7 +68,7 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     dispatchersType _dispatchers,
     long long unsigned int _block_size,
     std::map<node_id_t, std::string> ip_addrs,
-    std::vector<bool> already_failed, std::string filename,
+    std::vector<char> already_failed, std::string filename,
     unsigned int _window_size,
     unsigned int timeout_ms, rdmc::send_algorithm _type, uint32_t port)
     : members(_members),
@@ -120,7 +120,7 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     std::vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-    std::vector<bool> already_failed, uint32_t port)
+    std::vector<char> already_failed, uint32_t port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),

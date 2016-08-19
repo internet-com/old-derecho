@@ -66,7 +66,7 @@ private:
 
     using view_upcall_t = std::function<void(vector<node_id_t> new_members,
                                              vector<node_id_t> old_members)>;
-    using View<handlersType>::MAX_MEMBERS;
+    static constexpr int MAX_MEMBERS = View<handlersType>::MAX_MEMBERS;
 
     /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
      * Currently, this mapping must be completely known at startup. */
@@ -193,8 +193,6 @@ public:
                  std::string filename = std::string(),
                  const unsigned int _window_size = 3,
                  const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
-    ~ManagedGroup();
-
     /**
      * Constructor that re-starts a failed group member from log files.
      * It assumes the local ".paxosstate" file already contains the last known
@@ -228,6 +226,8 @@ public:
                  const long long unsigned int _block_size,
                  const unsigned int _window_size = 3,
                  const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+
+    ~ManagedGroup();
 
     static void global_setup(const std::map<node_id_t, ip_addr>& member_ips,
                              node_id_t my_id);
@@ -268,7 +268,7 @@ public:
         util::debug_log().log_event(event_text);
     }
     void print_log(std::ostream& output_dest) const;
-    std::map<node_id_t, ip_addr> get_member_ips_map(std::vector<node_id_t>& members, std::vector<bool> failed);
+    std::map<node_id_t, ip_addr> get_member_ips_map(std::vector<node_id_t>& members, std::vector<char> failed);
 };
 
 } /* namespace derecho */
