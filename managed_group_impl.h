@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <signal.h>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -244,7 +245,11 @@ template <typename handlersType>
 void ManagedGroup<handlersType>::global_setup(
     const map<node_id_t, ip_addr>& member_ips, node_id_t my_id) {
     cout << "Doing global setup of SST and RDMC" << endl;
-    rdmc::initialize(member_ips, my_id);
+    // this global setup has to be depricated anyway
+    if (!rdmc::initialize(member_ips, my_id)) {
+      cout << "Global setup failed" << endl;
+      exit(0);
+    }
     sst::tcp::tcp_initialize(my_id, member_ips);
     sst::verbs_initialize();
     rdmc_globals_initialized = true;
@@ -299,7 +304,7 @@ void ManagedGroup<handlersType>::register_predicates() {
         for(int q = 0; q < Vc.num_members; q++) {
             if(gmsSST[myRank].suspected[q] && !Vc.failed[q]) {
                 log_event(std::stringstream() << "Marking " << Vc.members[q] << " failed");
-                if(Vc.nFailed + 1 >= Vc.num_members / 2) {
+                if(Vc.nFailed >= (Vc.num_members + 1) / 2) {
                     throw derecho_exception("Majority of a Derecho group simultaneously failed ... shutting down");
                 }
 
@@ -310,7 +315,7 @@ void ManagedGroup<handlersType>::register_predicates() {
                 Vc.failed[q] = true;
                 Vc.nFailed++;
 
-                if(Vc.nFailed > Vc.num_members / 2 || (Vc.nFailed == Vc.num_members / 2 && Vc.num_members % 2 == 0)) {
+                if (Vc.nFailed >= (Vc.num_members + 1) / 2) {
                     throw derecho_exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
                 }
 
@@ -439,6 +444,7 @@ void ManagedGroup<handlersType>::register_predicates() {
         }
 
         if(next_view->gmsSST != nullptr) {
+            std::cout << "Segmentation fault" << std::endl; raise(SIGSEGV);
             throw derecho_exception("Overwriting the SST");
         }
 
@@ -567,7 +573,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
                             const rdmc::send_algorithm& _type) {
     curr_view->gmsSST =  make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
             curr_view->members, curr_view->members[curr_view->my_rank],
-            [this](const uint32_t node_id) { report_failure(node_id); });
+            [this](const uint32_t node_id) { report_failure(node_id); }, curr_view->failed);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
@@ -577,7 +583,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
         curr_view->members, curr_view->members[curr_view->my_rank],
         curr_view->gmsSST, message_buffers, _max_payload_size,
         stability_callbacks, std::move(group_handlers), _block_size,
-        get_member_ips_map(curr_view->members), filename, _window_size, 1, _type);
+        get_member_ips_map(curr_view->members, curr_view->failed), curr_view->failed, filename, _window_size, 1, _type);
 }
 
 /**
@@ -595,12 +601,12 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& new
     //    std::map<node_id_t, ip_addr> new_member_map {{newView.members[newView.my_rank], newView.member_ips[newView.my_rank]}, {newView.members.back(), newView.member_ips.back()}};
     //    sst::tcp::tcp_initialize(newView.members[newView.my_rank], new_member_map);
     newView.gmsSST = make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
-            newView.members, newView.members[newView.my_rank],
-            [this](const uint32_t node_id) { report_failure(node_id); });
+        newView.members, newView.members[newView.my_rank],
+        [this](const uint32_t node_id) { report_failure(node_id); }, newView.failed);
     newView.rdmc_sending_group = make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
         std::move(*curr_view->rdmc_sending_group),
-        get_member_ips_map(newView.members));
+        get_member_ips_map(newView.members, newView.failed), newView.failed);
     curr_view->rdmc_sending_group.reset();
 
     // Initialize this node's row in the new SST
@@ -831,10 +837,12 @@ void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
         }
     }
 
-    if(cnt >= curr_view->num_members / 2) {
-        throw derecho_exception("Potential partitioning event: this node is no longer in the majority and must shut down!");
+    if(cnt >= (curr_view->num_members + 1) / 2) {
+        throw derecho_exception(
+            "Potential partitioning event: this node is no longer in the majority and must shut down!");
     }
     curr_view->gmsSST->put();
+    std::cout << "Exiting from remote_failure" << std::endl;
 }
 
 template <typename handlersType>
@@ -864,46 +872,66 @@ void ManagedGroup<handlersType>::send() {
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
-    curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
-        nodes, std::forward<Args>(args)...);
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
+    curr_view->rdmc_sending_group->template orderedSend<IdClass,tag, Args...>(
+        nodes, buf, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::orderedSend(Args&&... args) {
-    curr_view->rdmc_sending_group->template orderedSend<tag, Args...>(
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
+    curr_view->rdmc_sending_group->template orderedSend<IdClass,tag, Args...>(
         std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::orderedQuery(const vector<node_id_t>& nodes,
                                               Args&&... args) {
-    return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
+    return curr_view->rdmc_sending_group->template orderedQuery<IdClass,tag, Args...>(
         nodes, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::orderedQuery(Args&&... args) {
-    return curr_view->rdmc_sending_group->template orderedQuery<tag, Args...>(
+    char* buf;
+    while(!(buf = get_sendbuffer_ptr(0))) {
+    };
+
+    std::unique_lock<std::mutex> lock(view_mutex);
+    return curr_view->rdmc_sending_group->template orderedQuery<IdClass,tag, Args...>(
         std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 void ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
-    curr_view->rdmc_sending_group->template p2pSend<tag, Args...>(
+    curr_view->rdmc_sending_group->template p2pSend<IdClass,tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 
 template <typename handlersType>
-template <unsigned long long tag, typename... Args>
+template <typename IdClass, unsigned long long tag, typename... Args>
 auto ManagedGroup<handlersType>::p2pQuery(node_id_t dest_node, Args&&... args) {
-    return curr_view->rdmc_sending_group->template p2pQuery<tag, Args...>(
+    return curr_view->rdmc_sending_group->template p2pQuery<IdClass,tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 
@@ -940,10 +968,13 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
 
 template <typename handlersType>
 std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
-    std::vector<node_id_t>& members) {
+    std::vector<node_id_t>& members, std::vector<bool> failed) {
     std::map<node_id_t, ip_addr> member_ips;
-    for(auto m : members) {
-        member_ips[m] = member_ips_by_id[m];
+    size_t num_members = members.size();
+    for(uint i = 0; i < num_members; ++i) {
+        if(!failed[i]) {
+            member_ips[members[i]] = member_ips_by_id[members[i]];
+        }
     }
     return member_ips;
 }

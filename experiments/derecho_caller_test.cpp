@@ -28,15 +28,23 @@ uint32_t num_nodes;
 
 int count = 0;
 
-int test1 (string str) {
-  cout << str << endl;
-  count++;
-  if (node_rank == 3 && count == 2) {
-    cout << "Exiting" << endl;
-    exit(0);
-  }
-  return 19954;
-}
+struct test1_str{
+	int test1 (string str) {
+		cout << str << endl;
+		count++;
+		if (node_rank == 3 && count == 2) {
+			cout << "Exiting" << endl;
+			exit(0);
+		}
+		return 19954;
+	}
+	
+	template<typename Dispatcher>
+	auto register_functions(Dispatcher &d){
+		return d.register_functions(
+			this, &test1_str::test1);
+	}
+};
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
@@ -60,8 +68,8 @@ int main(int argc, char *argv[]) {
     auto stability_callback =
         [](int sender_id, long long int index, char *buf,
            long long int msg_size) {};
-
-    auto group_handlers = handlers(node_rank, 0, test1);
+	
+	Dispatcher<test1_str> group_handlers(node_rank,std::make_tuple());
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
@@ -92,31 +100,22 @@ int main(int argc, char *argv[]) {
     cout << endl;
 
     string str = "Here is a message";
-    auto fut = managed_group.template orderedQuery<0>({}, str);
+    auto fut = managed_group.template orderedQuery<test1_str,0>({}, str);
     auto& rmap = fut.get();
     cout << "Obtained a reply map" << endl;
     for (auto it = rmap.begin(); it != rmap.end(); ++it) {
       try {
-	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
+    	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
       }
       catch (const std::exception &e) {
-	cout << e.what() << endl;
+    	cout << e.what() << endl;
       }
     }
     
-    // int a = rmap.get(0);
-    // cout << "Reply from node 0: " << a << endl;
-    // int b = rmap.get(1);
-    // cout << "Reply from node 1: " << b << endl;
-    // auto fut = managed_group.template p2pQuery<0>(1 - node_rank, node_rank,
-    // index, buf, msg_size);
-
+    int a = rmap.get(0);
+    cout << "Reply from node 0: " << a << endl;
+    int b = rmap.get(1);
+    cout << "Reply from node 1: " << b << endl;
+	
     cout << "Done" << endl;
-
-    while (true) {
-
-    }
-    // cout << "Obtained value: " << fut.get(0) << endl;
-    // cout << "Obtained value: " << fut.get(1) << endl;
-    // cout << "Obtained value: " << fut.get(1 - node_rank) << endl;
 }

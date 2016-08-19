@@ -8,19 +8,22 @@
 #include "../rdmc/microbenchmarks.h"
 #include "../rdmc/group_send.h"
 
-void initialize(uint32_t &node_rank, uint32_t &num_nodes) {
-    map<uint32_t, std::string> node_addresses;
+bool initialize (uint32_t &node_rank, uint32_t &num_nodes) {
+  map<uint32_t, std::string> node_addresses;
 
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
 
-    // initialize RDMA resources, input number of nodes, node rank and ip
-    // addresses and create TCP connections
-    rdmc::initialize(node_addresses, node_rank);
+  // initialize RDMA resources, input number of nodes, node rank and ip addresses and create TCP connections
+  if (!rdmc::initialize(node_addresses, node_rank)) {
+    return false;
+  }
 
-    // initialize tcp connections
-    sst::tcp::tcp_initialize(node_rank, node_addresses);
+  // initialize tcp connections
+  sst::tcp::tcp_initialize(node_rank, node_addresses);
+  
+  // initialize the rdma resources
+  sst::verbs_initialize();
 
-    // initialize the rdma resources
-    sst::verbs_initialize();
+  return true;
 }

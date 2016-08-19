@@ -144,7 +144,7 @@ struct MessageTrackingRow {
  * send
  * template parameter is the maximum possible group size - used for the GMS SST
  * row-struct */
-template <unsigned int N, typename handlersType>
+template <unsigned int N, typename dispatcherType>
 class DerechoGroup {
 private:
     /** vector of member id's */
@@ -163,13 +163,15 @@ private:
     const rdmc::send_algorithm type;
     const unsigned int window_size;
     const CallbackSet callbacks;
-    handlersType group_handlers;
+    dispatcherType dispatchers;
     tcp::all_tcp_connections connections;
     std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
     std::list<std::unique_ptr<PendingBase>> fulfilledList;
     std::mutex pending_results_mutex;
     /** Offset to add to member ranks to form RDMC group numbers. */
     const uint16_t rdmc_group_num_offset;
+    /** false if RDMC groups haven't been created successfully */
+    bool rdmc_groups_created = false;
     unsigned int total_message_buffers;
     /** Stores message buffers not currently in use. Protected by
      * msg_state_mtx */
@@ -238,14 +240,14 @@ private:
     void check_failures_loop();
 
     std::function<void(persistence::message)> make_file_written_callback();
-    void create_rdmc_groups();
+    bool create_rdmc_groups();
     void initialize_sst_row();
     void register_predicates();
 
     void deliver_message(Message &msg);
-    template <unsigned long long tag, typename... Args>
-    auto derechoCallerSend(const vector<node_id_t>& nodes, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
+    auto derechoCallerSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto tcpSend(node_id_t dest_node, Args&&... args);
     // private get_position - used for cooked send
     char* get_position(long long unsigned int payload_size, bool cooked_send,
@@ -259,8 +261,9 @@ public:
         std::vector<MessageBuffer>& free_message_buffers,
         long long unsigned int _max_payload_size,
         CallbackSet _callbacks,
-        handlersType _group_handlers, long long unsigned int _block_size,
+        dispatcherType _dispatchers, long long unsigned int _block_size,
         std::map<node_id_t, std::string> ip_addrs,
+        std::vector<bool> already_failed = {},
         std::string filename = std::string(),
         unsigned int _window_size = 3, unsigned int timeout_ms = 1,
         rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
@@ -271,7 +274,7 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-        uint32_t port = 12487);
+        std::vector<bool> already_failed = {}, uint32_t port = 12487);
     ~DerechoGroup();
 
     void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);
@@ -282,17 +285,25 @@ public:
      * This still allows making multiple send calls without acknowledgement; at a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
     bool send();
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
+    void orderedSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
+    void orderedSend(char* buf, Args&&... args);
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
+    auto orderedQuery(const vector<node_id_t>& nodes, char* buf, Args&&... args);
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
+    auto orderedQuery(char* buf, Args&&... args);
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     void p2pSend(node_id_t dest_node, Args&&... args);
-    template <unsigned long long tag, typename... Args>
+    template <typename IdClass, unsigned long long tag, typename... Args>
     auto p2pQuery(node_id_t dest_node, Args&&... args);
     void rpc_process_loop();
     void set_exceptions_for_removed_nodes(

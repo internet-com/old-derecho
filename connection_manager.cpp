@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <cassert>
+#include <set>
 
 namespace tcp {
 bool all_tcp_connections::add_connection(const node_id_t my_id,
@@ -58,7 +59,7 @@ bool all_tcp_connections::add_connection(const node_id_t my_id,
 void all_tcp_connections::establish_node_connections(
     const node_id_t my_id, const std::map<node_id_t, ip_addr_t>& ip_addrs) {
     conn_listener = std::make_unique<connection_listener>(port);
-    
+
     for(auto it = ip_addrs.begin(); it != ip_addrs.end(); it++) {
         if(it->first != my_id) {
             if(!add_connection(my_id, it->first, it->second)) {

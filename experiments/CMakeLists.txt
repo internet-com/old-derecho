@@ -25,7 +25,7 @@ target_link_libraries(derecho_bw_test derecho)
 
 include_directories("../mutils" "../mutils-serialization")
 # derecho_caller_test
-add_executable(derecho_caller_test derecho_caller_test.cpp block_size.cpp initialize.cpp)
+add_executable(derecho_caller_test derecho_caller_test.cpp block_size.cpp)
 target_link_libraries(derecho_caller_test derecho mutils mutils-serialization)
 
 # raw_send_test
