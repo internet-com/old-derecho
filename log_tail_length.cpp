@@ -4,8 +4,6 @@
  * Derecho log file, from the provided message number to the end. Since message
  * numbers are a tuple (view_id, sender, index), the message number is provided
  * as three (whitespace-separated) input arguments.
- * @date Aug 1, 2016
- * @author edward
  */
 
 #include <iostream>

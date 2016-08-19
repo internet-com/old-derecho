@@ -4,8 +4,6 @@
  * and creates a serialized View file (readable by ManagedGroup) containing the
  * equivalent data. Basically the inverse of parse_state_file.
  *
- * @date Aug 1, 2016
- * @author edward
  */
 
 #include <iostream>

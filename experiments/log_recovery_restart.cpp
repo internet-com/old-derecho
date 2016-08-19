@@ -1,10 +1,3 @@
-/**
- * @file log_recovery_restart.cpp
- *
- * @date Aug 5, 2016
- * @author edward
- */
-
 #include <stddef.h>
 #include <cstdint>
 #include <cstdlib>

@@ -1,14 +1,8 @@
-/*
- * view.cpp
- *
- *  Created on: Apr 15, 2016
- *      Author: edward
- */
-
 #include <memory>
-#include <string>
 #include <iostream>
+#include <iterator>
 #include <sstream>
+#include <string>
 
 #include "view.h"
 

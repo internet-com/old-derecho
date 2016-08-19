@@ -1,10 +1,3 @@
-/*
- * gms_test.cpp
- *
- *  Created on: Apr 26, 2016
- *      Author: edward
- */
-
 #include <iostream>
 #include <string>
 #include <cstdlib>

@@ -4,8 +4,6 @@
  * file" (saved by ManagedGroup during execution) and prints out its fields to
  * stdout, each on its own line. This allows Bash utilities to easily read
  * saved state files.
- * @date Jul 11, 2016
- * @author edward
  */
 
 #include <iostream>

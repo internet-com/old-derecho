@@ -25,7 +25,7 @@
 #include "derecho_group.h"
 #include "derecho_row.h"
 #include "persistence.h"
-#include "serialization/SerializationSupport.hpp"
+#include "mutils-serialization/SerializationSupport.hpp"
 #include "sst/sst.h"
 #include "view.h"
 
@@ -163,7 +163,7 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
       thread_shutdown(false),
       view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
       view_upcalls(_view_upcalls) {
-    auto last_view = load_view(view_file_name);
+    auto last_view = load_view<handlersType>(view_file_name);
     //    for(std::vector<node_id_t>::size_type rank = 0; rank < last_view->members.size(); rank++) {
     //        member_ips_by_id.insert({last_view->members[rank], last_view->member_ips[rank]});
     //    }
@@ -260,7 +260,7 @@ void ManagedGroup<handlersType>::create_threads() {
     client_listener_thread = std::thread{[this]() {
         while(!thread_shutdown) {
             tcp::socket client_socket = server_socket.accept();
-            debug_log().log_event(std::stringstream() << "Background thread got a client connection from " << client_socket.remote_ip);
+	    util::debug_log().log_event(std::stringstream() << "Background thread got a client connection from " << client_socket.remote_ip);
             pending_joins.locked().access.emplace_back(std::move(client_socket));
         }
         cout << "Connection listener thread shutting down." << endl;
@@ -571,15 +571,15 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
                             const std::string& filename,
                             const unsigned int _window_size,
                             const rdmc::send_algorithm& _type) {
-    curr_view->gmsSST =  make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
-            curr_view->members, curr_view->members[curr_view->my_rank],
-            [this](const uint32_t node_id) { report_failure(node_id); }, curr_view->failed);
+    curr_view->gmsSST = std::make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
+        curr_view->members, curr_view->members[curr_view->my_rank],
+        [this](const uint32_t node_id) { report_failure(node_id); }, curr_view->failed);
     for(int r = 0; r < curr_view->num_members; ++r) {
         gmssst::init((*curr_view->gmsSST)[r]);
     }
     gmssst::set((*curr_view->gmsSST)[curr_view->my_rank].vid, curr_view->vid);
 
-    curr_view->rdmc_sending_group = make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
+    curr_view->rdmc_sending_group = std::make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
         curr_view->gmsSST, message_buffers, _max_payload_size,
         stability_callbacks, std::move(group_handlers), _block_size,
@@ -600,10 +600,10 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& new
     //
     //    std::map<node_id_t, ip_addr> new_member_map {{newView.members[newView.my_rank], newView.member_ips[newView.my_rank]}, {newView.members.back(), newView.member_ips.back()}};
     //    sst::tcp::tcp_initialize(newView.members[newView.my_rank], new_member_map);
-    newView.gmsSST = make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
+    newView.gmsSST = std::make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
         newView.members, newView.members[newView.my_rank],
         [this](const uint32_t node_id) { report_failure(node_id); }, newView.failed);
-    newView.rdmc_sending_group = make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
+    newView.rdmc_sending_group = std::make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
         std::move(*curr_view->rdmc_sending_group),
         get_member_ips_map(newView.members, newView.failed), newView.failed);
@@ -758,7 +758,7 @@ void ManagedGroup<handlersType>::deliver_in_order(const View<handlersType>& Vc, 
                          std::string(" ");
         max_received_indices[n] = (*Vc.gmsSST)[Leader].globalMin[n];
     }
-    debug_log().log_event("Delivering ragged-edge messages in order: " +
+    util::debug_log().log_event("Delivering ragged-edge messages in order: " +
                           deliveryOrder);
     //    std::cout << "Delivery Order (View " << Vc.vid << ") {" <<
     //    deliveryOrder << std::string("}") << std::endl;
@@ -767,13 +767,14 @@ void ManagedGroup<handlersType>::deliver_in_order(const View<handlersType>& Vc, 
 
 template <typename handlersType>
 void ManagedGroup<handlersType>::ragged_edge_cleanup(View<handlersType>& Vc) {
-    debug_log().log_event("Running RaggedEdgeCleanup");
+    util::debug_log().log_event(
+        "Running RaggedEdgeCleanup");
     if(Vc.IAmLeader()) {
         leader_ragged_edge_cleanup(Vc);
     } else {
         follower_ragged_edge_cleanup(Vc);
     }
-    debug_log().log_event("Done with RaggedEdgeCleanup");
+    util::debug_log().log_event("Done with RaggedEdgeCleanup");
 }
 
 template <typename handlersType>
@@ -802,7 +803,7 @@ void ManagedGroup<handlersType>::leader_ragged_edge_cleanup(View<handlersType>& 
         }
     }
 
-    debug_log().log_event("Leader finished computing globalMin");
+    util::debug_log().log_event("Leader finished computing globalMin");
     gmssst::set((*Vc.gmsSST)[myRank].globalMinReady, true);
     Vc.gmsSST->put();
 
@@ -813,7 +814,7 @@ template <typename handlersType>
 void ManagedGroup<handlersType>::follower_ragged_edge_cleanup(View<handlersType>& Vc) {
     int myRank = Vc.my_rank;
     // Learn the leader's data and push it before acting upon it
-    debug_log().log_event("Received leader's globalMin; echoing it");
+    util::debug_log().log_event("Received leader's globalMin; echoing it");
     int Leader = Vc.rank_of_leader();
     gmssst::set((*Vc.gmsSST)[myRank].globalMin, (*Vc.gmsSST)[Leader].globalMin,
                 Vc.num_members);
@@ -959,8 +960,8 @@ void ManagedGroup<handlersType>::debug_print_status() const {
 
 template <typename handlersType>
 void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
-    for(size_t i = 0; i < debug_log().curr_event; ++i) {
-        output_dest << debug_log().times[i] << "," << debug_log().events[i]
+    for(size_t i = 0; i < util::debug_log().curr_event; ++i) {
+        output_dest << util::debug_log().times[i] << "," << util::debug_log().events[i]
                     << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]]
                     << endl;
     }

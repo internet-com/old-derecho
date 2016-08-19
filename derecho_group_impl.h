@@ -336,8 +336,8 @@ bool DerechoGroup<N, dispatchersType>::create_rdmc_groups() {
             // In the group in which this node is the sender, we need to signal the writer thread
             // to continue when we see that one of our messages was delivered.
             if(!rdmc::create_group(
-                   i + rdmc_group_num_offset, rotated_members, block_size, type,
-                   [this, i](size_t length) -> rdmc::receive_destination {
+                   groupnum + rdmc_group_num_offset, rotated_members, block_size, type,
+                   [this, groupnum](size_t length) -> rdmc::receive_destination {
                        assert(false);
                        return {nullptr, 0};
                    },
@@ -347,21 +347,21 @@ bool DerechoGroup<N, dispatchersType>::create_rdmc_groups() {
             }
         } else {
             if(!rdmc::create_group(
-                   i + rdmc_group_num_offset, rotated_members, block_size, type,
-                   [this, i](size_t length) -> rdmc::receive_destination {
+                   groupnum + rdmc_group_num_offset, rotated_members, block_size, type,
+                   [this, groupnum](size_t length) -> rdmc::receive_destination {
                        lock_guard<mutex> lock(msg_state_mtx);
                        assert(!free_message_buffers.empty());
 
                        Message msg;
-                       msg.sender_rank = i;
-                       msg.index = (*sst)[member_index].nReceived[i] + 1;
+                       msg.sender_rank = groupnum;
+                       msg.index = (*sst)[member_index].nReceived[groupnum] + groupnum;
                        msg.size = length;
                        msg.message_buffer =
                            std::move(free_message_buffers.back());
                        free_message_buffers.pop_back();
 
                        rdmc::receive_destination ret{msg.message_buffer.mr, 0};
-                       auto sequence_number = msg.index * num_members + i;
+                       auto sequence_number = msg.index * num_members + groupnum;
                        current_receives[sequence_number] = std::move(msg);
 
                        assert(ret.mr->buffer != nullptr);

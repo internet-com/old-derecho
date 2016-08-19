@@ -4,9 +4,6 @@
  * one member exit prematurely while the others keep sending. The "crashed"
  * member should then run log_recovery_restart after running the recovery
  * helper script.
- *
- * @date Aug 2, 2016
- * @author edward
  */
 
 #include <stddef.h>

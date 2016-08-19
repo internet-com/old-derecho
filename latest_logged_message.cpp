@@ -5,8 +5,6 @@
  * least confusing way to print the message number is the tuple (view_id,
  * sender, index). This is printed without the parentheses or comma for ease
  * of parsing by bash scripts.
- * @date Jul 11, 2016
- * @author edward
  */
 
 #include <iostream>

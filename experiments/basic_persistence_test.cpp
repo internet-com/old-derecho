@@ -1,9 +1,3 @@
-/**
- * @file basic_persistence_test.cpp
- *
- * @date Jun 7, 2016
- * @author: edward
- */
 #include "../derecho_group.h"
 #include "../managed_group.h"
 #include "../rdmc/util.h"

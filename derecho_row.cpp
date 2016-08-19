@@ -1,10 +1,3 @@
-/*
- * derecho_row.cpp
- *
- *  Created on: Apr 27, 2016
- *      Author: edward
- */
-
 #include "derecho_row.h"
 #include <cstring>
 #include <atomic>

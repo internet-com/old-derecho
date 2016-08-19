@@ -1,10 +1,3 @@
-/*
- * local_filewriter_test.cpp
- *
- *  Created on: Jun 10, 2016
- *      Author: edward
- */
-
 #include <iostream>
 #include <memory>
 #include <string>

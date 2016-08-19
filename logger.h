@@ -1,10 +1,3 @@
-/**
- * @file logger.h
- *
- * @date May 3, 2016
- * @author edward
- */
-
 #pragma once
 
 #include <chrono>

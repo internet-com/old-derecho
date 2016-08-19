@@ -1,8 +1,6 @@
 /**
  * @file view.h
  * @brief: Contains the definition of the View class
- * @date: Apr 14, 2016
- * @author: Edward
  */
 
 #pragma once
@@ -16,8 +14,8 @@
 #include "derecho_group.h"
 #include "sst/sst.h"
 #include "derecho_row.h"
-#include "serialization/SerializationMacros.hpp"
-#include "serialization/SerializationSupport.hpp"
+#include "mutils-serialization/SerializationMacros.hpp"
+#include "mutils-serialization/SerializationSupport.hpp"
 #include "max_members.h"
 
 namespace derecho {
