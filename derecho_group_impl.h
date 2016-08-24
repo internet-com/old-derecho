@@ -102,7 +102,16 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     deliveryBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
 
     initialize_sst_row();
-    if(!already_failed.size()) {
+    bool no_member_failed = true;
+    if(already_failed.size()) {
+        for(int i = 0; i < num_members; ++i) {
+	  if (already_failed[i]) {
+	    no_member_failed = false;
+	    break;
+	  }
+        }
+    }
+    if(!already_failed.size() || no_member_failed) {
         // if groups are created successfully, rdmc_groups_created will be set
         // to true
         rdmc_groups_created = create_rdmc_groups();

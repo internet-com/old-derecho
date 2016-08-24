@@ -22,6 +22,25 @@ using std::endl;
 
 using namespace derecho;
 
+int count = 0;
+
+struct test1_str {
+    int test1(string str) {
+        cout << str << endl;
+        count++;
+        if(count == 2) {
+            cout << "Exiting" << endl;
+            exit(0);
+        }
+        return 19954;
+    }
+
+    template <typename Dispatcher>
+    auto register_functions(Dispatcher &d) {
+        return d.register_functions(this, &test1_str::test1);
+    }
+};
+
 int main(int argc, char *argv[]) {
     srand(time(NULL));
 
@@ -43,7 +62,7 @@ int main(int argc, char *argv[]) {
     long long unsigned int block_size = get_block_size(max_msg_size);
     int num_senders_selector = atoi(argv[2]);
     int num_messages = 1000;
-    max_msg_size -= 8;
+    max_msg_size -= 16;
 
     bool done = false;
     auto stability_callback = [
@@ -54,8 +73,8 @@ int main(int argc, char *argv[]) {
         num_last_received = 0u
     ](int sender_id, long long int index, char *buf,
       long long int msg_size) mutable {
-        // cout << "In stability callback; sender = " << sender_id << ", index =
-        // " << index << endl;
+        cout << "In stability callback; sender = " << sender_id
+             << ", index = " << index << endl;
         if(num_senders_selector == 0) {
             if(index == num_messages - 1 && sender_id == (int)num_nodes - 1) {
                 done = true;
@@ -74,9 +93,11 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    derecho::ManagedGroup managed_group(
+    Dispatcher<test1_str> group_handlers(node_rank, std::make_tuple());
+    derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
-        derecho::CallbackSet{stability_callback, nullptr}, block_size);
+        derecho::CallbackSet{stability_callback, nullptr},
+        std::move(group_handlers), {}, block_size);
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
 
@@ -88,23 +109,15 @@ int main(int argc, char *argv[]) {
         cout << id << " ";
     }
     cout << endl;
-    // int n;
-    // std::cin >> n;
-
-    // std::shared_ptr<sst::SST<DerechoRow<MAX_GROUP_SIZE>, sst::Mode::Writes>>
-    // derecho_sst =
-    //           std::make_shared<sst::SST<DerechoRow<8>,
-    //           sst::Mode::Writes>>(members, node_rank);
-    //   vector<derecho::MessageBuffer> free_message_buffers;
-    //   DerechoGroup<MAX_GROUP_SIZE> g (members, node_rank, derecho_sst,
-    //   free_message_buffers, msg_size, stability_callback, block_size);
 
     auto send_all = [&]() {
         for(int i = 0; i < num_messages; ++i) {
+            cout << "Asking for a buffer" << endl;
             char *buf = managed_group.get_sendbuffer_ptr(max_msg_size);
             while(!buf) {
                 buf = managed_group.get_sendbuffer_ptr(max_msg_size);
             }
+            cout << "Obtained a buffer, sending" << endl;	    
             managed_group.send();
         }
     };
