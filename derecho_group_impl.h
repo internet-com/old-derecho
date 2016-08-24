@@ -363,7 +363,7 @@ bool DerechoGroup<N, dispatchersType>::create_rdmc_groups() {
 
                        Message msg;
                        msg.sender_rank = groupnum;
-                       msg.index = (*sst)[member_index].nReceived[groupnum] + groupnum;
+                       msg.index = (*sst)[member_index].nReceived[groupnum] + 1;
                        msg.size = length;
                        msg.message_buffer =
                            std::move(free_message_buffers.back());
