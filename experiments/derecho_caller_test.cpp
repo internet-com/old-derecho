@@ -28,22 +28,24 @@ uint32_t num_nodes;
 
 int count = 0;
 
-struct test1_str{
-	int test1 (string str) {
-		cout << str << endl;
-		count++;
-		if (node_rank == 3 && count == 2) {
-			cout << "Exiting" << endl;
-			exit(0);
-		}
-		return 19954;
-	}
-	
-	template<typename Dispatcher>
-	auto register_functions(Dispatcher &d){
-		return d.register_functions(
-			this, &test1_str::test1);
-	}
+struct test1_str {
+    int state;
+    int read_state(bool t) {
+        cout << "Returning state, it is: " << state << endl;
+        return state;
+    }
+    bool change_state(int new_state) {
+        cout << "Previous state was: " << state << endl;
+        state = new_state;
+        cout << "Current state is: " << state << endl;
+        return true;
+    }
+
+    template <typename Dispatcher>
+    auto register_functions(Dispatcher &d) {
+        return d.register_functions(this, &test1_str::read_state,
+                                    &test1_str::change_state);
+    }
 };
 
 int main(int argc, char *argv[]) {
@@ -65,16 +67,16 @@ int main(int argc, char *argv[]) {
     long long unsigned int block_size = get_block_size(max_msg_size);
     // int num_messages = 10;
 
-    auto stability_callback =
-        [](int sender_id, long long int index, char *buf,
-           long long int msg_size) {};
-	
-	Dispatcher<test1_str> group_handlers(node_rank,std::make_tuple());
+    auto stability_callback = [](int sender_id, long long int index, char *buf,
+                                 long long int msg_size) {};
+
+    Dispatcher<test1_str> group_handlers(node_rank, std::make_tuple());
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
         GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
         {stability_callback, {}}, std::move(group_handlers),
-        {[](vector<derecho::node_id_t> new_members, vector<derecho::node_id_t> old_members) {
+        {[](vector<derecho::node_id_t> new_members,
+            vector<derecho::node_id_t> old_members) {
             cout << "New members are : " << endl;
             for(auto n : new_members) {
                 cout << n << " ";
@@ -85,10 +87,26 @@ int main(int argc, char *argv[]) {
                 cout << o << " ";
             }
             cout << endl;
-	  }},
+        }},
         block_size);
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
+
+    // // other nodes (first two) change each other's state
+    // if (node_rank != 2) {
+    //   cout << "Changing each other's state to 35" << endl;
+    //   auto fut = managed_group.template orderedQuery<test1_str, 0>({}, 35);
+    //   auto &rmap = fut.get();
+    //   cout << "Obtained a reply map" << endl;
+    //   for(auto it = rmap.begin(); it != rmap.end(); ++it) {
+    //       try {
+    //           cout << "Reply from node " << it->first << ": "
+    //                << it->second.get() << endl;
+    //       } catch(const std::exception &e) {
+    //           cout << e.what() << endl;
+    //       }
+    //   }
+    // }
 
     while(managed_group.get_members().size() < num_nodes) {
     }
@@ -99,23 +117,23 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-    string str = "Here is a message";
-    auto fut = managed_group.template orderedQuery<test1_str,0>({}, str);
-    auto& rmap = fut.get();
-    cout << "Obtained a reply map" << endl;
-    for (auto it = rmap.begin(); it != rmap.end(); ++it) {
-      try {
-    	cout << "Reply from node " << it->first << ": " << it->second.get() << endl;
-      }
-      catch (const std::exception &e) {
-    	cout << e.what() << endl;
-      }
-    }
-    
-    int a = rmap.get(0);
-    cout << "Reply from node 0: " << a << endl;
-    int b = rmap.get(1);
-    cout << "Reply from node 1: " << b << endl;
-	
+    // // all members verify node 2's state
+    // cout << "Reading everyone's state" << endl;
+    // auto fut = managed_group.template orderedQuery<test1_str, 0>({}, true);
+    // auto &rmap = fut.get();
+    // cout << "Obtained a reply map" << endl;
+    // for(auto it = rmap.begin(); it != rmap.end(); ++it) {
+    //     try {
+    //         cout << "Reply from node " << it->first << ": " <<
+    //         it->second.get()
+    //              << endl;
+    //     } catch(const std::exception &e) {
+    //         cout << e.what() << endl;
+    //     }
+    // }
     cout << "Done" << endl;
+    cout << "Reached here" << endl;
+    // wait forever
+    while(true) {
+    }
 }
