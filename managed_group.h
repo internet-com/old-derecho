@@ -121,6 +121,7 @@ private:
      *  in the process of transitioning to a new view. */
     std::unique_ptr<View<handlersType>> next_view;
 
+    handlersType group_handlers;
     std::vector<view_upcall_t> view_upcalls;
 
     /** Sends a joining node the new view that has been constructed to include it.*/
@@ -158,7 +159,6 @@ private:
     void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers,
                             const long long unsigned int _max_payload_size,
                             const CallbackSet& stability_callbacks,
-                            handlersType group_handlers,
                             const long long unsigned int _block_size,
                             const std::string& filename,
                             const unsigned int _window_size,
@@ -187,7 +187,7 @@ public:
                  const node_id_t leader_id,
                  const long long unsigned int _max_payload_size,
                  const CallbackSet stability_callbacks,
-                 handlersType group_handlers,
+                 handlersType _group_handlers,
                  std::vector<view_upcall_t> _view_upcalls,
                  const long long unsigned int _block_size,
                  std::string filename = std::string(),
@@ -221,7 +221,7 @@ public:
                  const node_id_t my_id,
                  const long long unsigned int _max_payload_size,
                  const CallbackSet stability_callbacks,
-                 handlersType group_handlers,
+                 handlersType _group_handlers,
                  std::vector<view_upcall_t> _view_upcalls,
                  const long long unsigned int _block_size,
                  const unsigned int _window_size = 3,
@@ -240,7 +240,7 @@ public:
      * buffer. The returned pointer can be used to write a message into the
      * buffer. (Analogous to DerechoGroup::get_position) */
     char* get_sendbuffer_ptr(long long unsigned int payload_size,
-                             int pause_sending_turns = 0);
+                             int pause_sending_turns = 0, bool cooked_send = false);
     /** Instructs the managed DerechoGroup to send the next message. This
      * returns immediately; the send is scheduled to happen some time in the future. */
     void send();

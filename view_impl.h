@@ -20,7 +20,7 @@ View<handlersType>::View(int num_members)
     : vid(0),
       members(num_members),
       member_ips(num_members),
-      failed(num_members),
+      failed(num_members, 0),
       nFailed(0),
       who(nullptr),
       num_members(num_members),
@@ -32,7 +32,7 @@ template <typename handlersType>
 void View<handlersType>::init_vectors() {
     members.resize(num_members);
     member_ips.resize(num_members);
-    failed.resize(num_members);
+    failed.resize(num_members, 0);
 }
 
 template <typename handlersType>

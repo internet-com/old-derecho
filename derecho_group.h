@@ -47,12 +47,12 @@ struct __attribute__((__packed__)) header {
 
 class PendingBase {
 public:
-  virtual void fulfill_map(const std::vector<node_id_t>&) {
-    assert(false);
-  }
-  virtual void set_exception_for_removed_node(const node_id_t&) {
-    assert(false);
-  }
+    virtual void fulfill_map(const std::vector<node_id_t>&) {
+        assert(false);
+    }
+    virtual void set_exception_for_removed_node(const node_id_t&) {
+        assert(false);
+    }
 };
 
 template <class Ret>
@@ -75,7 +75,7 @@ public:
 
 template <class T>
 auto createPending(PendingResults<T>& pending) {
-  return std::make_unique<Pending<T>>(pending);
+    return std::make_unique<Pending<T>>(pending);
 };
 
 /**
@@ -95,10 +95,10 @@ struct MessageBuffer {
             mr = std::make_shared<rdma::memory_region>(buffer.get(), size);
         }
     }
-    MessageBuffer(const MessageBuffer &) = delete;
-    MessageBuffer(MessageBuffer &&) = default;
-    MessageBuffer &operator=(const MessageBuffer &) = delete;
-    MessageBuffer &operator=(MessageBuffer &&) = default;
+    MessageBuffer(const MessageBuffer&) = delete;
+    MessageBuffer(MessageBuffer&&) = default;
+    MessageBuffer& operator=(const MessageBuffer&) = delete;
+    MessageBuffer& operator=(MessageBuffer&&) = default;
 };
 
 struct Message {
@@ -138,7 +138,6 @@ struct MessageTrackingRow {
      * at least stable_num. */
     long long int delivered_num;
 };
-
 
 /** combines sst and rdmc to give an abstraction of a group where anyone can
  * send
@@ -244,14 +243,12 @@ private:
     void initialize_sst_row();
     void register_predicates();
 
-    void deliver_message(Message &msg);
+    void deliver_message(Message& msg);
     template <typename IdClass, unsigned long long tag, typename... Args>
     auto derechoCallerSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     auto tcpSend(node_id_t dest_node, Args&&... args);
     // private get_position - used for cooked send
-    char* get_position(long long unsigned int payload_size, bool cooked_send,
-                       int pause_sending_turns = 0);
 
 public:
     // the constructor - takes the list of members, send parameters (block size, buffer size), K0 and K1 callbacks
@@ -280,7 +277,7 @@ public:
     void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);
     /** get a pointer into the buffer, to write data into it before sending */
     char* get_position(long long unsigned int payload_size,
-                       int pause_sending_turns = 0);
+                       int pause_sending_turns = 0, bool cooked_send = false);
     /** Note that get_position and send are called one after the another - regexp for using the two is (get_position.send)*
      * This still allows making multiple send calls without acknowledgement; at a single point in time, however,
      * there is only one message per sender in the RDMC pipeline */
@@ -288,23 +285,16 @@ public:
     template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
-    void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(char* buf, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
-    void orderedSend(Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
-    auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(char* buf, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
-    auto orderedQuery(Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     void p2pSend(node_id_t dest_node, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     auto p2pQuery(node_id_t dest_node, Args&&... args);
+    void send_objects(tcp::socket& new_member_socket);
     void rpc_process_loop();
     void set_exceptions_for_removed_nodes(
         std::vector<node_id_t> removed_members);

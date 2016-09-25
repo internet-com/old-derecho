@@ -114,8 +114,7 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     if(!already_failed.size() || no_member_failed) {
         // if groups are created successfully, rdmc_groups_created will be set
         // to true
-        std::cout << "Going to create the RDMC groups" << std::endl;
-        rdmc_groups_created = create_rdmc_groups();
+      rdmc_groups_created = create_rdmc_groups();
     }
     register_predicates();
     sender_thread = std::thread(&DerechoGroup::send_loop, this);
@@ -217,13 +216,22 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     if(file_writer) {
         file_writer->set_message_written_upcall(make_file_written_callback());
     }
-    for(auto &entry : old_group.non_persistent_messages) {
+    for(auto& entry : old_group.non_persistent_messages) {
         non_persistent_messages.emplace(entry.first,
                                         convert_msg(entry.second));
     }
     old_group.non_persistent_messages.clear();
     initialize_sst_row();
-    if(!already_failed.size()) {
+    bool no_member_failed = true;
+    if(already_failed.size()) {
+        for(int i = 0; i < num_members; ++i) {
+            if(already_failed[i]) {
+                no_member_failed = false;
+                break;
+            }
+        }
+    }
+    if(!already_failed.size() || no_member_failed) {
         // if groups are created successfully, rdmc_groups_created will be set
         // to true
         rdmc_groups_created = create_rdmc_groups();
@@ -568,7 +576,7 @@ void DerechoGroup<N, dispatchersType>::register_predicates() {
         }
         return true;
     };
-    auto sender_trig = [this](sst::SST<DerechoRow<N>, sst::Mode::Writes> &sst) {
+    auto sender_trig = [this](sst::SST<DerechoRow<N>, sst::Mode::Writes> & sst) {
         sender_cv.notify_all();
         next_message_to_deliver++;
     };
@@ -614,10 +622,10 @@ void DerechoGroup<N, dispatchersType>::wedge() {
     }
 
     if(rpc_thread.joinable()) {
-      rpc_thread.join();
+        rpc_thread.join();
     }
     connections.destroy();
-    
+
     sender_cv.notify_all();
     if(sender_thread.joinable()) {
         sender_thread.join();
@@ -704,8 +712,8 @@ char* DerechoGroup<N, dispatchersType>::get_position(
     }
     long long unsigned int msg_size = payload_size + sizeof(header);
     // payload_size is 0 when max_msg_size is desired, useful for ordered send/query
-    if (!payload_size) {
-      msg_size = max_msg_size;
+    if(!payload_size) {
+        msg_size = max_msg_size;
     }
     if(msg_size > max_msg_size) {
         cout << "Can't send messages of size larger than the maximum message "
@@ -787,77 +795,40 @@ auto DerechoGroup<N, dispatchersType>::derechoCallerSend(
 template <unsigned int N, typename dispatchersType>
 template <typename IDClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(const vector<node_id_t>& nodes,
-                                                char* buf, Args&&... args) {
-    derechoCallerSend<IDClass,tag>(nodes, buf, std::forward<Args>(args)...);
-}
-
-// this should be called by the client directly using DerechoGroup without a GMS
-template <unsigned int N, typename dispatchersType>
-template <typename IdClass, unsigned long long tag, typename... Args>
-void DerechoGroup<N, dispatchersType>::orderedSend(const vector<node_id_t>& nodes,
-                                                Args&&... args) {
-    char* buf;
-    // 0 means max_msg_size
-    while((buf = get_position(0, 0, true)) == nullptr) {
-    }
-    derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
+                                                   char* buf, Args&&... args) {
+    derechoCallerSend<IDClass, tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::orderedSend(char* buf, Args&&... args) {
     // empty nodes means that the destination is the entire group
-    orderedSend<IdClass,tag>({}, buf, std::forward<Args>(args)...);
-}
-
-// this should be called by the client directly using DerechoGroup without a GMS
-template <unsigned int N, typename dispatchersType>
-template <typename IdClass, unsigned long long tag, typename... Args>
-void DerechoGroup<N, dispatchersType>::orderedSend(Args&&... args) {
-    // empty nodes means that the destination is the entire group
-    orderedSend<IdClass,tag>({}, std::forward<Args>(args)...);
+    orderedSend<IdClass, tag>({}, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(const vector<node_id_t>& nodes,
-                                                 char* buf, Args&&... args) {
-    return derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
-}
-
-template <unsigned int N, typename dispatchersType>
-template <typename IdClass, unsigned long long tag, typename... Args>
-auto DerechoGroup<N, dispatchersType>::orderedQuery(const vector<node_id_t>& nodes,
-                                                 Args&&... args) {
-    char* buf;
-    // 0 means max_msg_size
-    while((buf = get_position(0, 0, true)) == nullptr) {
-    }
-    return derechoCallerSend<IdClass,tag>(nodes, buf, std::forward<Args>(args)...);
+                                                    char* buf, Args&&... args) {
+    return derechoCallerSend<IdClass, tag>(nodes, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::orderedQuery(char* buf, Args&&... args) {
-    return orderedQuery<IdClass,tag>({}, buf, std::forward<Args>(args)...);
-}
-
-template <unsigned int N, typename dispatchersType>
-template <typename IdClass, unsigned long long tag, typename... Args>
-auto DerechoGroup<N, dispatchersType>::orderedQuery(Args&&... args) {
-    return orderedQuery<IdClass,tag>({}, std::forward<Args>(args)...);
+    return orderedQuery<IdClass, tag>({}, buf, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
-                                            Args&&... args) {
+                                               Args&&... args) {
     assert(dest_node != members[member_index]);
     // use dest_node
-    
+
     size_t size;
     auto max_payload_size = max_msg_size - sizeof(header);
-    auto return_pair = dispatchers.template Send<IdClass,tag>(
+    auto return_pair = dispatchers.template Send<IdClass, tag>(
         [this, &max_payload_size, &size](size_t _size) -> char* {
             size = _size;
             if(size <= max_payload_size) {
@@ -879,15 +850,20 @@ auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 void DerechoGroup<N, dispatchersType>::p2pSend(node_id_t dest_node,
-                                            Args&&... args) {
-    tcpSend<IdClass,tag>(dest_node, std::forward<Args>(args)...);
+                                               Args&&... args) {
+    tcpSend<IdClass, tag>(dest_node, std::forward<Args>(args)...);
 }
 
 template <unsigned int N, typename dispatchersType>
 template <typename IdClass, unsigned long long tag, typename... Args>
 auto DerechoGroup<N, dispatchersType>::p2pQuery(node_id_t dest_node,
-                                             Args&&... args) {
-    return tcpSend<IdClass,tag>(dest_node, std::forward<Args>(args)...);
+                                                Args&&... args) {
+    return tcpSend<IdClass, tag>(dest_node, std::forward<Args>(args)...);
+}
+
+template <unsigned int N, typename dispatchersType>
+void DerechoGroup<N, dispatchersType>::send_objects(tcp::socket& new_member_socket) {
+    dispatchers.send_objects(new_member_socket);
 }
 
 template <unsigned int N, typename dispatchersType>
@@ -897,7 +873,7 @@ void DerechoGroup<N, dispatchersType>::send_objects(tcp::socket &new_member_sock
 
 template <unsigned int N, typename dispatchersType>
 void DerechoGroup<N, dispatchersType>::rpc_process_loop() {
-	using namespace ::rpc::remote_invocation_utilities;
+    using namespace ::rpc::remote_invocation_utilities;
     const auto header_size = header_space();
     auto max_payload_size = max_msg_size - sizeof(header);
     std::unique_ptr<char[]> rpcBuffer =
@@ -912,7 +888,7 @@ void DerechoGroup<N, dispatchersType>::rpc_process_loop() {
         Opcode indx;
         Node_id received_from;
         retrieve_header(nullptr, rpcBuffer.get(), payload_size,
-                                        indx, received_from);
+                        indx, received_from);
         connections.tcp_read(other_id, rpcBuffer.get() + header_size,
                              payload_size);
         size_t reply_size = 0;
@@ -940,7 +916,7 @@ void DerechoGroup<N, dispatchersType>::set_exceptions_for_removed_nodes(
     std::lock_guard<std::mutex> lock(pending_results_mutex);
     for(auto& pending : fulfilledList) {
         for(auto removed_id : removed_members) {
-	  pending->set_exception_for_removed_node(removed_id);
+            pending->set_exception_for_removed_node(removed_id);
         }
     }
 }
