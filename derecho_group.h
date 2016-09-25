@@ -285,19 +285,11 @@ public:
     template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
-    void orderedSend(const vector<node_id_t>& nodes, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
     void orderedSend(char* buf, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
-    void orderedSend(Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(const vector<node_id_t>& nodes, char* buf, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
-    auto orderedQuery(const vector<node_id_t>& nodes, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
     auto orderedQuery(char* buf, Args&&... args);
-    template <typename IdClass, unsigned long long tag, typename... Args>
-    auto orderedQuery(Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>
     void p2pSend(node_id_t dest_node, Args&&... args);
     template <typename IdClass, unsigned long long tag, typename... Args>

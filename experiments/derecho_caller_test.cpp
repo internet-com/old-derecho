@@ -91,46 +91,40 @@ int main(int argc, char *argv[]) {
         block_size);
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
-
-    // // other nodes (first two) change each other's state
-    // if (node_rank != 2) {
-    //   cout << "Changing each other's state to 35" << endl;
-    //   auto fut = managed_group.template orderedQuery<test1_str, 0>({}, 35);
-    //   auto &rmap = fut.get();
-    //   cout << "Obtained a reply map" << endl;
-    //   for(auto it = rmap.begin(); it != rmap.end(); ++it) {
-    //       try {
-    //           cout << "Reply from node " << it->first << ": "
-    //                << it->second.get() << endl;
-    //       } catch(const std::exception &e) {
-    //           cout << e.what() << endl;
-    //       }
-    //   }
-    // }
+    
+    // other nodes (first two) change each other's state
+    if(node_rank != 2) {
+      cout << "Changing each other's state to 35" << endl;
+      auto fut = managed_group.template orderedQuery<test1_str, 0>({1-node_rank}, 35);
+      auto &rmap = fut.get();
+      cout << "Obtained a reply map" << endl;
+      for(auto it = rmap.begin(); it != rmap.end(); ++it) {
+	try {
+	  cout << "Reply from node " << it->first << ": "
+	       << it->second.get() << endl;
+	} catch(const std::exception &e) {
+	  cout << e.what() << endl;
+	}
+      }
+    }
 
     while(managed_group.get_members().size() < num_nodes) {
     }
-    auto members_order = managed_group.get_members();
-    cout << "The order of members is :" << endl;
-    for(auto id : members_order) {
-        cout << id << " ";
+    
+    // all members verify every node's state
+    cout << "Reading everyone's state" << endl;
+    auto fut = managed_group.template orderedQuery<test1_str, 0>({}, true);
+    auto &rmap = fut.get();
+    cout << "Obtained a reply map" << endl;
+    for(auto it = rmap.begin(); it != rmap.end(); ++it) {
+        try {
+            cout << "Reply from node " << it->first << ": " <<
+            it->second.get()
+                 << endl;
+        } catch(const std::exception &e) {
+            cout << e.what() << endl;
+        }
     }
-    cout << endl;
-
-    // // all members verify node 2's state
-    // cout << "Reading everyone's state" << endl;
-    // auto fut = managed_group.template orderedQuery<test1_str, 0>({}, true);
-    // auto &rmap = fut.get();
-    // cout << "Obtained a reply map" << endl;
-    // for(auto it = rmap.begin(); it != rmap.end(); ++it) {
-    //     try {
-    //         cout << "Reply from node " << it->first << ": " <<
-    //         it->second.get()
-    //              << endl;
-    //     } catch(const std::exception &e) {
-    //         cout << e.what() << endl;
-    //     }
-    // }
     cout << "Done" << endl;
     cout << "Reached here" << endl;
     // wait forever
