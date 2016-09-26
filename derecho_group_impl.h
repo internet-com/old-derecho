@@ -867,11 +867,6 @@ void DerechoGroup<N, dispatchersType>::send_objects(tcp::socket& new_member_sock
 }
 
 template <unsigned int N, typename dispatchersType>
-void DerechoGroup<N, dispatchersType>::send_objects(tcp::socket &new_member_socket) {
-  dispatchers.send_objects(new_member_socket);
-}
-
-template <unsigned int N, typename dispatchersType>
 void DerechoGroup<N, dispatchersType>::rpc_process_loop() {
     using namespace ::rpc::remote_invocation_utilities;
     const auto header_size = header_space();

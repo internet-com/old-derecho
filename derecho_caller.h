@@ -8,6 +8,8 @@
 #include <set>
 #include <tuple_extras.hpp>
 
+#include "sst/tcp.h"
+
 namespace rpc {
 
 template <typename t>
