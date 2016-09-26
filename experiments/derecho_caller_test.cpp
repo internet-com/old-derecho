@@ -19,6 +19,8 @@ using std::map;
 using std::string;
 using std::cout;
 using std::endl;
+using namespace std;
+using namespace mutils;
 
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
@@ -28,7 +30,7 @@ uint32_t num_nodes;
 
 int count = 0;
 
-struct test1_str {
+struct test1_str{
     int state;
     int read_state(bool t) {
         cout << "Returning state, it is: " << state << endl;
@@ -42,18 +44,31 @@ struct test1_str {
     }
 
     template <typename Dispatcher>
-    auto register_functions(Dispatcher &d) {
-        return d.register_functions(this, &test1_str::read_state,
+    auto register_functions(Dispatcher &d, std::unique_ptr<test1_str> *ptr) {
+      assert(this == ptr->get());
+        return d.register_functions(ptr, &test1_str::read_state,
                                     &test1_str::change_state);
     }
 };
+
+void output_result(auto& rmap) {
+    cout << "Obtained a reply map" << endl;
+    for(auto it = rmap.begin(); it != rmap.end(); ++it) {
+        try {
+            cout << "Reply from node " << it->first << ": " << it->second.get()
+                 << endl;
+        } catch(const std::exception &e) {
+            cout << e.what() << endl;
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
 
     uint32_t server_rank = 0;
 
-    map<uint32_t, std::string> node_addresses;
+    std::map<uint32_t, std::string> node_addresses;
 
     query_addresses(node_addresses, node_rank);
     num_nodes = node_addresses.size();
@@ -95,36 +110,16 @@ int main(int argc, char *argv[]) {
     // other nodes (first two) change each other's state
     if(node_rank != 2) {
       cout << "Changing each other's state to 35" << endl;
-      auto fut = managed_group.template orderedQuery<test1_str, 0>({1-node_rank}, 35);
-      auto &rmap = fut.get();
-      cout << "Obtained a reply map" << endl;
-      for(auto it = rmap.begin(); it != rmap.end(); ++it) {
-	try {
-	  cout << "Reply from node " << it->first << ": "
-	       << it->second.get() << endl;
-	} catch(const std::exception &e) {
-	  cout << e.what() << endl;
-	}
-      }
+      output_result(managed_group.template orderedQuery<test1_str, 0>({1-node_rank}, 35).get());
     }
-
+    
     while(managed_group.get_members().size() < num_nodes) {
     }
     
     // all members verify every node's state
     cout << "Reading everyone's state" << endl;
-    auto fut = managed_group.template orderedQuery<test1_str, 0>({}, true);
-    auto &rmap = fut.get();
-    cout << "Obtained a reply map" << endl;
-    for(auto it = rmap.begin(); it != rmap.end(); ++it) {
-        try {
-            cout << "Reply from node " << it->first << ": " <<
-            it->second.get()
-                 << endl;
-        } catch(const std::exception &e) {
-            cout << e.what() << endl;
-        }
-    }
+    output_result(managed_group.template orderedQuery<test1_str, 0>({}, true).get());
+    
     cout << "Done" << endl;
     cout << "Reached here" << endl;
     // wait forever

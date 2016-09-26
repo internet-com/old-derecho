@@ -48,74 +48,6 @@ using who_t = std::vector<Node_id>;
 template <FunctionTag, typename>
 struct RemoteInvocable;
 
-class LocalMessager {
-private:
-    LocalMessager() {}
-    using elem = std::pair<std::size_t, char const *const>;
-    using queue_t = std::queue<elem>;
-
-    std::shared_ptr<queue_t> _send;
-    std::shared_ptr<queue_t> _receive;
-    using l = std::unique_lock<std::mutex>;
-    std::shared_ptr<std::mutex> m_send;
-    std::shared_ptr<std::condition_variable> cv_send;
-    std::shared_ptr<std::mutex> m_receive;
-    std::shared_ptr<std::condition_variable> cv_receive;
-    LocalMessager(decltype(_send) &_send, decltype(_receive) &_receive,
-                  decltype(m_send) &m_send, decltype(cv_send) &cv_send,
-                  decltype(m_receive) &m_receive,
-                  decltype(cv_receive) &cv_receive)
-        : _send(_send),
-          _receive(_receive),
-          m_send(m_send),
-          cv_send(cv_send),
-          m_receive(m_receive),
-          cv_receive(cv_receive) {}
-
-public:
-    LocalMessager(const LocalMessager &) = default;
-    static std::map<Node_id, LocalMessager> send_to;
-
-    static LocalMessager init_pipe(const Node_id &source);
-
-    static LocalMessager get_send_to(const Node_id &source);
-
-    void send(std::size_t s, char const *const v) {
-        assert(((Opcode *)v)[0].id > 0);
-        l e{*m_send};
-        cv_send->notify_all();
-        assert(s);
-        _send->emplace(s, v);
-    }
-
-    elem receive() {
-        l e{*m_receive};
-        while(_receive->empty()) {
-            cv_receive->wait(e);
-        }
-        auto ret = _receive->front();
-        _receive->pop();
-        assert(((const Opcode *)ret.second)[0].id > 0);
-        return ret;
-    }
-};
-
-LocalMessager LocalMessager::get_send_to(const Node_id &source) {
-    assert(send_to.count(source));
-    return send_to.at(source);
-}
-LocalMessager LocalMessager::init_pipe(const Node_id &source) {
-    std::shared_ptr<queue_t> q1{new queue_t{}};
-    std::shared_ptr<queue_t> q2{new queue_t{}};
-    std::shared_ptr<std::mutex> m1{new std::mutex{}};
-    std::shared_ptr<std::condition_variable> cv1{new std::condition_variable{}};
-    std::shared_ptr<std::mutex> m2{new std::mutex{}};
-    std::shared_ptr<std::condition_variable> cv2{new std::condition_variable{}};
-    send_to.emplace(source, LocalMessager{q1, q2, m1, cv1, m2, cv2});
-    return LocalMessager{q2, q1, m2, cv2, m1, cv1};
-}
-std::map<Node_id, LocalMessager> LocalMessager::send_to;
-
 struct remote_exception_occurred : public std::exception {
     Node_id who;
     remote_exception_occurred(Node_id who) : who(who) {}
@@ -512,7 +444,7 @@ struct partial_wrapped {
 };
 
 template <typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
-auto wrap(NewClass *, const wrapped<opcode, std::function<Ret(Args...)> > &passthrough) {
+auto wrap(std::unique_ptr<NewClass> *, const wrapped<opcode, std::function<Ret(Args...)> > &passthrough) {
     return passthrough;
 }
 
@@ -522,8 +454,9 @@ auto wrap(const partial_wrapped<opcode, Ret, NewClass, Args...> &partial) {
 }
 
 template <typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
-auto wrap(NewClass *_this, const partial_wrapped<opcode, Ret, NewClass, Args...> &partial) {
-    return wrapped<opcode, std::function<Ret(Args...)> >{[ _this, fun = partial.fun ](Args... a){return (_this->*fun)(a...);
+auto wrap(std::unique_ptr<NewClass> *_this, const partial_wrapped<opcode, Ret, NewClass, Args...> &partial) {
+  return wrapped<opcode, std::function<Ret(Args...)> >{
+    [ _this, fun = partial.fun ](Args... a){return ((_this->get())->*fun)(a...);
 }
 };
 }
@@ -655,7 +588,7 @@ template <typename... T>
 struct Dispatcher;
 
 template <typename T>
-using RemoteInvocableOf = std::decay_t<decltype(*std::declval<T>().register_functions(std::declval<Dispatcher<> &>()))>;
+using RemoteInvocableOf = std::decay_t<decltype(*std::declval<T>().register_functions(std::declval<Dispatcher<> &>(),std::declval<std::unique_ptr<T>* >() ))>;
 
 template <typename... T>
 struct Dispatcher {
@@ -720,8 +653,8 @@ public:
 
 private:
     template <typename... ClientClasses>
-    auto register_all(const std::unique_ptr<ClientClasses> &... cc) {
-        return std::make_unique<impl_t>(cc->register_functions(*this)...);
+    auto register_all(std::unique_ptr<ClientClasses> &... cc) {
+      return std::make_unique<impl_t>(cc->register_functions(*this,&cc)...);
     }
 
     template <typename>
@@ -758,16 +691,21 @@ public:
         size_t offset = 0;
         mutils::fold(objects, [&](auto &obj, const size_t &offset) {
 	  using O = std::decay_t<decltype(*obj)>;
-	  obj = mutils::from_bytes<O>(&dsm, buf + offset);
+	  *obj = *mutils::from_bytes<O>(&dsm, buf + offset);
+	  std::cout << "Received obj" << std::endl;
+	  std::cout << "obj's state is: " << obj->state << std::endl;
 	  return offset + mutils::bytes_size(*obj);
         }, offset);
+	
     }
 
     template <typename... CtrTuples>
-    Dispatcher(Node_id nid, CtrTuples... a) : nid(nid),
-                                              receivers(new std::decay_t<decltype(*receivers)>()),
-                                              objects(construct_objects<mutils::TupleList<CtrTuples...>, T...>(mutils::TupleList<CtrTuples...>{a...})),
-                                              impl(mutils::callFunc([&](const auto &... a) {return this->register_all(a...); }, objects)) {}
+    Dispatcher(Node_id nid, CtrTuples... a)
+        : nid(nid),
+          receivers(new std::decay_t<decltype(*receivers)>()),
+          objects(construct_objects<mutils::TupleList<CtrTuples...>, T...>(mutils::TupleList<CtrTuples...>{a...})),
+          impl(mutils::callFunc([&](auto &... obj) {return this->register_all(obj...); },
+                                objects)) {}
 
     Dispatcher(Dispatcher &&other)
         : nid(other.nid),
@@ -776,7 +714,7 @@ public:
           impl(std::move(other.impl)) {}
 
     template <class NewClass, typename... NewFuns>
-    auto register_functions(NewClass *cls, NewFuns... f) {
+    auto register_functions(std::unique_ptr<NewClass> *cls, NewFuns... f) {
         //NewFuns must be of type Ret (NewClass::*) (Args...)
         //or of type wrapped<opcode,Ret,Args...>
         return build_remoteinvocableclass<NewClass>(nid, *receivers, wrap(cls, wrap(f))...);
