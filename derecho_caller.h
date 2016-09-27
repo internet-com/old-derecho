@@ -283,7 +283,7 @@ struct RemoteInvocable<tag, std::function<Ret(Args...)> > {
         auto invocation_id = mutils::long_rand();
         std::size_t size = mutils::bytes_size(invocation_id);
         {
-            auto t = {mutils::bytes_size(a)...};
+	  auto t = {std::size_t{0}, std::size_t{0}, mutils::bytes_size(a)...};
             size += std::accumulate(t.begin(), t.end(), 0);
         }
         char *serialized_args = out_alloc(size);
@@ -455,10 +455,12 @@ auto wrap(const partial_wrapped<opcode, Ret, NewClass, Args...> &partial) {
 
 template <typename NewClass, FunctionTag opcode, typename Ret, typename... Args>
 auto wrap(std::unique_ptr<NewClass> *_this, const partial_wrapped<opcode, Ret, NewClass, Args...> &partial) {
+  assert(_this);
+  assert(_this->get());
   return wrapped<opcode, std::function<Ret(Args...)> >{
     [ _this, fun = partial.fun ](Args... a){return ((_this->get())->*fun)(a...);
-}
-};
+    }
+  };
 }
 
 template <typename NewClass, typename Ret, typename... Args>
@@ -601,7 +603,7 @@ private:
     std::unique_ptr<std::map<Opcode, receive_fun_t> > receivers;
     // constructed *after* initialization
     std::unique_ptr<std::thread> receiver;
-    std::tuple<std::unique_ptr<T>...> objects;
+  std::tuple<std::unique_ptr<std::unique_ptr<T> >...> objects;
     mutils::DeserializationManager dsm{{}};
     std::unique_ptr<impl_t> impl;
 
@@ -664,19 +666,21 @@ private:
 
     template <typename TL, typename FirstType, typename... EverythingElse>
     auto construct_objects(const TL &tl) {
-        return std::tuple_cat(std::make_tuple(mutils::make_unique_tupleargs<FirstType>(tl.first)),
-                              construct_objects<typename TL::Rest, EverythingElse...>(tl.rest));
+      auto internal_unique_ptr = mutils::make_unique_tupleargs<FirstType>(tl.first);
+      auto second_unique_ptr = std::make_unique<decltype(internal_unique_ptr)>(std::move(internal_unique_ptr));
+      return std::tuple_cat(std::make_tuple(std::move(second_unique_ptr)),
+			    construct_objects<typename TL::Rest, EverythingElse...>(tl.rest));
     }
 
 public:
     void send_objects(tcp::socket &receiver_socket) {
         auto total_size = mutils::fold(objects, [](const auto &obj, const auto &accumulated_state) {
-	  return accumulated_state + mutils::bytes_size(*obj);
+	  return accumulated_state + mutils::bytes_size(**obj);
         }, 0);
         auto bind_socket_write = [&receiver_socket](const char *bytes, std::size_t size) {receiver_socket.write(bytes, size); };
         mutils::post_object(bind_socket_write, total_size);
         mutils::fold(objects, [&](auto &obj, const auto &acc) {
-	    mutils::post_object(bind_socket_write,*obj);
+	    mutils::post_object(bind_socket_write,**obj);
 	    return acc;
         }, nullptr);
     }
@@ -690,11 +694,11 @@ public:
         assert(success);
         size_t offset = 0;
         mutils::fold(objects, [&](auto &obj, const size_t &offset) {
-	  using O = std::decay_t<decltype(*obj)>;
-	  *obj = *mutils::from_bytes<O>(&dsm, buf + offset);
+	  using O = std::decay_t<decltype(**obj)>;
+	  *obj = mutils::from_bytes<O>(&dsm, buf + offset);
 	  std::cout << "Received obj" << std::endl;
-	  std::cout << "obj's state is: " << obj->state << std::endl;
-	  return offset + mutils::bytes_size(*obj);
+	  std::cout << "obj's state is: " << (*obj)->state << std::endl;
+	  return offset + mutils::bytes_size(**obj);
         }, offset);
 	
     }
@@ -704,7 +708,7 @@ public:
         : nid(nid),
           receivers(new std::decay_t<decltype(*receivers)>()),
           objects(construct_objects<mutils::TupleList<CtrTuples...>, T...>(mutils::TupleList<CtrTuples...>{a...})),
-          impl(mutils::callFunc([&](auto &... obj) {return this->register_all(obj...); },
+          impl(mutils::callFunc([&](auto &... obj) {return this->register_all(*obj...); },
                                 objects)) {}
 
     Dispatcher(Dispatcher &&other)

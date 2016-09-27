@@ -73,6 +73,21 @@ public:
     }
 };
 
+  template <>
+  class Pending<void> : public PendingBase {
+    PendingResults<void>& pending;
+
+public:
+    Pending(PendingResults<Ret>& _pending) : pending(_pending) {}
+    void fulfill_map(const std::vector<node_id_t>& nodes) {
+        who_t who;
+        for(auto n : nodes) {
+            who.push_back(Node_id(n));
+        }
+        pending.fulfill_map(who);
+    }
+};
+
 template <class T>
 auto createPending(PendingResults<T>& pending) {
     return std::make_unique<Pending<T>>(pending);

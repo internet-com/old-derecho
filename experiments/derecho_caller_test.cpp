@@ -32,15 +32,14 @@ int count = 0;
 
 struct test1_str{
     int state;
-    int read_state(bool t) {
+    int read_state() {
         cout << "Returning state, it is: " << state << endl;
         return state;
     }
-    bool change_state(int new_state) {
+  void change_state(int new_state) {
         cout << "Previous state was: " << state << endl;
         state = new_state;
         cout << "Current state is: " << state << endl;
-        return true;
     }
 
     template <typename Dispatcher>
@@ -110,15 +109,16 @@ int main(int argc, char *argv[]) {
     // other nodes (first two) change each other's state
     if(node_rank != 2) {
       cout << "Changing each other's state to 35" << endl;
-      output_result(managed_group.template orderedQuery<test1_str, 0>({1-node_rank}, 35).get());
+      managed_group.template orderedSend<test1_str, 0>({1 - node_rank},
+                                                       36 - node_rank);
     }
-    
+
     while(managed_group.get_members().size() < num_nodes) {
     }
     
     // all members verify every node's state
     cout << "Reading everyone's state" << endl;
-    output_result(managed_group.template orderedQuery<test1_str, 0>({}, true).get());
+    output_result(managed_group.template orderedQuery<test1_str, 0>({}).get());
     
     cout << "Done" << endl;
     cout << "Reached here" << endl;
