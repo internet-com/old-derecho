@@ -35,12 +35,8 @@ using lock_guard_t = std::lock_guard<std::mutex>;
 using unique_lock_t = std::unique_lock<std::mutex>;
 
 template <typename handlersType>
-bool ManagedGroup<handlersType>::rdmc_globals_initialized = false;
-
-template <typename handlersType>
 ManagedGroup<handlersType>::ManagedGroup(
     const int gms_port,
-    const std::map<node_id_t, ip_addr>& global_ip_map,
     const node_id_t my_id,
     const node_id_t leader_id,
     const long long unsigned int _max_payload_size,
@@ -51,17 +47,13 @@ ManagedGroup<handlersType>::ManagedGroup(
     std::string filename,
     const unsigned int _window_size,
     const rdmc::send_algorithm _type)
-    : member_ips_by_id(global_ip_map),
-      last_suspected(MAX_MEMBERS),
+    : last_suspected(MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
       next_view(nullptr),
       group_handlers(std::move(_group_handlers)),
       view_upcalls(_view_upcalls) {
-    if(!rdmc_globals_initialized) {
-        global_setup(global_ip_map, my_id);
-    }
     std::vector<MessageBuffer> message_buffers;
     auto max_msg_size = DerechoGroup<MAX_MEMBERS, handlersType>::compute_max_msg_size(_max_payload_size, _block_size);
     while(message_buffers.size() < _window_size * MAX_MEMBERS) {
@@ -69,6 +61,7 @@ ManagedGroup<handlersType>::ManagedGroup(
     }
     if(my_id != leader_id) {
         curr_view = join_existing(member_ips_by_id[leader_id], gms_port);
+	rdmc_sst_setup();
     } else {
         curr_view = start_group(my_id);
         tcp::socket client_socket = server_socket.accept();
@@ -148,7 +141,6 @@ ManagedGroup<handlersType>::ManagedGroup(
 template <typename handlersType>
 ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
                                          const int gms_port,
-                                         const map<node_id_t, ip_addr>& global_ip_map,
                                          const node_id_t my_id,
                                          const long long unsigned int _max_payload_size,
                                          CallbackSet stability_callbacks,
@@ -157,22 +149,14 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
                                          const long long unsigned int _block_size,
                                          const unsigned int _window_size,
                                          const rdmc::send_algorithm _type)
-    : member_ips_by_id(global_ip_map),
-      last_suspected(MAX_MEMBERS),
+    : last_suspected(MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
       view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
       group_handlers(std::move(_group_handlers)),
       view_upcalls(_view_upcalls) {
-    auto last_view = load_view<handlersType>(view_file_name);
-    //    for(std::vector<node_id_t>::size_type rank = 0; rank < last_view->members.size(); rank++) {
-    //        member_ips_by_id.insert({last_view->members[rank], last_view->member_ips[rank]});
-    //    }
-    if(!rdmc_globals_initialized) {
-        global_setup(member_ips_by_id, my_id);
-    }
-
+    auto last_view = load_view<handlersType>(view_file_name);    
     std::vector<MessageBuffer> message_buffers;
     auto max_msg_size = DerechoGroup<MAX_MEMBERS, handlersType>::compute_max_msg_size(_max_payload_size, _block_size);
     while(message_buffers.size() < _window_size * MAX_MEMBERS) {
@@ -244,17 +228,14 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
 }
 
 template <typename handlersType>
-void ManagedGroup<handlersType>::global_setup(
-    const map<node_id_t, ip_addr>& member_ips, node_id_t my_id) {
-    cout << "Doing global setup of SST and RDMC" << endl;
-    // this global setup has to be depricated anyway
+void ManagedGroup<handlersType>::rdmc_sst_setup() {
+    cout << "Doing global setup of RDMC and SST" << endl;
+    // construct member_ips
     if(!rdmc::initialize(member_ips, my_id)) {
         cout << "Global setup failed" << endl;
         exit(0);
     }
-    sst::tcp::tcp_initialize(my_id, member_ips);
-    sst::verbs_initialize();
-    rdmc_globals_initialized = true;
+    sst::verbs_initialize(my_id, member_ips);
 }
 
 template <typename handlersType>

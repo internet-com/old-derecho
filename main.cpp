@@ -7,7 +7,6 @@
 #include "rdmc/group_send.h"
 #include "sst/sst.h"
 #include "sst/predicates.h"
-#include "sst/tcp.h"
 
 #include <atomic>
 #include <algorithm>
@@ -28,8 +27,6 @@
 
 using namespace std;
 using namespace sst;
-using sst::tcp::tcp_initialize;
-using sst::tcp::sync;
 uint32_t node_rank;
 uint32_t num_nodes;
 map<uint32_t, string> node_addresses;
@@ -46,11 +43,8 @@ int main() {
     // addresses and create TCP connections
     rdmc::initialize(node_addresses, node_rank);
 
-    // initialize tcp connections
-    tcp_initialize(node_rank, node_addresses);
-
     // initialize the rdma resources
-    sst::verbs_initialize();
+    sst::verbs_initialize(node_rank, node_addresses);
 
     // set block size
     const size_t block_size = 10;

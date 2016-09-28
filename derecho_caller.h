@@ -8,7 +8,7 @@
 #include <set>
 #include <tuple_extras.hpp>
 
-#include "sst/tcp.h"
+#include "rdmc/connection.h"
 
 namespace rpc {
 

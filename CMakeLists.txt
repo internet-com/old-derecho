@@ -27,6 +27,9 @@ add_dependencies(derecho mutils_serialization)
 add_executable(main main.cpp)
 target_link_libraries(main derecho)
 
+add_executable(dynamic_connection_setup dynamic_connection_setup.cpp)
+target_link_libraries(dynamic_connection_setup derecho rdmc)
+
 add_executable(parse_state_file parse_state_file.cpp)
 target_link_libraries(parse_state_file derecho)
 

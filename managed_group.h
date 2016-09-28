@@ -68,11 +68,6 @@ private:
                                              vector<node_id_t> old_members)>;
     static constexpr int MAX_MEMBERS = View<handlersType>::MAX_MEMBERS;
 
-    /** Maps node IDs (what RDMC/SST call "ranks") to IP addresses.
-     * Currently, this mapping must be completely known at startup. */
-    std::map<node_id_t, ip_addr> member_ips_by_id;
-    static bool rdmc_globals_initialized;
-
     /** Contains client sockets for all pending joins, except the current one.*/
     LockedQueue<tcp::socket> pending_joins;
 
@@ -182,7 +177,6 @@ public:
      * @param leader_id The node ID of the GMS leader
      */
     ManagedGroup(const int gms_port,
-                 const std::map<node_id_t, ip_addr>& global_ip_map,
                  const node_id_t my_id,
                  const node_id_t leader_id,
                  const long long unsigned int _max_payload_size,
@@ -217,7 +211,6 @@ public:
      */
     ManagedGroup(const std::string& recovery_filename,
                  const int gms_port,
-                 const std::map<node_id_t, ip_addr>& global_ip_map,
                  const node_id_t my_id,
                  const long long unsigned int _max_payload_size,
                  const CallbackSet stability_callbacks,
@@ -229,8 +222,7 @@ public:
 
     ~ManagedGroup();
 
-    static void global_setup(const std::map<node_id_t, ip_addr>& member_ips,
-                             node_id_t my_id);
+    static void rdmc_sst_setup();
     /** Causes this node to cleanly leave the group by setting itself to "failed." */
     void leave();
     /** Creates and returns a vector listing the nodes that are currently members of the group. */

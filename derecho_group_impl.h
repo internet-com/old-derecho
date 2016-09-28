@@ -463,8 +463,8 @@ template <unsigned int N, typename dispatchersType>
                             toFulfillQueue.pop();
                         }
                     } else {
-                        connections.tcp_write(id, deliveryBuffer.get(),
-                                              reply_size);
+                        connections.write(id, deliveryBuffer.get(),
+                                          reply_size);
                     }
                 }
             }
@@ -838,7 +838,7 @@ auto DerechoGroup<N, dispatchersType>::tcpSend(node_id_t dest_node,
             }
         },
         std::forward<Args>(args)...);
-    connections.tcp_write(dest_node, p2pBuffer.get(), size);
+    connections.write(dest_node, p2pBuffer.get(), size);
     auto P = createPending(return_pair.pending);
     P->fulfill_map({dest_node});
 
@@ -878,13 +878,13 @@ void DerechoGroup<N, dispatchersType>::rpc_process_loop() {
         if(other_id < 0) {
             continue;
         }
-        connections.tcp_read(other_id, rpcBuffer.get(), header_size);
+        connections.read(other_id, rpcBuffer.get(), header_size);
         std::size_t payload_size;
         Opcode indx;
         Node_id received_from;
         retrieve_header(nullptr, rpcBuffer.get(), payload_size,
                         indx, received_from);
-        connections.tcp_read(other_id, rpcBuffer.get() + header_size,
+        connections.read(other_id, rpcBuffer.get() + header_size,
                              payload_size);
         size_t reply_size = 0;
         dispatchers.handle_receive(
@@ -899,8 +899,8 @@ void DerechoGroup<N, dispatchersType>::rpc_process_loop() {
                 }
             });
         if(reply_size > 0) {
-            connections.tcp_write(received_from.id, rpcBuffer.get(),
-                                  reply_size);
+            connections.write(received_from.id, rpcBuffer.get(),
+                              reply_size);
         }
     }
 }

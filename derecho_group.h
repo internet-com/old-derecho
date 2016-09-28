@@ -73,20 +73,20 @@ public:
     }
 };
 
-  template <>
-  class Pending<void> : public PendingBase {
-    PendingResults<void>& pending;
+//   template <>
+//   class Pending<void> : public PendingBase {
+//     PendingResults<void>& pending;
 
-public:
-    Pending(PendingResults<Ret>& _pending) : pending(_pending) {}
-    void fulfill_map(const std::vector<node_id_t>& nodes) {
-        who_t who;
-        for(auto n : nodes) {
-            who.push_back(Node_id(n));
-        }
-        pending.fulfill_map(who);
-    }
-};
+// public:
+//     Pending(PendingResults<Ret>& _pending) : pending(_pending) {}
+//     void fulfill_map(const std::vector<node_id_t>& nodes) {
+//         who_t who;
+//         for(auto n : nodes) {
+//             who.push_back(Node_id(n));
+//         }
+//         pending.fulfill_map(who);
+//     }
+// };
 
 template <class T>
 auto createPending(PendingResults<T>& pending) {
@@ -178,7 +178,7 @@ private:
     const unsigned int window_size;
     const CallbackSet callbacks;
     dispatcherType dispatchers;
-    tcp::all_tcp_connections connections;
+    tcp::tcp_connections connections;
     std::queue<std::unique_ptr<PendingBase>> toFulfillQueue;
     std::list<std::unique_ptr<PendingBase>> fulfilledList;
     std::mutex pending_results_mutex;
