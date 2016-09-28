@@ -27,6 +27,7 @@
 #include "persistence.h"
 #include "mutils-serialization/SerializationSupport.hpp"
 #include "sst/sst.h"
+#include "sst/verbs.h"
 #include "view.h"
 
 namespace derecho {
@@ -39,6 +40,8 @@ ManagedGroup<handlersType>::ManagedGroup(
     const int gms_port,
     const node_id_t my_id,
     const node_id_t leader_id,
+    const ip_addr my_ip,
+    const ip_addr leader_ip,
     const long long unsigned int _max_payload_size,
     const CallbackSet stability_callbacks,
     handlersType _group_handlers,
@@ -60,21 +63,19 @@ ManagedGroup<handlersType>::ManagedGroup(
         message_buffers.emplace_back(max_msg_size);
     }
     if(my_id != leader_id) {
-        curr_view = join_existing(member_ips_by_id[leader_id], gms_port);
+      curr_view = join_existing(my_id, leader_ip, gms_port);
 	rdmc_sst_setup();
     } else {
-        curr_view = start_group(my_id);
+        curr_view = start_group(my_id, my_ip);
+	rdmc_sst_setup();
         tcp::socket client_socket = server_socket.accept();
+	node_id_t client_id = 0;
+	client_socket.exchange(my_id, client_id);
         ip_addr& joiner_ip = client_socket.remote_ip;
         curr_view->num_members++;
         curr_view->member_ips.push_back(joiner_ip);
-        for(const auto& entry : member_ips_by_id) {
-            if(entry.second == joiner_ip) {
-                curr_view->members.push_back(entry.first);
-                break;
-            }
-        }
-        curr_view->failed.push_back(false);
+	curr_view->members.push_back(client_id);
+	curr_view->failed.push_back(false);
 
         auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
             bool success = client_socket.write(bytes, size);
@@ -84,14 +85,9 @@ ManagedGroup<handlersType>::ManagedGroup(
         mutils::post_object(bind_socket_write, size_of_view);
         mutils::post_object(bind_socket_write, *curr_view);
         group_handlers.send_objects(client_socket);
+	sst::add_node(client_id, joiner_ip);
     }
     curr_view->my_rank = curr_view->rank_of(my_id);
-    // Temporarily disabled because all member IP->ID mappings are fixed at
-    // startup
-    //    for(int rank = 0; rank < curr_view->num_members; ++rank) {
-    //        member_ips_by_id[curr_view->members[rank]] =
-    //        curr_view->member_ips[rank];
-    //    }
 
     if(!filename.empty()) {
         view_file_name = std::string(filename + persistence::PAXOS_STATE_EXTENSION);
@@ -142,6 +138,7 @@ template <typename handlersType>
 ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
                                          const int gms_port,
                                          const node_id_t my_id,
+					 const ip_addr my_ip,
                                          const long long unsigned int _max_payload_size,
                                          CallbackSet stability_callbacks,
                                          handlersType _group_handlers,
@@ -164,24 +161,21 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
     }
 
     if(my_id != last_view->members[last_view->rank_of_leader()]) {
-        curr_view = join_existing(last_view->member_ips[last_view->rank_of_leader()], gms_port);
+        curr_view = join_existing(my_id, last_view->member_ips[last_view->rank_of_leader()], gms_port);
     } else {
         /* This should only happen if an entire group failed and the leader is restarting;
          * otherwise the view obtained from the recovery script will have a leader that is
          * not me. So reset to an empty view and wait for the first non-leader member to
          * restart and join. */
-        curr_view = start_group(my_id);
+        curr_view = start_group(my_id, my_ip);
         curr_view->vid = last_view->vid + 1;
         tcp::socket client_socket = server_socket.accept();
+        node_id_t client_id = 0;
+        client_socket.exchange(my_id, client_id);
         ip_addr& joiner_ip = client_socket.remote_ip;
         curr_view->num_members++;
         curr_view->member_ips.push_back(joiner_ip);
-        for(const auto& entry : member_ips_by_id) {
-            if(entry.second == joiner_ip) {
-                curr_view->members.push_back(entry.first);
-                break;
-            }
-        }
+        curr_view->members.push_back(client_id);
         curr_view->failed.push_back(false);
 
         auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
@@ -231,11 +225,12 @@ template <typename handlersType>
 void ManagedGroup<handlersType>::rdmc_sst_setup() {
     cout << "Doing global setup of RDMC and SST" << endl;
     // construct member_ips
-    if(!rdmc::initialize(member_ips, my_id)) {
+    auto member_ips_map = get_member_ips_map(curr_view->members, curr_view->member_ips, curr_view->failed);
+    if(!rdmc::initialize(member_ips_map, curr_view->members[curr_view->my_rank])) {
         cout << "Global setup failed" << endl;
         exit(0);
     }
-    sst::verbs_initialize(my_id, member_ips);
+    sst::verbs_initialize(member_ips_map, curr_view->members[curr_view->my_rank]);
 }
 
 template <typename handlersType>
@@ -408,7 +403,6 @@ void ManagedGroup<handlersType>::register_predicates() {
             next_view->init_vectors();
             next_view->members[new_member_rank] = currChangeID;
             next_view->member_ips[new_member_rank] = std::string(const_cast<cstring&>(gmsSST[myRank].joiner_ip));
-            member_ips_by_id[currChangeID] = next_view->member_ips[new_member_rank];
         }
 
         int m = 0;
@@ -499,6 +493,9 @@ void ManagedGroup<handlersType>::register_predicates() {
                     curr_view->merge_changes();  // Create a combined list of Changes
                 }
 
+		if (old_members.size() < curr_view->members.size()) {
+		  sst::add_node(curr_view->members.back(), curr_view->member_ips.back());
+		}
                 for(auto& view_upcall : view_upcalls) {
                     view_upcall(curr_view->members, old_members);
                 }
@@ -566,7 +563,7 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
         curr_view->members, curr_view->members[curr_view->my_rank],
         curr_view->gmsSST, message_buffers, _max_payload_size,
         stability_callbacks, std::move(group_handlers), _block_size,
-        get_member_ips_map(curr_view->members, curr_view->failed), curr_view->failed, filename, _window_size, 1, _type);
+        get_member_ips_map(curr_view->members, curr_view->member_ips, curr_view->failed), curr_view->failed, filename, _window_size, 1, _type);
 }
 
 /**
@@ -590,7 +587,7 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& new
     newView.rdmc_sending_group = std::make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
         std::move(*curr_view->rdmc_sending_group),
-        get_member_ips_map(newView.members, newView.failed), newView.failed);
+        get_member_ips_map(newView.members, newView.member_ips, newView.failed), newView.failed);
     curr_view->rdmc_sending_group.reset();
 
     // Initialize this node's row in the new SST
@@ -599,11 +596,11 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& new
 }
 
 template <typename handlersType>
-std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::start_group(const node_id_t my_id) {
+std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::start_group(const node_id_t my_id, const ip_addr my_ip) {
     log_event("Starting new empty group with myself as leader");
     std::unique_ptr<View<handlersType>> newView = std::make_unique<View<handlersType>>(1);
     newView->members[0] = my_id;
-    newView->member_ips[0] = member_ips_by_id[my_id];
+    newView->member_ips[0] = my_ip;
     newView->failed[0] = false;
     newView->IKnowIAmLeader = true;
     return newView;
@@ -611,7 +608,7 @@ std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::start_group(cons
 
 template <typename handlersType>
 std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::join_existing(
-									      const ip_addr& leader_ip, const int leader_port) {
+    const node_id_t my_id, const ip_addr& leader_ip, const int leader_port) {
     //    cout << "Joining group by contacting node at " << leader_ip << endl;
     log_event("Joining group: waiting for a response from the leader");
     tcp::socket leader_socket{leader_ip, leader_port};
@@ -621,6 +618,10 @@ std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::join_existing(
     //    bool success = leader_socket.read((char*)&myNodeID,sizeof(myNodeID));
     //    assert(success);
 
+    // exchange ids
+    node_id_t leader_id = 0;
+    leader_socket.exchange(my_id, leader_id);
+    
     //The leader will first send the size of the necessary buffer, then the serialized View
     std::size_t size_of_view;
     bool success = leader_socket.read((char*)&size_of_view, sizeof(std::size_t));
@@ -645,15 +646,9 @@ void ManagedGroup<handlersType>::receive_join(tcp::socket& client_socket) {
         throw derecho_exception("Too many changes to allow a Join right now");
     }
 
-    //    node_id_t largest_id = member_ips_by_id.rbegin()->first;
-    //    joining_client_id = largest_id + 1;
-    for(const auto& entry : member_ips_by_id) {
-        if(entry.second == joiner_ip) {
-            joining_client_id = entry.first;
-            break;
-        }
-    }
-
+    node_id_t joining_client_id = 0;
+    client_socket.exchange(curr_view->members[curr_view->my_rank], joining_client_id);
+    
     log_event(std::stringstream() << "Proposing change to add node " << joining_client_id);
     size_t next_change = gmsSST[curr_view->my_rank].nChanges % MAX_MEMBERS;
     gmssst::set(gmsSST[curr_view->my_rank].changes[next_change], joining_client_id);
@@ -935,11 +930,6 @@ void ManagedGroup<handlersType>::barrier_sync() {
 
 template <typename handlersType>
 void ManagedGroup<handlersType>::debug_print_status() const {
-    cout << "Member IPs by ID: {";
-    for(auto& entry : member_ips_by_id) {
-        cout << entry.first << " => " << entry.second << ", ";
-    }
-    cout << "}" << endl;
     cout << "curr_view = " << curr_view->ToString() << endl;
 }
 
@@ -954,15 +944,15 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
 
 template <typename handlersType>
 std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
-    std::vector<node_id_t>& members, std::vector<char> failed) {
-    std::map<node_id_t, ip_addr> member_ips;
+    std::vector<node_id_t>& members, std::vector<ip_addr>& member_ips, std::vector<char> failed) {
+    std::map<node_id_t, ip_addr> member_ips_map;
     size_t num_members = members.size();
     for(uint i = 0; i < num_members; ++i) {
         if(!failed[i]) {
-            member_ips[members[i]] = member_ips_by_id[members[i]];
+	  member_ips_map[members[i]] = member_ips[i];
         }
     }
-    return member_ips;
+    return member_ips_map;
 }
 
 } /* namespace derecho */

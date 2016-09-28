@@ -112,6 +112,7 @@ bool tcp_connections::read(node_id_t node_id, char* buffer,
 bool tcp_connections::add_node(node_id_t new_id, const ip_addr_t new_ip_addr) {
     std::lock_guard<std::mutex> lock(sockets_mutex);
     assert(new_id != my_id);
+    assert(!sockets.count(new_id));
     return add_connection(new_id, new_ip_addr);
 }
 

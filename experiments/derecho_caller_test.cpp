@@ -25,9 +25,6 @@ using namespace mutils;
 using derecho::DerechoGroup;
 using derecho::DerechoRow;
 
-uint32_t node_rank;
-uint32_t num_nodes;
-
 int count = 0;
 
 struct test1_str{
@@ -66,18 +63,13 @@ void output_result(auto& rmap) {
 int main(int argc, char *argv[]) {
     srand(time(NULL));
 
-    uint32_t server_rank = 0;
-
-    std::map<uint32_t, std::string> node_addresses;
-
-    query_addresses(node_addresses, node_rank);
-    num_nodes = node_addresses.size();
-
-    vector<uint32_t> members(num_nodes);
-    for(uint32_t i = 0; i < num_nodes; ++i) {
-        members[i] = i;
-    }
-
+    uint32_t leader_id = 0;
+    string leader_ip = "128.84.139.10";
+    uint32_t my_id;
+    string my_ip;
+    cin >> my_id;
+    cin >> my_ip;
+    
     long long unsigned int max_msg_size = 100;
     long long unsigned int block_size = get_block_size(max_msg_size);
     // int num_messages = 10;
@@ -85,10 +77,10 @@ int main(int argc, char *argv[]) {
     auto stability_callback = [](int sender_id, long long int index, char *buf,
                                  long long int msg_size) {};
 
-    Dispatcher<test1_str> group_handlers(node_rank, std::make_tuple());
+    Dispatcher<test1_str> group_handlers(my_id, std::make_tuple());
 
     derecho::ManagedGroup<decltype(group_handlers)> managed_group(
-        GMS_PORT, node_addresses, node_rank, server_rank, max_msg_size,
+        GMS_PORT, my_id, leader_id, my_ip, leader_ip, max_msg_size,
         {stability_callback, {}}, std::move(group_handlers),
         {[](vector<derecho::node_id_t> new_members,
             vector<derecho::node_id_t> old_members) {
@@ -108,13 +100,13 @@ int main(int argc, char *argv[]) {
     cout << "Finished constructing/joining ManagedGroup" << endl;
     
     // other nodes (first two) change each other's state
-    if(node_rank != 2) {
+    if(my_id != 2) {
       cout << "Changing each other's state to 35" << endl;
-      output_result(managed_group.template orderedQuery<test1_str, 0>({1 - node_rank},
-								      36 - node_rank).get());
+      output_result(managed_group.template orderedQuery<test1_str, 0>({1 - my_id},
+								      36 - my_id).get());
     }
 
-    while(managed_group.get_members().size() < num_nodes) {
+    while(managed_group.get_members().size() < 3) {
     }
     
     // all members verify every node's state

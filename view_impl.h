@@ -169,6 +169,7 @@ shared_ptr<node_id_t> View<handlersType>::Departed() const {
 
 template <typename handlersType>
 std::string View<handlersType>::ToString() const {
+    // need to add member ips and other fields
     std::stringstream s;
     s << "View " << vid << ": MyRank=" << my_rank << ". ";
     string ms = " ";

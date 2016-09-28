@@ -129,9 +129,9 @@ private:
     void receive_join(tcp::socket& client_socket);
 
     /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
-    std::unique_ptr<View<handlersType>> start_group(const node_id_t my_id);
+  std::unique_ptr<View<handlersType>> start_group(const node_id_t my_id, const ip_addr my_ip);
     /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-    std::unique_ptr<View<handlersType>> join_existing(const ip_addr& leader_ip, const int leader_port);
+    std::unique_ptr<View<handlersType>> join_existing(const node_id_t my_id, const ip_addr& leader_ip, const int leader_port);
 
     // Ken's helper methods
     void deliver_in_order(const View<handlersType>& Vc, int Leader);
@@ -179,6 +179,8 @@ public:
     ManagedGroup(const int gms_port,
                  const node_id_t my_id,
                  const node_id_t leader_id,
+		 const ip_addr my_ip,
+		 const ip_addr leader_ip,
                  const long long unsigned int _max_payload_size,
                  const CallbackSet stability_callbacks,
                  handlersType _group_handlers,
@@ -212,6 +214,7 @@ public:
     ManagedGroup(const std::string& recovery_filename,
                  const int gms_port,
                  const node_id_t my_id,
+                 const ip_addr my_ip,
                  const long long unsigned int _max_payload_size,
                  const CallbackSet stability_callbacks,
                  handlersType _group_handlers,
@@ -222,7 +225,7 @@ public:
 
     ~ManagedGroup();
 
-    static void rdmc_sst_setup();
+    void rdmc_sst_setup();
     /** Causes this node to cleanly leave the group by setting itself to "failed." */
     void leave();
     /** Creates and returns a vector listing the nodes that are currently members of the group. */
@@ -260,7 +263,7 @@ public:
         util::debug_log().log_event(event_text);
     }
     void print_log(std::ostream& output_dest) const;
-    std::map<node_id_t, ip_addr> get_member_ips_map(std::vector<node_id_t>& members, std::vector<char> failed);
+    std::map<node_id_t, ip_addr> get_member_ips_map(std::vector<node_id_t>& members, std::vector<ip_addr>& member_ips, std::vector<char> failed);
 };
 
 } /* namespace derecho */
