@@ -63,32 +63,29 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     vector<MessageBuffer>& _free_message_buffers,
-    long long unsigned int _max_payload_size,
-    CallbackSet _callbacks,
     dispatchersType _dispatchers,
-    long long unsigned int _block_size,
+    CallbackSet callbacks,
+    const DerechoParams derecho_params,
     std::map<node_id_t, std::string> ip_addrs,
-    std::vector<char> already_failed, std::string filename,
-    unsigned int _window_size,
-    unsigned int timeout_ms, rdmc::send_algorithm _type, uint32_t port)
+    std::vector<char> already_failed)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
-      block_size(_block_size),
-      max_msg_size(compute_max_msg_size(_max_payload_size, _block_size)),
-      type(_type),
-      window_size(_window_size),
-      callbacks(_callbacks),
+      block_size(derecho_params.block_size),
+      max_msg_size(compute_max_msg_size(derecho_params.max_payload_size, derecho_params.block_size)),
+      type(derecho_params.type),
+      window_size(derecho_params.window_size),
+      callbacks(callbacks),
       dispatchers(std::move(_dispatchers)),
-      connections(my_node_id, ip_addrs, port),
+      connections(my_node_id, ip_addrs, derecho_params.rpc_port),
       rdmc_group_num_offset(0),
-      sender_timeout(timeout_ms),
+      sender_timeout(derecho_params.timeout_ms),
       sst(_sst) {
     assert(window_size >= 1);
 
-    if(!filename.empty()) {
+    if(!derecho_params.filename.empty()) {
         file_writer = std::make_unique<FileWriter>(make_file_written_callback(),
-                                                   filename);
+                                                   derecho_params.filename);
     }
 
     free_message_buffers.swap(_free_message_buffers);
@@ -98,8 +95,8 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
 
     total_message_buffers = free_message_buffers.size();
 
-    p2pBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
-    deliveryBuffer = std::unique_ptr<char[]>(new char[_max_payload_size]);
+    p2pBuffer = std::unique_ptr<char[]>(new char[derecho_params.max_payload_size]);
+    deliveryBuffer = std::unique_ptr<char[]>(new char[derecho_params.max_payload_size]);
 
     initialize_sst_row();
     bool no_member_failed = true;
@@ -129,7 +126,7 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
     std::vector<node_id_t> _members, node_id_t my_node_id,
     std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
     DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-    std::vector<char> already_failed, uint32_t port)
+    std::vector<char> already_failed, uint32_t rpc_port)
     : members(_members),
       num_members(members.size()),
       member_index(index_of(members, my_node_id)),
@@ -139,7 +136,7 @@ DerechoGroup<N, dispatchersType>::DerechoGroup(
       window_size(old_group.window_size),
       callbacks(old_group.callbacks),
       dispatchers(std::move(old_group.dispatchers)),
-      connections(my_node_id, ip_addrs, port),
+      connections(my_node_id, ip_addrs, rpc_port),
       toFulfillQueue(std::move(old_group.toFulfillQueue)),
       fulfilledList(std::move(old_group.fulfilledList)),
       rdmc_group_num_offset(old_group.rdmc_group_num_offset +

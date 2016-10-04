@@ -58,21 +58,21 @@ public:
  * features. All members of a group should create instances of ManagedGroup
  * (instead of creating DerechoGroup directly) in order to enable the GMS.
  */
-template <typename handlersType>
+template <typename dispatcherType>
 class ManagedGroup {
 private:
     using pred_handle =
-        typename View<handlersType>::DerechoSST::Predicates::pred_handle;
+        typename View<dispatcherType>::DerechoSST::Predicates::pred_handle;
 
     using view_upcall_t = std::function<void(vector<node_id_t> new_members,
                                              vector<node_id_t> old_members)>;
-    static constexpr int MAX_MEMBERS = View<handlersType>::MAX_MEMBERS;
+    static constexpr int MAX_MEMBERS = View<dispatcherType>::MAX_MEMBERS;
 
     /** Contains client sockets for all pending joins, except the current one.*/
     LockedQueue<tcp::socket> pending_joins;
 
     /** Contains old Views that need to be cleaned up*/
-    std::queue<std::unique_ptr<View<handlersType>>> old_views;
+    std::queue<std::unique_ptr<View<dispatcherType>>> old_views;
     std::mutex old_views_mutex;
     std::condition_variable old_views_cv;
 
@@ -111,16 +111,16 @@ private:
 
     /** The current View, containing the state of the managed group.
      *  Must be a pointer so we can re-assign it.*/
-    std::unique_ptr<View<handlersType>> curr_view;
+    std::unique_ptr<View<dispatcherType>> curr_view;
     /** May hold a pointer to the partially-constructed next view, if we are
      *  in the process of transitioning to a new view. */
-    std::unique_ptr<View<handlersType>> next_view;
+    std::unique_ptr<View<dispatcherType>> next_view;
 
-    handlersType group_handlers;
+    dispatcherType dispatchers;
     std::vector<view_upcall_t> view_upcalls;
 
     /** Sends a joining node the new view that has been constructed to include it.*/
-    void commit_join(const View<handlersType>& new_view,
+    void commit_join(const View<dispatcherType>& new_view,
                      tcp::socket& client_socket);
 
     bool has_pending_join() { return pending_joins.locked().access.size() > 0; }
@@ -129,20 +129,20 @@ private:
     void receive_join(tcp::socket& client_socket);
 
     /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
-  std::unique_ptr<View<handlersType>> start_group(const node_id_t my_id, const ip_addr my_ip);
+  std::unique_ptr<View<dispatcherType>> start_group(const node_id_t my_id, const ip_addr my_ip);
     /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-    std::unique_ptr<View<handlersType>> join_existing(const node_id_t my_id, const ip_addr& leader_ip, const int leader_port);
+  std::unique_ptr<View<dispatcherType>> join_existing(const node_id_t my_id, const ip_addr& leader_ip, const int leader_port, DerechoParams &derecho_params);
 
     // Ken's helper methods
-    void deliver_in_order(const View<handlersType>& Vc, int Leader);
-    void ragged_edge_cleanup(View<handlersType>& Vc);
-    void leader_ragged_edge_cleanup(View<handlersType>& Vc);
-    void follower_ragged_edge_cleanup(View<handlersType>& Vc);
+    void deliver_in_order(const View<dispatcherType>& Vc, int Leader);
+    void ragged_edge_cleanup(View<dispatcherType>& Vc);
+    void leader_ragged_edge_cleanup(View<dispatcherType>& Vc);
+    void follower_ragged_edge_cleanup(View<dispatcherType>& Vc);
 
-    static bool suspected_not_equal(const typename View<handlersType>::DerechoSST& gmsSST, const std::vector<bool>& old);
-    static void copy_suspected(const typename View<handlersType>::DerechoSST& gmsSST, std::vector<bool>& old);
-    static bool changes_contains(const typename View<handlersType>::DerechoSST& gmsSST, const node_id_t q);
-    static int min_acked(const typename View<handlersType>::DerechoSST& gmsSST, const std::vector<char>& failed);
+    static bool suspected_not_equal(const typename View<dispatcherType>::DerechoSST& gmsSST, const std::vector<bool>& old);
+    static void copy_suspected(const typename View<dispatcherType>::DerechoSST& gmsSST, std::vector<bool>& old);
+    static bool changes_contains(const typename View<dispatcherType>::DerechoSST& gmsSST, const node_id_t q);
+    static int min_acked(const typename View<dispatcherType>::DerechoSST& gmsSST, const std::vector<char>& failed);
 
     /** Constructor helper method to encapsulate spawning the background threads. */
     void create_threads();
@@ -151,16 +151,12 @@ private:
 
     /** Creates the SST and derecho_group for the current view, using the current view's member list.
      * The parameters are all the possible parameters for constructing derecho_group. */
-    void setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers,
-                            const long long unsigned int _max_payload_size,
-                            const CallbackSet& stability_callbacks,
-                            const long long unsigned int _block_size,
-                            const std::string& filename,
-                            const unsigned int _window_size,
-                            const rdmc::send_algorithm& _type);
+    void setup_derecho(std::vector<MessageBuffer>& message_buffers,
+		       CallbackSet callbacks,
+                       const DerechoParams& derecho_params);
     /** Sets up the SST and derecho_group for a new view, based on the settings in the current view
      * (and copying over the SST data from the current view). */
-    void transition_sst_and_rdmc(View<handlersType>& newView, int whichFailed);
+    void transition_sst_and_rdmc(View<dispatcherType>& newView, int whichFailed);
 
 public:
     /**
@@ -176,19 +172,20 @@ public:
      * @param my_id The node ID of the node executing this code
      * @param leader_id The node ID of the GMS leader
      */
-    ManagedGroup(const int gms_port,
-                 const node_id_t my_id,
-                 const node_id_t leader_id,
-		 const ip_addr my_ip,
-		 const ip_addr leader_ip,
-                 const long long unsigned int _max_payload_size,
-                 const CallbackSet stability_callbacks,
-                 handlersType _group_handlers,
-                 std::vector<view_upcall_t> _view_upcalls,
-                 const long long unsigned int _block_size,
-                 std::string filename = std::string(),
-                 const unsigned int _window_size = 3,
-                 const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+    ManagedGroup(const ip_addr my_ip,
+                 dispatcherType _dispatchers,
+		 CallbackSet callbacks,
+                 const DerechoParams derecho_params,
+                 std::vector<view_upcall_t> _view_upcalls = {},
+                 const int gms_port = 12345);
+    ManagedGroup(const node_id_t my_id,
+                 const ip_addr my_ip,
+		 const node_id_t leader_id,
+                 const ip_addr leader_ip,
+                 dispatcherType _dispatchers,
+		 CallbackSet callbacks,
+		 std::vector<view_upcall_t> _view_upcalls = {},
+                 const int gms_port = 12345);
     /**
      * Constructor that re-starts a failed group member from log files.
      * It assumes the local ".paxosstate" file already contains the last known
@@ -212,16 +209,13 @@ public:
      * @param _type
      */
     ManagedGroup(const std::string& recovery_filename,
-                 const int gms_port,
                  const node_id_t my_id,
                  const ip_addr my_ip,
-                 const long long unsigned int _max_payload_size,
-                 const CallbackSet stability_callbacks,
-                 handlersType _group_handlers,
-                 std::vector<view_upcall_t> _view_upcalls,
-                 const long long unsigned int _block_size,
-                 const unsigned int _window_size = 3,
-                 const rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND);
+                 dispatcherType _dispatchers,
+		 CallbackSet callbacks,
+		 DerechoParams derecho_params,
+                 std::vector<view_upcall_t> _view_upcalls = {},
+		 const int gms_port=12345);
 
     ~ManagedGroup();
 

@@ -12,8 +12,6 @@
 #include "block_size.h"
 #include "../rdmc/util.h"
 
-static const int GMS_PORT = 12345;
-
 using std::vector;
 using std::map;
 using std::string;
@@ -77,41 +75,63 @@ int main(int argc, char *argv[]) {
     auto stability_callback = [](int sender_id, long long int index, char *buf,
                                  long long int msg_size) {};
 
-    Dispatcher<test1_str> group_handlers(my_id, std::make_tuple());
+    Dispatcher<test1_str> dispatchers(my_id, std::make_tuple());
 
-    derecho::ManagedGroup<decltype(group_handlers)> managed_group(
-        GMS_PORT, my_id, leader_id, my_ip, leader_ip, max_msg_size,
-        {stability_callback, {}}, std::move(group_handlers),
-        {[](vector<derecho::node_id_t> new_members,
-            vector<derecho::node_id_t> old_members) {
-            cout << "New members are : " << endl;
-            for(auto n : new_members) {
-                cout << n << " ";
-            }
-            cout << endl;
-            cout << "Old members were :" << endl;
-            for(auto o : old_members) {
-                cout << o << " ";
-            }
-            cout << endl;
-        }},
-        block_size);
+    derecho::DerechoParams derecho_params{max_msg_size, block_size};
+    derecho::ManagedGroup<decltype(dispatchers)>* managed_group;
+
+    if(my_id == 0) {
+        managed_group = new derecho::ManagedGroup<decltype(dispatchers)>(
+            my_ip, std::move(dispatchers), {stability_callback, {}},
+            derecho_params, {[](vector<derecho::node_id_t> new_members,
+                                vector<derecho::node_id_t> old_members) {
+                cout << "New members are : " << endl;
+                for(auto n : new_members) {
+                    cout << n << " ";
+                }
+                cout << endl;
+                cout << "Old members were :" << endl;
+                for(auto o : old_members) {
+                    cout << o << " ";
+                }
+                cout << endl;
+            }});
+    }
+
+    else {
+        managed_group = new derecho::ManagedGroup<decltype(dispatchers)>(
+            my_id, my_ip, leader_id, leader_ip, std::move(dispatchers),
+            {stability_callback, {}},
+            {[](vector<derecho::node_id_t> new_members,
+                vector<derecho::node_id_t> old_members) {
+                cout << "New members are : " << endl;
+                for(auto n : new_members) {
+                    cout << n << " ";
+                }
+                cout << endl;
+                cout << "Old members were :" << endl;
+                for(auto o : old_members) {
+                    cout << o << " ";
+                }
+                cout << endl;
+            }});
+    }
 
     cout << "Finished constructing/joining ManagedGroup" << endl;
     
     // other nodes (first two) change each other's state
     if(my_id != 2) {
       cout << "Changing each other's state to 35" << endl;
-      output_result(managed_group.template orderedQuery<test1_str, 0>({1 - my_id},
+      output_result(managed_group->template orderedQuery<test1_str, 0>({1 - my_id},
 								      36 - my_id).get());
     }
 
-    while(managed_group.get_members().size() < 3) {
+    while(managed_group->get_members().size() < 3) {
     }
     
     // all members verify every node's state
     cout << "Reading everyone's state" << endl;
-    output_result(managed_group.template orderedQuery<test1_str, 0>({}).get());
+    output_result(managed_group->template orderedQuery<test1_str, 0>({}).get());
     
     cout << "Done" << endl;
     cout << "Reached here" << endl;

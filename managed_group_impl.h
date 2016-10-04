@@ -35,75 +35,124 @@ namespace derecho {
 using lock_guard_t = std::lock_guard<std::mutex>;
 using unique_lock_t = std::unique_lock<std::mutex>;
 
-template <typename handlersType>
-ManagedGroup<handlersType>::ManagedGroup(
-    const int gms_port,
-    const node_id_t my_id,
-    const node_id_t leader_id,
+template <typename dispatcherType>
+ManagedGroup<dispatcherType>::ManagedGroup(
     const ip_addr my_ip,
-    const ip_addr leader_ip,
-    const long long unsigned int _max_payload_size,
-    const CallbackSet stability_callbacks,
-    handlersType _group_handlers,
+    dispatcherType _dispatchers,
+    CallbackSet callbacks,
+    const DerechoParams derecho_params,
     std::vector<view_upcall_t> _view_upcalls,
-    const long long unsigned int _block_size,
-    std::string filename,
-    const unsigned int _window_size,
-    const rdmc::send_algorithm _type)
+    const int gms_port)
     : last_suspected(MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
       next_view(nullptr),
-      group_handlers(std::move(_group_handlers)),
+      dispatchers(std::move(_dispatchers)),
       view_upcalls(_view_upcalls) {
-    std::vector<MessageBuffer> message_buffers;
-    auto max_msg_size = DerechoGroup<MAX_MEMBERS, handlersType>::compute_max_msg_size(_max_payload_size, _block_size);
-    while(message_buffers.size() < _window_size * MAX_MEMBERS) {
-        message_buffers.emplace_back(max_msg_size);
-    }
-    if(my_id != leader_id) {
-      curr_view = join_existing(my_id, leader_ip, gms_port);
-	rdmc_sst_setup();
-    } else {
-        curr_view = start_group(my_id, my_ip);
-	rdmc_sst_setup();
-        tcp::socket client_socket = server_socket.accept();
-	node_id_t client_id = 0;
-	client_socket.exchange(my_id, client_id);
-        ip_addr& joiner_ip = client_socket.remote_ip;
-        curr_view->num_members++;
-        curr_view->member_ips.push_back(joiner_ip);
-	curr_view->members.push_back(client_id);
-	curr_view->failed.push_back(false);
+    const node_id_t my_id = 0;
+    curr_view = start_group(my_id, my_ip);
+    rdmc_sst_setup();
+    tcp::socket client_socket = server_socket.accept();
+    node_id_t client_id = 0;
+    client_socket.exchange(my_id, client_id);
+    ip_addr& joiner_ip = client_socket.remote_ip;
+    curr_view->num_members++;
+    curr_view->member_ips.push_back(joiner_ip);
+    curr_view->members.push_back(client_id);
+    curr_view->failed.push_back(false);
 
-        auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
-            bool success = client_socket.write(bytes, size);
-            assert(success);
-        };
-        std::size_t size_of_view = mutils::bytes_size(*curr_view);
-        mutils::post_object(bind_socket_write, size_of_view);
-        mutils::post_object(bind_socket_write, *curr_view);
-        group_handlers.send_objects(client_socket);
-	sst::add_node(client_id, joiner_ip);
-    }
+   auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
+     bool success = client_socket.write(bytes, size);
+     assert(success);
+   };
+   std::size_t size_of_view = mutils::bytes_size(*curr_view);
+   mutils::post_object(bind_socket_write, size_of_view);
+   mutils::post_object(bind_socket_write, *curr_view);
+   // mutils::post_object(bind_socket_write, derecho_params);
+   dispatchers.send_objects(client_socket);
+   rdma::impl::verbs_add_connection(client_id, joiner_ip, my_id);
+   sst::add_node(client_id, joiner_ip);
+
+   if(!derecho_params.filename.empty()) {
+       view_file_name = std::string(derecho_params.filename + persistence::PAXOS_STATE_EXTENSION);
+       persist_view(*curr_view, view_file_name);
+   }
+
+   std::vector<MessageBuffer> message_buffers;
+   auto max_msg_size = DerechoGroup<MAX_MEMBERS, dispatcherType>::compute_max_msg_size(derecho_params.max_payload_size, derecho_params.block_size);
+   while(message_buffers.size() < derecho_params.window_size * MAX_MEMBERS) {
+       message_buffers.emplace_back(max_msg_size);
+   }
+
+   log_event("Initializing SST and RDMC for the first time.");
+   setup_derecho(message_buffers, callbacks, derecho_params);
+   curr_view->gmsSST->put();
+   curr_view->gmsSST->sync_with_members();
+   log_event("Done setting up initial SST and RDMC");
+
+   create_threads();
+   register_predicates();
+   curr_view->gmsSST->start_predicate_evaluation();
+   log_event("Starting predicate evaluation");
+
+   view_upcalls.push_back([this](std::vector<node_id_t> new_members,
+                                 std::vector<node_id_t> old_members) {
+        std::vector<node_id_t> removed_members;
+        std::set_difference(
+                old_members.begin(), old_members.end(), new_members.begin(),
+                new_members.end(),
+                std::back_inserter(removed_members));
+        curr_view->derecho_group->set_exceptions_for_removed_nodes(removed_members);
+   });
+   lock_guard_t lock(view_mutex);
+   vector<node_id_t> old_members(curr_view->members.begin(),
+                                 curr_view->members.end() - 1);
+   for(auto& view_upcall : view_upcalls) {
+       view_upcall(curr_view->members, old_members);
+   }
+   // curr_view->derecho_group->debug_print();
+}
+
+template <typename dispatcherType>
+ManagedGroup<dispatcherType>::ManagedGroup(const node_id_t my_id,
+                                           const ip_addr my_ip,
+                                           const node_id_t leader_id,
+                                           const ip_addr leader_ip,
+                                           dispatcherType _dispatchers,
+                                           CallbackSet callbacks,
+                                           std::vector<view_upcall_t> _view_upcalls,
+                                           const int gms_port)
+    : last_suspected(MAX_MEMBERS),
+      gms_port(gms_port),
+      server_socket(gms_port),
+      thread_shutdown(false),
+      next_view(nullptr),
+      dispatchers(std::move(_dispatchers)),
+      view_upcalls(_view_upcalls) {
+    DerechoParams derecho_params(0, 0);
+    curr_view = join_existing(my_id, leader_ip, gms_port, derecho_params);
     curr_view->my_rank = curr_view->rank_of(my_id);
-
-    if(!filename.empty()) {
-        view_file_name = std::string(filename + persistence::PAXOS_STATE_EXTENSION);
+    rdmc_sst_setup();
+    if(!derecho_params.filename.empty()) {
+        view_file_name = std::string(derecho_params.filename + persistence::PAXOS_STATE_EXTENSION);
         persist_view(*curr_view, view_file_name);
     }
     log_event("Initializing SST and RDMC for the first time.");
-    setup_sst_and_rdmc(message_buffers, _max_payload_size,
-                       stability_callbacks,
-                       _block_size, filename, _window_size, _type);
+
+    std::vector<MessageBuffer> message_buffers;
+    auto max_msg_size = DerechoGroup<MAX_MEMBERS, dispatcherType>::compute_max_msg_size(derecho_params.max_payload_size, derecho_params.block_size);
+    while(message_buffers.size() < derecho_params.window_size * MAX_MEMBERS) {
+        message_buffers.emplace_back(max_msg_size);
+    }
+    setup_derecho(message_buffers, callbacks, derecho_params);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
     log_event("Done setting up initial SST and RDMC");
 
-    if(my_id != leader_id && curr_view->vid != 0) {
+    if(curr_view->vid != 0) {
         // If this node is joining an existing group with a non-initial view, copy the leader's nChanges and nAcked
-        // Otherwise, you'll immediately think that there's as new proposed view changed because [leader].nChanges > nAcked
+        // Otherwise, you'll immediately think that there's as new proposed view change because [leader].nChanges > nAcked
         gmssst::init_from_existing(
             (*curr_view->gmsSST)[curr_view->my_rank],
             (*curr_view->gmsSST)[curr_view->rank_of_leader()]);
@@ -123,7 +172,7 @@ ManagedGroup<handlersType>::ManagedGroup(
                 old_members.begin(), old_members.end(), new_members.begin(),
                 new_members.end(),
                 std::back_inserter(removed_members));
-        curr_view->rdmc_sending_group->set_exceptions_for_removed_nodes(removed_members);
+        curr_view->derecho_group->set_exceptions_for_removed_nodes(removed_members);
     });
     lock_guard_t lock(view_mutex);
     vector<node_id_t> old_members(curr_view->members.begin(),
@@ -131,37 +180,35 @@ ManagedGroup<handlersType>::ManagedGroup(
     for(auto& view_upcall : view_upcalls) {
         view_upcall(curr_view->members, old_members);
     }
-    // curr_view->rdmc_sending_group->debug_print();
+    // curr_view->derecho_group->debug_print();
+
 }
 
-template <typename handlersType>
-ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
-                                         const int gms_port,
-                                         const node_id_t my_id,
-					 const ip_addr my_ip,
-                                         const long long unsigned int _max_payload_size,
-                                         CallbackSet stability_callbacks,
-                                         handlersType _group_handlers,
-                                         std::vector<view_upcall_t> _view_upcalls,
-                                         const long long unsigned int _block_size,
-                                         const unsigned int _window_size,
-                                         const rdmc::send_algorithm _type)
+template <typename dispatcherType>
+ManagedGroup<dispatcherType>::ManagedGroup(const std::string& recovery_filename,
+                                           const node_id_t my_id,
+                                           const ip_addr my_ip,
+                                           dispatcherType _dispatchers,
+                                           CallbackSet callbacks,
+                                           DerechoParams derecho_params,
+                                           std::vector<view_upcall_t> _view_upcalls,
+                                           const int gms_port)
     : last_suspected(MAX_MEMBERS),
       gms_port(gms_port),
       server_socket(gms_port),
       thread_shutdown(false),
       view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
-      group_handlers(std::move(_group_handlers)),
+      dispatchers(std::move(_dispatchers)),
       view_upcalls(_view_upcalls) {
-    auto last_view = load_view<handlersType>(view_file_name);    
+    auto last_view = load_view<dispatcherType>(view_file_name);    
     std::vector<MessageBuffer> message_buffers;
-    auto max_msg_size = DerechoGroup<MAX_MEMBERS, handlersType>::compute_max_msg_size(_max_payload_size, _block_size);
-    while(message_buffers.size() < _window_size * MAX_MEMBERS) {
+    auto max_msg_size = DerechoGroup<MAX_MEMBERS, dispatcherType>::compute_max_msg_size(derecho_params.max_payload_size, derecho_params.block_size);
+    while(message_buffers.size() < derecho_params.window_size * MAX_MEMBERS) {
         message_buffers.emplace_back(max_msg_size);
     }
 
     if(my_id != last_view->members[last_view->rank_of_leader()]) {
-        curr_view = join_existing(my_id, last_view->member_ips[last_view->rank_of_leader()], gms_port);
+        curr_view = join_existing(my_id, last_view->member_ips[last_view->rank_of_leader()], gms_port, derecho_params);
     } else {
         /* This should only happen if an entire group failed and the leader is restarting;
          * otherwise the view obtained from the recovery script will have a leader that is
@@ -177,7 +224,7 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
         curr_view->member_ips.push_back(joiner_ip);
         curr_view->members.push_back(client_id);
         curr_view->failed.push_back(false);
-
+	
         auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {
             bool success = client_socket.write(bytes, size);
             assert(success);
@@ -185,13 +232,15 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
         std::size_t size_of_view = mutils::bytes_size(*curr_view);
         mutils::post_object(bind_socket_write, size_of_view);
         mutils::post_object(bind_socket_write, *curr_view);
+	// mutils::post_object(bind_socket_write, derecho_params);
     }
     curr_view->my_rank = curr_view->rank_of(my_id);
-
+    
     log_event("Initializing SST and RDMC for the first time.");
-    setup_sst_and_rdmc(message_buffers, _max_payload_size,
-                       stability_callbacks,
-                       _block_size, recovery_filename, _window_size, _type);
+    derecho_params.filename = recovery_filename;
+    setup_derecho(message_buffers,
+                  callbacks,
+                  derecho_params);
     curr_view->gmsSST->put();
     curr_view->gmsSST->sync_with_members();
     log_event("Done setting up initial SST and RDMC");
@@ -210,7 +259,7 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
                 old_members.begin(), old_members.end(), new_members.begin(),
                 new_members.end(),
                 std::back_inserter(removed_members));
-        curr_view->rdmc_sending_group->set_exceptions_for_removed_nodes(removed_members);
+        curr_view->derecho_group->set_exceptions_for_removed_nodes(removed_members);
     });
 
     lock_guard_t lock(view_mutex);
@@ -221,8 +270,8 @@ ManagedGroup<handlersType>::ManagedGroup(const std::string& recovery_filename,
     }
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::rdmc_sst_setup() {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::rdmc_sst_setup() {
     cout << "Doing global setup of RDMC and SST" << endl;
     // construct member_ips
     auto member_ips_map = get_member_ips_map(curr_view->members, curr_view->member_ips, curr_view->failed);
@@ -233,8 +282,8 @@ void ManagedGroup<handlersType>::rdmc_sst_setup() {
     sst::verbs_initialize(member_ips_map, curr_view->members[curr_view->my_rank]);
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::create_threads() {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::create_threads() {
     client_listener_thread = std::thread{[this]() {
         while(!thread_shutdown) {
             tcp::socket client_socket = server_socket.accept();
@@ -259,16 +308,16 @@ void ManagedGroup<handlersType>::create_threads() {
     });
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::register_predicates() {
-    using DerechoSST = typename View<handlersType>::DerechoSST;
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::register_predicates() {
+    using DerechoSST = typename View<dispatcherType>::DerechoSST;
 
     auto suspected_changed = [this](const DerechoSST& sst) {
         return suspected_not_equal(sst, last_suspected);
     };
     auto suspected_changed_trig = [this](DerechoSST& gmsSST) {
         log_event("Suspected[] changed");
-        View<handlersType>& Vc = *curr_view;
+        View<dispatcherType>& Vc = *curr_view;
         int myRank = curr_view->my_rank;
         // These fields had better be synchronized.
         assert(gmsSST.get_local_index() == curr_view->my_rank);
@@ -288,7 +337,7 @@ void ManagedGroup<handlersType>::register_predicates() {
 
                 log_event(std::stringstream() << "GMS telling SST to freeze row " << q << " which is node " << Vc.members[q]);
                 gmsSST.freeze(q);  // Cease to accept new updates from q
-                Vc.rdmc_sending_group->wedge();
+                Vc.derecho_group->wedge();
                 gmssst::set(gmsSST[myRank].wedged, true);  // RDMC has halted new sends and receives in theView
                 Vc.failed[q] = true;
                 Vc.nFailed++;
@@ -377,14 +426,14 @@ void ManagedGroup<handlersType>::register_predicates() {
         gmsSST.predicates.remove(change_commit_ready_handle);
         gmsSST.predicates.remove(leader_proposed_handle);
 
-        View<handlersType>& Vc = *curr_view;
+        View<dispatcherType>& Vc = *curr_view;
         int myRank = curr_view->my_rank;
         // These fields had better be synchronized.
         assert(gmsSST.get_local_index() == curr_view->my_rank);
 
         Vc.wedge();
         node_id_t currChangeID = gmsSST[myRank].changes[Vc.vid % MAX_MEMBERS];
-        next_view = std::make_unique<View<handlersType>>();
+        next_view = std::make_unique<View<dispatcherType>>();
         next_view->vid = Vc.vid + 1;
         next_view->IKnowIAmLeader = Vc.IKnowIAmLeader;
         node_id_t myID = Vc.members[myRank];
@@ -446,14 +495,11 @@ void ManagedGroup<handlersType>::register_predicates() {
                 lock_guard_t lock(view_mutex);
                 assert(next_view);
 
-                // for view upcall
-                auto old_members = curr_view->members;
-		
                 ragged_edge_cleanup(*curr_view);
                 if(curr_view->IAmLeader() && !failed) {
                     // Send the view to the newly joined client before we try to do SST and RDMC setup
                     commit_join(*next_view, joining_client_socket);
-		    curr_view->rdmc_sending_group->send_objects(joining_client_socket);
+		    curr_view->derecho_group->send_objects(joining_client_socket);
                     // Close the client's socket
                     joining_client_socket = tcp::socket();
                 }
@@ -463,18 +509,26 @@ void ManagedGroup<handlersType>::register_predicates() {
                 gmsSST.predicates.remove(suspected_changed_handle);
 
                 log_event(std::stringstream() << "Starting creation of new SST and DerechoGroup for view " << next_view->vid);
+		// if  a new member has joined
+		if (curr_view->members.size() < next_view->members.size()) {
+		  rdma::impl::verbs_add_connection(next_view->members.back(), next_view->member_ips.back(), next_view->members[next_view->my_rank]);
+		  sst::add_node(next_view->members.back(), next_view->member_ips.back());
+		}
                 // This will block until everyone responds to SST/RDMC initial handshakes
                 transition_sst_and_rdmc(*next_view, whoFailed);
                 next_view->gmsSST->put();
                 next_view->gmsSST->sync_with_members();
                 log_event(std::stringstream() << "Done setting up SST and DerechoGroup for view " << next_view->vid);
+                // for view upcall
+                auto old_members = curr_view->members;
                 {
                     lock_guard_t old_views_lock(old_views_mutex);
                     old_views.push(std::move(curr_view));
                     old_views_cv.notify_all();
                 }
-                curr_view = std::move(next_view);
-                // Announce the new view to the application
+		curr_view = std::move(next_view);
+
+		// Announce the new view to the application
                 curr_view->newView(*curr_view);
 
                 //If in persistent mode, write the new view to disk before using it
@@ -493,9 +547,6 @@ void ManagedGroup<handlersType>::register_predicates() {
                     curr_view->merge_changes();  // Create a combined list of Changes
                 }
 
-		if (old_members.size() < curr_view->members.size()) {
-		  sst::add_node(curr_view->members.back(), curr_view->member_ips.back());
-		}
                 for(auto& view_upcall : view_upcalls) {
                     view_upcall(curr_view->members, old_members);
                 }
@@ -529,8 +580,8 @@ void ManagedGroup<handlersType>::register_predicates() {
     leader_committed_handle = curr_view->gmsSST->predicates.insert(leader_committed_next_view, start_view_change, sst::PredicateType::ONE_TIME);
 }
 
-template <typename handlersType>
-ManagedGroup<handlersType>::~ManagedGroup() {
+template <typename dispatcherType>
+ManagedGroup<dispatcherType>::~ManagedGroup() {
     thread_shutdown = true;
     // force accept to return.
     tcp::socket s{"localhost", gms_port};
@@ -543,14 +594,10 @@ ManagedGroup<handlersType>::~ManagedGroup() {
     }
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& message_buffers,
-                                                    const long long unsigned int _max_payload_size,
-                                                    const CallbackSet& stability_callbacks,
-                                                    const long long unsigned int _block_size,
-                                                    const std::string& filename,
-                                                    const unsigned int _window_size,
-                                                    const rdmc::send_algorithm& _type) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::setup_derecho(std::vector<MessageBuffer>& message_buffers,
+                                                 CallbackSet callbacks,
+                                                 const DerechoParams& derecho_params) {
     curr_view->gmsSST = std::make_shared<sst::SST<DerechoRow<MAX_MEMBERS>>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
         [this](const uint32_t node_id) { report_failure(node_id); }, curr_view->failed);
@@ -559,11 +606,11 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
     }
     gmssst::set((*curr_view->gmsSST)[curr_view->my_rank].vid, curr_view->vid);
 
-    curr_view->rdmc_sending_group = std::make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
+    curr_view->derecho_group = std::make_unique<DerechoGroup<MAX_MEMBERS, dispatcherType>>(
         curr_view->members, curr_view->members[curr_view->my_rank],
-        curr_view->gmsSST, message_buffers, _max_payload_size,
-        stability_callbacks, std::move(group_handlers), _block_size,
-        get_member_ips_map(curr_view->members, curr_view->member_ips, curr_view->failed), curr_view->failed, filename, _window_size, 1, _type);
+        curr_view->gmsSST, message_buffers, std::move(dispatchers), callbacks, derecho_params,
+        get_member_ips_map(curr_view->members, curr_view->member_ips, curr_view->failed),
+	curr_view->failed);
 }
 
 /**
@@ -571,8 +618,8 @@ void ManagedGroup<handlersType>::setup_sst_and_rdmc(std::vector<MessageBuffer>& 
  * @param newView The new view in which to construct an SST and derecho_group
  * @param whichFailed The rank of the node in the old view that failed, if any.
  */
-template <typename handlersType>
-void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& newView, int whichFailed) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::transition_sst_and_rdmc(View<dispatcherType>& newView, int whichFailed) {
     //Temporarily disabled because all nodes are initialized at the beginning
     //    if(whichFailed == -1) { //This is a join
     //        rdmc::add_address(newView.members.back(), newView.member_ips.back());
@@ -584,31 +631,32 @@ void ManagedGroup<handlersType>::transition_sst_and_rdmc(View<handlersType>& new
         newView.members, newView.members[newView.my_rank],
         [this](const uint32_t node_id) { report_failure(node_id); }, newView.failed);
     std::cout << "Going to create the derecho group" << std::endl;
-    newView.rdmc_sending_group = std::make_unique<DerechoGroup<MAX_MEMBERS, handlersType>>(
+    newView.derecho_group = std::make_unique<DerechoGroup<MAX_MEMBERS, dispatcherType>>(
         newView.members, newView.members[newView.my_rank], newView.gmsSST,
-        std::move(*curr_view->rdmc_sending_group),
+        std::move(*curr_view->derecho_group),
         get_member_ips_map(newView.members, newView.member_ips, newView.failed), newView.failed);
-    curr_view->rdmc_sending_group.reset();
+    curr_view->derecho_group.reset();
 
     // Initialize this node's row in the new SST
     gmssst::template init_from_existing<MAX_MEMBERS>((*newView.gmsSST)[newView.my_rank], (*curr_view->gmsSST)[curr_view->my_rank]);
     gmssst::set((*newView.gmsSST)[newView.my_rank].vid, newView.vid);
 }
 
-template <typename handlersType>
-std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::start_group(const node_id_t my_id, const ip_addr my_ip) {
+template <typename dispatcherType>
+std::unique_ptr<View<dispatcherType>> ManagedGroup<dispatcherType>::start_group(const node_id_t my_id, const ip_addr my_ip) {
     log_event("Starting new empty group with myself as leader");
-    std::unique_ptr<View<handlersType>> newView = std::make_unique<View<handlersType>>(1);
+    std::unique_ptr<View<dispatcherType>> newView = std::make_unique<View<dispatcherType>>(1);
     newView->members[0] = my_id;
+    newView->my_rank = 0;
     newView->member_ips[0] = my_ip;
     newView->failed[0] = false;
     newView->IKnowIAmLeader = true;
     return newView;
 }
 
-template <typename handlersType>
-std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::join_existing(
-    const node_id_t my_id, const ip_addr& leader_ip, const int leader_port) {
+template <typename dispatcherType>
+std::unique_ptr<View<dispatcherType>> ManagedGroup<dispatcherType>::join_existing(
+    const node_id_t my_id, const ip_addr& leader_ip, const int leader_port, DerechoParams &derecho_params) {
     //    cout << "Joining group by contacting node at " << leader_ip << endl;
     log_event("Joining group: waiting for a response from the leader");
     tcp::socket leader_socket{leader_ip, leader_port};
@@ -629,17 +677,22 @@ std::unique_ptr<View<handlersType>> ManagedGroup<handlersType>::join_existing(
     char buffer[size_of_view];
     success = leader_socket.read(buffer, size_of_view);
     assert(success);
-    std::unique_ptr<View<handlersType>> newView = mutils::from_bytes<View<handlersType>>(nullptr, buffer);
-    group_handlers.receive_objects(leader_socket);
+    std::unique_ptr<View<dispatcherType>> newView = mutils::from_bytes<View<dispatcherType>>(nullptr, buffer);
+    char buffer2[sizeof(DerechoParams)];
+    success = leader_socket.read(buffer2, sizeof(DerechoParams));
+    assert(success);
+    // std::unique_ptr <DerechoParams> params_ptr = mutils::from_bytes<DerechoParams>(nullptr, buffer2);
+    // derecho_params = *params_ptr;
+    dispatchers.receive_objects(leader_socket);
 
     log_event("Received View from leader");
     return newView;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::receive_join(tcp::socket& client_socket) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::receive_join(tcp::socket& client_socket) {
     ip_addr& joiner_ip = client_socket.remote_ip;
-    using derechoSST = sst::SST<DerechoRow<View<handlersType>::MAX_MEMBERS>>;
+    using derechoSST = sst::SST<DerechoRow<View<dispatcherType>::MAX_MEMBERS>>;
     derechoSST& gmsSST = *curr_view->gmsSST;
     if((gmsSST[curr_view->my_rank].nChanges -
         gmsSST[curr_view->my_rank].nCommitted) == MAX_MEMBERS / 2) {
@@ -662,8 +715,8 @@ void ManagedGroup<handlersType>::receive_join(tcp::socket& client_socket) {
     gmsSST.put();
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::commit_join(const View<handlersType>& new_view,
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::commit_join(const View<dispatcherType>& new_view,
                                              tcp::socket& client_socket) {
     log_event("Sending client the new view");
     // Temporarily disabled because all node IDs are globally fixed at startup
@@ -676,9 +729,9 @@ void ManagedGroup<handlersType>::commit_join(const View<handlersType>& new_view,
 
 /* ------------------------- Ken's helper methods ------------------------- */
 
-template <typename handlersType>
-bool ManagedGroup<handlersType>::suspected_not_equal(
-    const typename View<handlersType>::DerechoSST& gmsSST,
+template <typename dispatcherType>
+bool ManagedGroup<dispatcherType>::suspected_not_equal(
+    const typename View<dispatcherType>::DerechoSST& gmsSST,
     const vector<bool>& old) {
     for(int r = 0; r < gmsSST.get_num_rows(); r++) {
         for(int who = 0; who < MAX_MEMBERS; who++) {
@@ -690,17 +743,17 @@ bool ManagedGroup<handlersType>::suspected_not_equal(
     return false;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::copy_suspected(
-    const typename View<handlersType>::DerechoSST& gmsSST, vector<bool>& old) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::copy_suspected(
+    const typename View<dispatcherType>::DerechoSST& gmsSST, vector<bool>& old) {
     for(int who = 0; who < gmsSST.get_num_rows(); ++who) {
         old[who] = gmsSST[gmsSST.get_local_index()].suspected[who];
     }
 }
 
-template <typename handlersType>
-bool ManagedGroup<handlersType>::changes_contains(
-    const typename View<handlersType>::DerechoSST& gmsSST, const node_id_t q) {
+template <typename dispatcherType>
+bool ManagedGroup<dispatcherType>::changes_contains(
+    const typename View<dispatcherType>::DerechoSST& gmsSST, const node_id_t q) {
     auto& myRow = gmsSST[gmsSST.get_local_index()];
     for(int n = myRow.nCommitted; n < myRow.nChanges; n++) {
         int p_index = n % MAX_MEMBERS;
@@ -712,9 +765,9 @@ bool ManagedGroup<handlersType>::changes_contains(
     return false;
 }
 
-template <typename handlersType>
-int ManagedGroup<handlersType>::min_acked(
-    const typename View<handlersType>::DerechoSST& gmsSST, const vector<char>& failed) {
+template <typename dispatcherType>
+int ManagedGroup<dispatcherType>::min_acked(
+    const typename View<dispatcherType>::DerechoSST& gmsSST, const vector<char>& failed) {
     int myRank = gmsSST.get_local_index();
     int min = gmsSST[myRank].nAcked;
     for(size_t n = 0; n < failed.size(); n++) {
@@ -726,8 +779,8 @@ int ManagedGroup<handlersType>::min_acked(
     return min;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::deliver_in_order(const View<handlersType>& Vc, int Leader) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::deliver_in_order(const View<dispatcherType>& Vc, int Leader) {
     // Ragged cleanup is finished, deliver in the implied order
     std::vector<long long int> max_received_indices(Vc.num_members);
     std::string deliveryOrder(" ");
@@ -742,11 +795,11 @@ void ManagedGroup<handlersType>::deliver_in_order(const View<handlersType>& Vc, 
                                 deliveryOrder);
     //    std::cout << "Delivery Order (View " << Vc.vid << ") {" <<
     //    deliveryOrder << std::string("}") << std::endl;
-    Vc.rdmc_sending_group->deliver_messages_upto(max_received_indices);
+    Vc.derecho_group->deliver_messages_upto(max_received_indices);
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::ragged_edge_cleanup(View<handlersType>& Vc) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::ragged_edge_cleanup(View<dispatcherType>& Vc) {
     util::debug_log().log_event(
         "Running RaggedEdgeCleanup");
     if(Vc.IAmLeader()) {
@@ -757,8 +810,8 @@ void ManagedGroup<handlersType>::ragged_edge_cleanup(View<handlersType>& Vc) {
     util::debug_log().log_event("Done with RaggedEdgeCleanup");
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::leader_ragged_edge_cleanup(View<handlersType>& Vc) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::leader_ragged_edge_cleanup(View<dispatcherType>& Vc) {
     int myRank = Vc.my_rank;
     int Leader = Vc.rank_of_leader();  // We don't want this to change under our feet
     bool found = false;
@@ -790,8 +843,8 @@ void ManagedGroup<handlersType>::leader_ragged_edge_cleanup(View<handlersType>& 
     deliver_in_order(Vc, Leader);
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::follower_ragged_edge_cleanup(View<handlersType>& Vc) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::follower_ragged_edge_cleanup(View<dispatcherType>& Vc) {
     int myRank = Vc.my_rank;
     // Learn the leader's data and push it before acting upon it
     util::debug_log().log_event("Received leader's globalMin; echoing it");
@@ -805,8 +858,8 @@ void ManagedGroup<handlersType>::follower_ragged_edge_cleanup(View<handlersType>
 
 /* ------------------------------------------------------------------------- */
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::report_failure(const node_id_t who) {
     int r = curr_view->rank_of(who);
     log_event(std::stringstream() << "Node ID " << who << " failure reported; marking suspected[" << r << "]");
     cout << "Node ID " << who << " failure reported; marking suspected[" << r << "]" << endl;
@@ -826,115 +879,115 @@ void ManagedGroup<handlersType>::report_failure(const node_id_t who) {
     std::cout << "Exiting from remote_failure" << std::endl;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::leave() {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::leave() {
     lock_guard_t lock(view_mutex);
     log_event("Cleanly leaving the group.");
-    curr_view->rdmc_sending_group->wedge();
+    curr_view->derecho_group->wedge();
     curr_view->gmsSST->delete_all_predicates();
     (*curr_view->gmsSST)[curr_view->my_rank].suspected[curr_view->my_rank] = true;
     curr_view->gmsSST->put();
     thread_shutdown = true;
 }
 
-template <typename handlersType>
-char* ManagedGroup<handlersType>::get_sendbuffer_ptr(unsigned long long int payload_size, int pause_sending_turns, bool cooked_send) {
+template <typename dispatcherType>
+char* ManagedGroup<dispatcherType>::get_sendbuffer_ptr(unsigned long long int payload_size, int pause_sending_turns, bool cooked_send) {
     lock_guard_t lock(view_mutex);
-    return curr_view->rdmc_sending_group->get_position(payload_size, pause_sending_turns, cooked_send);
+    return curr_view->derecho_group->get_position(payload_size, pause_sending_turns, cooked_send);
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::send() {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::send() {
     std::unique_lock<std::mutex> lock(view_mutex);
     while(true) {
-        if(curr_view->rdmc_sending_group->send()) break;
+        if(curr_view->derecho_group->send()) break;
         view_change_cv.wait(lock);
     }
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-void ManagedGroup<handlersType>::orderedSend(const vector<node_id_t>& nodes,
+void ManagedGroup<dispatcherType>::orderedSend(const vector<node_id_t>& nodes,
                                              Args&&... args) {
     char* buf;
     while(!(buf = get_sendbuffer_ptr(0, 0, true))) {
     };
 
     std::unique_lock<std::mutex> lock(view_mutex);
-    curr_view->rdmc_sending_group->template orderedSend<IdClass, tag, Args...>(
+    curr_view->derecho_group->template orderedSend<IdClass, tag, Args...>(
         nodes, buf, std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-void ManagedGroup<handlersType>::orderedSend(Args&&... args) {
+void ManagedGroup<dispatcherType>::orderedSend(Args&&... args) {
     char* buf;
     while(!(buf = get_sendbuffer_ptr(0, 0, true))) {
     };
 
     std::unique_lock<std::mutex> lock(view_mutex);
-    curr_view->rdmc_sending_group->template orderedSend<IdClass, tag, Args...>(buf,
+    curr_view->derecho_group->template orderedSend<IdClass, tag, Args...>(buf,
                                                                                std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::orderedQuery(const vector<node_id_t>& nodes,
+auto ManagedGroup<dispatcherType>::orderedQuery(const vector<node_id_t>& nodes,
                                               Args&&... args) {
     char* buf;
     while(!(buf = get_sendbuffer_ptr(0, 0, true))) {
     };
 
     std::unique_lock<std::mutex> lock(view_mutex);
-    return curr_view->rdmc_sending_group->template orderedQuery<IdClass, tag, Args...>(
+    return curr_view->derecho_group->template orderedQuery<IdClass, tag, Args...>(
         nodes, buf, std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::orderedQuery(Args&&... args) {
+auto ManagedGroup<dispatcherType>::orderedQuery(Args&&... args) {
     char* buf;
     while(!(buf = get_sendbuffer_ptr(0, 0, true))) {
     };
 
     std::unique_lock<std::mutex> lock(view_mutex);
-    return curr_view->rdmc_sending_group->template orderedQuery<IdClass, tag, Args...>(buf,
+    return curr_view->derecho_group->template orderedQuery<IdClass, tag, Args...>(buf,
                                                                                        std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-void ManagedGroup<handlersType>::p2pSend(node_id_t dest_node, Args&&... args) {
-    curr_view->rdmc_sending_group->template p2pSend<IdClass, tag, Args...>(
+void ManagedGroup<dispatcherType>::p2pSend(node_id_t dest_node, Args&&... args) {
+    curr_view->derecho_group->template p2pSend<IdClass, tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
+template <typename dispatcherType>
 template <typename IdClass, unsigned long long tag, typename... Args>
-auto ManagedGroup<handlersType>::p2pQuery(node_id_t dest_node, Args&&... args) {
-    return curr_view->rdmc_sending_group->template p2pQuery<IdClass, tag, Args...>(
+auto ManagedGroup<dispatcherType>::p2pQuery(node_id_t dest_node, Args&&... args) {
+    return curr_view->derecho_group->template p2pQuery<IdClass, tag, Args...>(
         dest_node, std::forward<Args>(args)...);
 }
 
-template <typename handlersType>
-std::vector<node_id_t> ManagedGroup<handlersType>::get_members() {
+template <typename dispatcherType>
+std::vector<node_id_t> ManagedGroup<dispatcherType>::get_members() {
     lock_guard_t lock(view_mutex);
     return curr_view->members;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::barrier_sync() {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::barrier_sync() {
     lock_guard_t lock(view_mutex);
     curr_view->gmsSST->sync_with_members();
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::debug_print_status() const {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::debug_print_status() const {
     cout << "curr_view = " << curr_view->ToString() << endl;
 }
 
-template <typename handlersType>
-void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
+template <typename dispatcherType>
+void ManagedGroup<dispatcherType>::print_log(std::ostream& output_dest) const {
     for(size_t i = 0; i < util::debug_log().curr_event; ++i) {
         output_dest << util::debug_log().times[i] << "," << util::debug_log().events[i]
                     << "," << std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[curr_view->members[curr_view->my_rank]]
@@ -942,8 +995,8 @@ void ManagedGroup<handlersType>::print_log(std::ostream& output_dest) const {
     }
 }
 
-template <typename handlersType>
-std::map<node_id_t, ip_addr> ManagedGroup<handlersType>::get_member_ips_map(
+template <typename dispatcherType>
+std::map<node_id_t, ip_addr> ManagedGroup<dispatcherType>::get_member_ips_map(
     std::vector<node_id_t>& members, std::vector<ip_addr>& member_ips, std::vector<char> failed) {
     std::map<node_id_t, ip_addr> member_ips_map;
     size_t num_members = members.size();

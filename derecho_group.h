@@ -19,6 +19,8 @@
 #include "derecho_caller.h"
 #include "derecho_row.h"
 #include "filewriter.h"
+#include "mutils-serialization/SerializationMacros.hpp"
+#include "mutils-serialization/SerializationSupport.hpp"
 #include "rdmc/rdmc.h"
 #include "sst/sst.h"
 
@@ -36,7 +38,35 @@ using message_callback = std::function<void(int, long long int, char*, long long
  */
 struct CallbackSet {
     message_callback global_stability_callback;
-    message_callback local_persistence_callback;
+    message_callback local_persistence_callback = nullptr;
+};
+
+struct DerechoParams {
+    long long unsigned int max_payload_size;
+    long long unsigned int block_size;
+    std::string filename = std::string();
+    unsigned int window_size = 3;
+    unsigned int timeout_ms = 1;
+    rdmc::send_algorithm type = rdmc::BINOMIAL_SEND;
+    uint32_t rpc_port = 12487;
+
+    DerechoParams(long long unsigned int max_payload_size,
+                  long long unsigned int block_size,
+                  std::string filename = std::string(),
+                  unsigned int window_size = 3,
+                  unsigned int timeout_ms = 1,
+                  rdmc::send_algorithm type = rdmc::BINOMIAL_SEND,
+                  uint32_t rpc_port = 12487)
+        : max_payload_size(max_payload_size),
+          block_size(block_size),
+          filename(filename),
+          window_size(window_size),
+          timeout_ms(timeout_ms),
+          type(type),
+          rpc_port(rpc_port) {
+    }
+
+    DEFAULT_SERIALIZATION_SUPPORT(DerechoParams, max_payload_size, block_size, filename, window_size, timeout_ms, type, rpc_port);
 };
 
 struct __attribute__((__packed__)) header {
@@ -271,22 +301,18 @@ public:
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         std::vector<MessageBuffer>& free_message_buffers,
-        long long unsigned int _max_payload_size,
-        CallbackSet _callbacks,
-        dispatcherType _dispatchers, long long unsigned int _block_size,
+        dispatcherType _dispatchers,
+	CallbackSet callbacks,
+	const DerechoParams derecho_params,
         std::map<node_id_t, std::string> ip_addrs,
-        std::vector<char> already_failed = {},
-        std::string filename = std::string(),
-        unsigned int _window_size = 3, unsigned int timeout_ms = 1,
-        rdmc::send_algorithm _type = rdmc::BINOMIAL_SEND,
-        uint32_t port = 12487);
+        std::vector<char> already_failed = {});
     /** Constructor to initialize a new derecho_group from an old one,
      * preserving the same settings but providing a new list of members. */
     DerechoGroup(
         std::vector<node_id_t> _members, node_id_t my_node_id,
         std::shared_ptr<sst::SST<DerechoRow<N>, sst::Mode::Writes>> _sst,
         DerechoGroup&& old_group, std::map<node_id_t, std::string> ip_addrs,
-        std::vector<char> already_failed = {}, uint32_t port = 12487);
+        std::vector<char> already_failed = {}, uint32_t rpc_port = 12487);
     ~DerechoGroup();
 
     void deliver_messages_upto(const std::vector<long long int>& max_indices_for_senders);

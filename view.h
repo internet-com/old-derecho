@@ -49,7 +49,7 @@ public:
     /** For member p, returns rankOf(p) */
     int32_t my_rank;
     /** RDMC manager object containing one RDMC group for each sender */
-    std::unique_ptr<DerechoGroup<MAX_MEMBERS, handlersType>> rdmc_sending_group;
+    std::unique_ptr<DerechoGroup<MAX_MEMBERS, handlersType>> derecho_group;
 
     std::shared_ptr<DerechoSST> gmsSST;
 
