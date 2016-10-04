@@ -119,6 +119,7 @@ private:
     dispatcherType dispatchers;
     std::vector<view_upcall_t> view_upcalls;
 
+    DerechoParams derecho_params;
     /** Sends a joining node the new view that has been constructed to include it.*/
     void commit_join(const View<dispatcherType>& new_view,
                      tcp::socket& client_socket);
@@ -131,7 +132,7 @@ private:
     /** Starts a new Derecho group with this node as the only member, and initializes the GMS. */
   std::unique_ptr<View<dispatcherType>> start_group(const node_id_t my_id, const ip_addr my_ip);
     /** Joins an existing Derecho group, initializing this object to participate in its GMS. */
-  std::unique_ptr<View<dispatcherType>> join_existing(const node_id_t my_id, const ip_addr& leader_ip, const int leader_port, DerechoParams &derecho_params);
+  std::unique_ptr<View<dispatcherType>> join_existing(const node_id_t my_id, const ip_addr& leader_ip, const int leader_port);
 
     // Ken's helper methods
     void deliver_in_order(const View<dispatcherType>& Vc, int Leader);

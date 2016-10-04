@@ -41,7 +41,7 @@ struct CallbackSet {
     message_callback local_persistence_callback = nullptr;
 };
 
-struct DerechoParams {
+struct DerechoParams : public mutils::ByteRepresentable {
     long long unsigned int max_payload_size;
     long long unsigned int block_size;
     std::string filename = std::string();

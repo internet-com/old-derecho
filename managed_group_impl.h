@@ -49,7 +49,8 @@ ManagedGroup<dispatcherType>::ManagedGroup(
       thread_shutdown(false),
       next_view(nullptr),
       dispatchers(std::move(_dispatchers)),
-      view_upcalls(_view_upcalls) {
+      view_upcalls(_view_upcalls),
+      derecho_params(derecho_params) {
     const node_id_t my_id = 0;
     curr_view = start_group(my_id, my_ip);
     rdmc_sst_setup();
@@ -67,9 +68,11 @@ ManagedGroup<dispatcherType>::ManagedGroup(
      assert(success);
    };
    std::size_t size_of_view = mutils::bytes_size(*curr_view);
-   mutils::post_object(bind_socket_write, size_of_view);
+   client_socket.write((char*)&size_of_view, sizeof(size_of_view));
    mutils::post_object(bind_socket_write, *curr_view);
-   // mutils::post_object(bind_socket_write, derecho_params);
+   std::size_t size_of_derecho_params = mutils::bytes_size(derecho_params);
+   client_socket.write((char*)&size_of_derecho_params, sizeof(size_of_derecho_params));
+   mutils::post_object(bind_socket_write, derecho_params);
    dispatchers.send_objects(client_socket);
    rdma::impl::verbs_add_connection(client_id, joiner_ip, my_id);
    sst::add_node(client_id, joiner_ip);
@@ -129,9 +132,9 @@ ManagedGroup<dispatcherType>::ManagedGroup(const node_id_t my_id,
       thread_shutdown(false),
       next_view(nullptr),
       dispatchers(std::move(_dispatchers)),
-      view_upcalls(_view_upcalls) {
-    DerechoParams derecho_params(0, 0);
-    curr_view = join_existing(my_id, leader_ip, gms_port, derecho_params);
+      view_upcalls(_view_upcalls),
+      derecho_params(0,0) {
+    curr_view = join_existing(my_id, leader_ip, gms_port);
     curr_view->my_rank = curr_view->rank_of(my_id);
     rdmc_sst_setup();
     if(!derecho_params.filename.empty()) {
@@ -199,7 +202,8 @@ ManagedGroup<dispatcherType>::ManagedGroup(const std::string& recovery_filename,
       thread_shutdown(false),
       view_file_name(recovery_filename + persistence::PAXOS_STATE_EXTENSION),
       dispatchers(std::move(_dispatchers)),
-      view_upcalls(_view_upcalls) {
+      view_upcalls(_view_upcalls),
+      derecho_params(derecho_params) {
     auto last_view = load_view<dispatcherType>(view_file_name);    
     std::vector<MessageBuffer> message_buffers;
     auto max_msg_size = DerechoGroup<MAX_MEMBERS, dispatcherType>::compute_max_msg_size(derecho_params.max_payload_size, derecho_params.block_size);
@@ -230,9 +234,11 @@ ManagedGroup<dispatcherType>::ManagedGroup(const std::string& recovery_filename,
             assert(success);
         };
         std::size_t size_of_view = mutils::bytes_size(*curr_view);
-        mutils::post_object(bind_socket_write, size_of_view);
+        client_socket.write((char*)&size_of_view, sizeof(size_of_view));
         mutils::post_object(bind_socket_write, *curr_view);
-	// mutils::post_object(bind_socket_write, derecho_params);
+        std::size_t size_of_derecho_params = mutils::bytes_size(derecho_params);
+        client_socket.write((char*)&size_of_derecho_params, sizeof(size_of_derecho_params));
+        mutils::post_object(bind_socket_write, derecho_params);
     }
     curr_view->my_rank = curr_view->rank_of(my_id);
     
@@ -656,7 +662,7 @@ std::unique_ptr<View<dispatcherType>> ManagedGroup<dispatcherType>::start_group(
 
 template <typename dispatcherType>
 std::unique_ptr<View<dispatcherType>> ManagedGroup<dispatcherType>::join_existing(
-    const node_id_t my_id, const ip_addr& leader_ip, const int leader_port, DerechoParams &derecho_params) {
+    const node_id_t my_id, const ip_addr& leader_ip, const int leader_port) {
     //    cout << "Joining group by contacting node at " << leader_ip << endl;
     log_event("Joining group: waiting for a response from the leader");
     tcp::socket leader_socket{leader_ip, leader_port};
@@ -672,17 +678,19 @@ std::unique_ptr<View<dispatcherType>> ManagedGroup<dispatcherType>::join_existin
     
     //The leader will first send the size of the necessary buffer, then the serialized View
     std::size_t size_of_view;
-    bool success = leader_socket.read((char*)&size_of_view, sizeof(std::size_t));
+    bool success = leader_socket.read((char*)&size_of_view, sizeof(size_of_view));
     assert(success);
     char buffer[size_of_view];
     success = leader_socket.read(buffer, size_of_view);
     assert(success);
     std::unique_ptr<View<dispatcherType>> newView = mutils::from_bytes<View<dispatcherType>>(nullptr, buffer);
-    char buffer2[sizeof(DerechoParams)];
-    success = leader_socket.read(buffer2, sizeof(DerechoParams));
+    std::size_t size_of_derecho_params;
+    success = leader_socket.read((char*)&size_of_derecho_params, sizeof(size_of_derecho_params));
+    char buffer2[size_of_derecho_params];
+    success = leader_socket.read(buffer2, size_of_derecho_params);
     assert(success);
-    // std::unique_ptr <DerechoParams> params_ptr = mutils::from_bytes<DerechoParams>(nullptr, buffer2);
-    // derecho_params = *params_ptr;
+    std::unique_ptr <DerechoParams> params_ptr = mutils::from_bytes<DerechoParams>(nullptr, buffer2);
+    derecho_params = *params_ptr;
     dispatchers.receive_objects(leader_socket);
 
     log_event("Received View from leader");
@@ -723,8 +731,11 @@ void ManagedGroup<dispatcherType>::commit_join(const View<dispatcherType>& new_v
     //    client_socket.write((char*) &joining_client_id, sizeof(joining_client_id));
     auto bind_socket_write = [&client_socket](const char* bytes, std::size_t size) {client_socket.write(bytes, size); };
     std::size_t size_of_view = mutils::bytes_size(new_view);
-    mutils::post_object(bind_socket_write, size_of_view);
+    client_socket.write((char*)&size_of_view, sizeof(size_of_view));
     mutils::post_object(bind_socket_write, new_view);
+    std::size_t size_of_derecho_params = mutils::bytes_size(derecho_params);
+    client_socket.write((char*)&size_of_derecho_params, sizeof(size_of_derecho_params));
+    mutils::post_object(bind_socket_write, derecho_params);
 }
 
 /* ------------------------- Ken's helper methods ------------------------- */
