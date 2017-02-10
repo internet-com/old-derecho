@@ -4,3 +4,9 @@
 [submodule "rdmc"]
 	path = rdmc
 	url = https://git01.codeplex.com/rdmc
+[submodule "mutils-serialization"]
+	path = mutils-serialization
+	url = https://github.com/mpmilano/mutils-serialization
+[submodule "mutils"]
+	path = mutils
+	url = https://github.com/mpmilano/mutils
